@@ -1,0 +1,16 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1",
+	"FriendlyName": "Wheel Input",
+	"Description": "Direct Linux evdev input and force feedback for Logitech wheels (G923) and the H-shifter.",
+	"Category": "Input",
+	"CanContainContent": false,
+	"Modules": [
+		{
+			"Name": "WheelInput",
+			"Type": "Runtime",
+			"LoadingPhase": "PreDefault"
+		}
+	]
+}

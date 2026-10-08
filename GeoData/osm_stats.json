@@ -1,0 +1,2589 @@
+{
+ "highway_ways": {
+  "service": {
+   "ways": 8335,
+   "km_total_ways": 627.3,
+   "km_in_bbox": 615.2
+  },
+  "footway": {
+   "ways": 7007,
+   "km_total_ways": 447.5,
+   "km_in_bbox": 441.6
+  },
+  "path": {
+   "ways": 2889,
+   "km_total_ways": 370.4,
+   "km_in_bbox": 343.7
+  },
+  "residential": {
+   "ways": 2125,
+   "km_total_ways": 391.1,
+   "km_in_bbox": 381.1
+  },
+  "track": {
+   "ways": 1667,
+   "km_total_ways": 447.7,
+   "km_in_bbox": 415.8
+  },
+  "tertiary": {
+   "ways": 903,
+   "km_total_ways": 191.6,
+   "km_in_bbox": 183.4
+  },
+  "steps": {
+   "ways": 748,
+   "km_total_ways": 7.5,
+   "km_in_bbox": 7.5
+  },
+  "secondary": {
+   "ways": 616,
+   "km_total_ways": 71.8,
+   "km_in_bbox": 69.0
+  },
+  "living_street": {
+   "ways": 463,
+   "km_total_ways": 47.9,
+   "km_in_bbox": 47.5
+  },
+  "unclassified": {
+   "ways": 257,
+   "km_total_ways": 87.7,
+   "km_in_bbox": 80.0
+  },
+  "primary": {
+   "ways": 247,
+   "km_total_ways": 22.3,
+   "km_in_bbox": 22.2
+  },
+  "motorway_link": {
+   "ways": 184,
+   "km_total_ways": 15.9,
+   "km_in_bbox": 15.8
+  },
+  "motorway": {
+   "ways": 151,
+   "km_total_ways": 50.5,
+   "km_in_bbox": 49.7
+  },
+  "pedestrian": {
+   "ways": 110,
+   "km_total_ways": 9.3,
+   "km_in_bbox": 9.3
+  },
+  "cycleway": {
+   "ways": 93,
+   "km_total_ways": 8.5,
+   "km_in_bbox": 7.3
+  },
+  "primary_link": {
+   "ways": 34,
+   "km_total_ways": 2.0,
+   "km_in_bbox": 2.0
+  },
+  "secondary_link": {
+   "ways": 26,
+   "km_total_ways": 1.0,
+   "km_in_bbox": 0.8
+  },
+  "bridleway": {
+   "ways": 19,
+   "km_total_ways": 15.1,
+   "km_in_bbox": 13.0
+  },
+  "tertiary_link": {
+   "ways": 18,
+   "km_total_ways": 0.6,
+   "km_in_bbox": 0.6
+  },
+  "trunk": {
+   "ways": 16,
+   "km_total_ways": 2.1,
+   "km_in_bbox": 1.2
+  },
+  "corridor": {
+   "ways": 11,
+   "km_total_ways": 0.6,
+   "km_in_bbox": 0.6
+  },
+  "busway": {
+   "ways": 6,
+   "km_total_ways": 0.2,
+   "km_in_bbox": 0.2
+  },
+  "proposed": {
+   "ways": 3,
+   "km_total_ways": 0.6,
+   "km_in_bbox": 0.1
+  },
+  "construction": {
+   "ways": 2,
+   "km_total_ways": 0.1,
+   "km_in_bbox": 0.1
+  },
+  "services": {
+   "ways": 2,
+   "km_total_ways": 1.0,
+   "km_in_bbox": 1.0
+  },
+  "bus_stop": {
+   "ways": 1,
+   "km_total_ways": 0.0,
+   "km_in_bbox": 0.0
+  }
+ },
+ "drivable_km_in_bbox": 1468.4,
+ "drivable_ways": 13375,
+ "bridges": {
+  "tertiary": 45,
+  "primary": 11,
+  "track": 95,
+  "motorway_link": 10,
+  "motorway": 22,
+  "secondary": 27,
+  "service": 44,
+  "footway": 195,
+  "railway": 105,
+  "unclassified": 16,
+  "path": 158,
+  "residential": 49,
+  "cycleway": 2,
+  "steps": 7,
+  "bridleway": 2,
+  "trunk": 2,
+  "pedestrian": 2,
+  "secondary_link": 2,
+  "construction": 1,
+  "primary_link": 2
+ },
+ "tunnels": {
+  "motorway": 2,
+  "service": 53,
+  "waterway": 857,
+  "motorway_link": 2,
+  "railway": 17,
+  "track": 3,
+  "footway": 142,
+  "path": 10,
+  "steps": 8,
+  "residential": 6,
+  "tertiary": 1,
+  "pedestrian": 4,
+  "living_street": 3
+ },
+ "roundabout_ways": 62,
+ "railway_ways": {
+  "rail": {
+   "ways": 773,
+   "km": 247.8
+  },
+  "abandoned": {
+   "ways": 128,
+   "km": 47.5
+  },
+  "light_rail": {
+   "ways": 113,
+   "km": 39.5
+  },
+  "disused": {
+   "ways": 101,
+   "km": 9.8
+  },
+  "razed": {
+   "ways": 23,
+   "km": 4.3
+  },
+  "platform": {
+   "ways": 9,
+   "km": 2.8
+  },
+  "subway": {
+   "ways": 7,
+   "km": 0.9
+  },
+  "narrow_gauge": {
+   "ways": 6,
+   "km": 0.9
+  },
+  "preserved": {
+   "ways": 5,
+   "km": 0.3
+  },
+  "signal_box": {
+   "ways": 4,
+   "km": 0.4
+  }
+ },
+ "linear_other": {
+  "waterway": {
+   "drain": {
+    "ways": 3590,
+    "km": 748.5
+   },
+   "ditch": {
+    "ways": 801,
+    "km": 113.8
+   },
+   "stream": {
+    "ways": 241,
+    "km": 53.4
+   },
+   "canal": {
+    "ways": 75,
+    "km": 35.5
+   },
+   "river": {
+    "ways": 51,
+    "km": 99.6
+   },
+   "lock_gate": {
+    "ways": 9,
+    "km": 0.1
+   },
+   "link": {
+    "ways": 4,
+    "km": 0.1
+   },
+   "floating_barrier": {
+    "ways": 3,
+    "km": 0.1
+   },
+   "boatyard": {
+    "ways": 2,
+    "km": 0.8
+   },
+   "fish_pass": {
+    "ways": 2,
+    "km": 0.1
+   },
+   "oxbow": {
+    "ways": 1,
+    "km": 0.0
+   },
+   "weir": {
+    "ways": 1,
+    "km": 0.0
+   }
+  },
+  "power": {
+   "line": {
+    "ways": 99,
+    "km": 99.0
+   }
+  },
+  "natural": {
+   "tree_row": {
+    "ways": 178,
+    "km": 19.1
+   }
+  }
+ },
+ "barrier_lines_top": [
+  [
+   "hedge",
+   1215
+  ],
+  [
+   "fence",
+   762
+  ],
+  [
+   "wall",
+   267
+  ],
+  [
+   "retaining_wall",
+   215
+  ],
+  [
+   "handrail",
+   73
+  ],
+  [
+   "gate",
+   28
+  ],
+  [
+   "guard_rail",
+   23
+  ],
+  [
+   "ditch",
+   10
+  ],
+  [
+   "bollard",
+   8
+  ],
+  [
+   "yes",
+   3
+  ]
+ ],
+ "tag_coverage": {
+  "drivable_all(excl track)": {
+   "ways": 13375,
+   "km": 1468.4,
+   "coverage": {
+    "maxspeed": {
+     "ways_pct": 28.1,
+     "km_pct": 44.6
+    },
+    "maxspeed(plain)": {
+     "ways_pct": 27.9,
+     "km_pct": 44.4
+    },
+    "maxspeed:type|zone:maxspeed|source:maxspeed": {
+     "ways_pct": 8.9,
+     "km_pct": 16.4
+    },
+    "lanes": {
+     "ways_pct": 17.2,
+     "km_pct": 22.2
+    },
+    "width": {
+     "ways_pct": 3.3,
+     "km_pct": 5.3
+    },
+    "oneway": {
+     "ways_pct": 16.1,
+     "km_pct": 16.3
+    },
+    "surface": {
+     "ways_pct": 51.0,
+     "km_pct": 63.3
+    },
+    "smoothness": {
+     "ways_pct": 6.9,
+     "km_pct": 9.4
+    },
+    "sidewalk*": {
+     "ways_pct": 13.4,
+     "km_pct": 20.2
+    },
+    "cycleway*": {
+     "ways_pct": 11.1,
+     "km_pct": 16.2
+    },
+    "turn:lanes*": {
+     "ways_pct": 4.1,
+     "km_pct": 1.9
+    },
+    "lit": {
+     "ways_pct": 23.5,
+     "km_pct": 30.1
+    },
+    "name": {
+     "ways_pct": 34.6,
+     "km_pct": 53.9
+    },
+    "ref": {
+     "ways_pct": 5.8,
+     "km_pct": 9.3
+    },
+    "layer": {
+     "ways_pct": 2.3,
+     "km_pct": 0.8
+    },
+    "bridge": {
+     "ways_pct": 1.7,
+     "km_pct": 0.5
+    },
+    "tunnel": {
+     "ways_pct": 0.5,
+     "km_pct": 0.1
+    },
+    "lane_markings": {
+     "ways_pct": 5.1,
+     "km_pct": 9.9
+    },
+    "parking:*": {
+     "ways_pct": 2.3,
+     "km_pct": 2.6
+    },
+    "access/motor_vehicle/vehicle": {
+     "ways_pct": 15.2,
+     "km_pct": 15.0
+    }
+   }
+  },
+  "motorway": {
+   "ways": 151,
+   "km": 49.7,
+   "coverage": {
+    "maxspeed": {
+     "ways_pct": 98.7,
+     "km_pct": 99.2
+    },
+    "maxspeed(plain)": {
+     "ways_pct": 98.7,
+     "km_pct": 99.2
+    },
+    "maxspeed:type|zone:maxspeed|source:maxspeed": {
+     "ways_pct": 23.8,
+     "km_pct": 18.1
+    },
+    "lanes": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "width": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "oneway": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "surface": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "smoothness": {
+     "ways_pct": 0.7,
+     "km_pct": 1.0
+    },
+    "sidewalk*": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "cycleway*": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "turn:lanes*": {
+     "ways_pct": 36.4,
+     "km_pct": 16.8
+    },
+    "lit": {
+     "ways_pct": 98.7,
+     "km_pct": 99.5
+    },
+    "name": {
+     "ways_pct": 2.0,
+     "km_pct": 1.4
+    },
+    "ref": {
+     "ways_pct": 98.0,
+     "km_pct": 99.4
+    },
+    "layer": {
+     "ways_pct": 15.9,
+     "km_pct": 3.8
+    },
+    "bridge": {
+     "ways_pct": 14.6,
+     "km_pct": 2.8
+    },
+    "tunnel": {
+     "ways_pct": 1.3,
+     "km_pct": 1.0
+    },
+    "lane_markings": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "parking:*": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "access/motor_vehicle/vehicle": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    }
+   }
+  },
+  "trunk": {
+   "ways": 16,
+   "km": 1.2,
+   "coverage": {
+    "maxspeed": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "maxspeed(plain)": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "maxspeed:type|zone:maxspeed|source:maxspeed": {
+     "ways_pct": 68.8,
+     "km_pct": 73.4
+    },
+    "lanes": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "width": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "oneway": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "surface": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "smoothness": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "sidewalk*": {
+     "ways_pct": 12.5,
+     "km_pct": 7.0
+    },
+    "cycleway*": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "turn:lanes*": {
+     "ways_pct": 6.2,
+     "km_pct": 4.0
+    },
+    "lit": {
+     "ways_pct": 62.5,
+     "km_pct": 78.3
+    },
+    "name": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "ref": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "layer": {
+     "ways_pct": 12.5,
+     "km_pct": 8.0
+    },
+    "bridge": {
+     "ways_pct": 12.5,
+     "km_pct": 8.0
+    },
+    "tunnel": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "lane_markings": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "parking:*": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "access/motor_vehicle/vehicle": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    }
+   }
+  },
+  "primary": {
+   "ways": 247,
+   "km": 22.2,
+   "coverage": {
+    "maxspeed": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "maxspeed(plain)": {
+     "ways_pct": 99.6,
+     "km_pct": 99.8
+    },
+    "maxspeed:type|zone:maxspeed|source:maxspeed": {
+     "ways_pct": 30.0,
+     "km_pct": 31.5
+    },
+    "lanes": {
+     "ways_pct": 97.2,
+     "km_pct": 95.1
+    },
+    "width": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "oneway": {
+     "ways_pct": 61.5,
+     "km_pct": 37.7
+    },
+    "surface": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "smoothness": {
+     "ways_pct": 31.2,
+     "km_pct": 41.1
+    },
+    "sidewalk*": {
+     "ways_pct": 59.5,
+     "km_pct": 61.2
+    },
+    "cycleway*": {
+     "ways_pct": 36.8,
+     "km_pct": 50.6
+    },
+    "turn:lanes*": {
+     "ways_pct": 34.8,
+     "km_pct": 15.7
+    },
+    "lit": {
+     "ways_pct": 87.9,
+     "km_pct": 79.4
+    },
+    "name": {
+     "ways_pct": 98.4,
+     "km_pct": 99.6
+    },
+    "ref": {
+     "ways_pct": 97.6,
+     "km_pct": 99.2
+    },
+    "layer": {
+     "ways_pct": 4.5,
+     "km_pct": 2.3
+    },
+    "bridge": {
+     "ways_pct": 4.5,
+     "km_pct": 2.3
+    },
+    "tunnel": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "lane_markings": {
+     "ways_pct": 1.2,
+     "km_pct": 0.3
+    },
+    "parking:*": {
+     "ways_pct": 18.2,
+     "km_pct": 12.4
+    },
+    "access/motor_vehicle/vehicle": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    }
+   }
+  },
+  "secondary": {
+   "ways": 616,
+   "km": 69.0,
+   "coverage": {
+    "maxspeed": {
+     "ways_pct": 94.6,
+     "km_pct": 93.8
+    },
+    "maxspeed(plain)": {
+     "ways_pct": 94.2,
+     "km_pct": 93.6
+    },
+    "maxspeed:type|zone:maxspeed|source:maxspeed": {
+     "ways_pct": 21.8,
+     "km_pct": 30.4
+    },
+    "lanes": {
+     "ways_pct": 90.3,
+     "km_pct": 85.3
+    },
+    "width": {
+     "ways_pct": 1.9,
+     "km_pct": 1.5
+    },
+    "oneway": {
+     "ways_pct": 57.1,
+     "km_pct": 31.4
+    },
+    "surface": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "smoothness": {
+     "ways_pct": 23.4,
+     "km_pct": 21.7
+    },
+    "sidewalk*": {
+     "ways_pct": 47.2,
+     "km_pct": 38.9
+    },
+    "cycleway*": {
+     "ways_pct": 54.1,
+     "km_pct": 52.9
+    },
+    "turn:lanes*": {
+     "ways_pct": 29.4,
+     "km_pct": 9.0
+    },
+    "lit": {
+     "ways_pct": 72.2,
+     "km_pct": 64.4
+    },
+    "name": {
+     "ways_pct": 93.5,
+     "km_pct": 90.5
+    },
+    "ref": {
+     "ways_pct": 28.6,
+     "km_pct": 49.8
+    },
+    "layer": {
+     "ways_pct": 4.1,
+     "km_pct": 0.9
+    },
+    "bridge": {
+     "ways_pct": 4.4,
+     "km_pct": 0.9
+    },
+    "tunnel": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "lane_markings": {
+     "ways_pct": 5.0,
+     "km_pct": 8.7
+    },
+    "parking:*": {
+     "ways_pct": 9.1,
+     "km_pct": 5.8
+    },
+    "access/motor_vehicle/vehicle": {
+     "ways_pct": 0.8,
+     "km_pct": 0.3
+    }
+   }
+  },
+  "tertiary": {
+   "ways": 903,
+   "km": 183.4,
+   "coverage": {
+    "maxspeed": {
+     "ways_pct": 95.3,
+     "km_pct": 97.8
+    },
+    "maxspeed(plain)": {
+     "ways_pct": 94.8,
+     "km_pct": 97.4
+    },
+    "maxspeed:type|zone:maxspeed|source:maxspeed": {
+     "ways_pct": 40.1,
+     "km_pct": 49.3
+    },
+    "lanes": {
+     "ways_pct": 68.9,
+     "km_pct": 61.3
+    },
+    "width": {
+     "ways_pct": 2.2,
+     "km_pct": 4.2
+    },
+    "oneway": {
+     "ways_pct": 31.7,
+     "km_pct": 12.9
+    },
+    "surface": {
+     "ways_pct": 100.0,
+     "km_pct": 100.0
+    },
+    "smoothness": {
+     "ways_pct": 15.5,
+     "km_pct": 19.6
+    },
+    "sidewalk*": {
+     "ways_pct": 51.7,
+     "km_pct": 53.9
+    },
+    "cycleway*": {
+     "ways_pct": 59.4,
+     "km_pct": 56.9
+    },
+    "turn:lanes*": {
+     "ways_pct": 11.6,
+     "km_pct": 2.1
+    },
+    "lit": {
+     "ways_pct": 51.7,
+     "km_pct": 43.7
+    },
+    "name": {
+     "ways_pct": 96.8,
+     "km_pct": 98.6
+    },
+    "ref": {
+     "ways_pct": 14.0,
+     "km_pct": 13.9
+    },
+    "layer": {
+     "ways_pct": 5.1,
+     "km_pct": 0.9
+    },
+    "bridge": {
+     "ways_pct": 5.0,
+     "km_pct": 0.9
+    },
+    "tunnel": {
+     "ways_pct": 0.1,
+     "km_pct": 0.0
+    },
+    "lane_markings": {
+     "ways_pct": 20.6,
+     "km_pct": 25.2
+    },
+    "parking:*": {
+     "ways_pct": 5.9,
+     "km_pct": 3.7
+    },
+    "access/motor_vehicle/vehicle": {
+     "ways_pct": 0.3,
+     "km_pct": 0.0
+    }
+   }
+  },
+  "unclassified": {
+   "ways": 257,
+   "km": 80.0,
+   "coverage": {
+    "maxspeed": {
+     "ways_pct": 54.1,
+     "km_pct": 54.3
+    },
+    "maxspeed(plain)": {
+     "ways_pct": 54.1,
+     "km_pct": 54.3
+    },
+    "maxspeed:type|zone:maxspeed|source:maxspeed": {
+     "ways_pct": 21.4,
+     "km_pct": 31.2
+    },
+    "lanes": {
+     "ways_pct": 29.6,
+     "km_pct": 20.7
+    },
+    "width": {
+     "ways_pct": 5.8,
+     "km_pct": 3.3
+    },
+    "oneway": {
+     "ways_pct": 24.1,
+     "km_pct": 24.9
+    },
+    "surface": {
+     "ways_pct": 84.0,
+     "km_pct": 87.8
+    },
+    "smoothness": {
+     "ways_pct": 22.2,
+     "km_pct": 22.2
+    },
+    "sidewalk*": {
+     "ways_pct": 26.5,
+     "km_pct": 24.4
+    },
+    "cycleway*": {
+     "ways_pct": 35.4,
+     "km_pct": 28.8
+    },
+    "turn:lanes*": {
+     "ways_pct": 2.7,
+     "km_pct": 0.4
+    },
+    "lit": {
+     "ways_pct": 32.3,
+     "km_pct": 26.1
+    },
+    "name": {
+     "ways_pct": 96.1,
+     "km_pct": 98.8
+    },
+    "ref": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "layer": {
+     "ways_pct": 6.6,
+     "km_pct": 1.4
+    },
+    "bridge": {
+     "ways_pct": 6.2,
+     "km_pct": 0.9
+    },
+    "tunnel": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "lane_markings": {
+     "ways_pct": 31.9,
+     "km_pct": 40.4
+    },
+    "parking:*": {
+     "ways_pct": 7.0,
+     "km_pct": 5.6
+    },
+    "access/motor_vehicle/vehicle": {
+     "ways_pct": 12.1,
+     "km_pct": 12.9
+    }
+   }
+  },
+  "residential": {
+   "ways": 2125,
+   "km": 381.1,
+   "coverage": {
+    "maxspeed": {
+     "ways_pct": 62.8,
+     "km_pct": 66.2
+    },
+    "maxspeed(plain)": {
+     "ways_pct": 62.6,
+     "km_pct": 66.1
+    },
+    "maxspeed:type|zone:maxspeed|source:maxspeed": {
+     "ways_pct": 21.4,
+     "km_pct": 21.9
+    },
+    "lanes": {
+     "ways_pct": 12.3,
+     "km_pct": 9.7
+    },
+    "width": {
+     "ways_pct": 15.1,
+     "km_pct": 15.1
+    },
+    "oneway": {
+     "ways_pct": 17.6,
+     "km_pct": 13.2
+    },
+    "surface": {
+     "ways_pct": 82.7,
+     "km_pct": 81.7
+    },
+    "smoothness": {
+     "ways_pct": 8.6,
+     "km_pct": 8.9
+    },
+    "sidewalk*": {
+     "ways_pct": 34.7,
+     "km_pct": 34.6
+    },
+    "cycleway*": {
+     "ways_pct": 17.6,
+     "km_pct": 14.6
+    },
+    "turn:lanes*": {
+     "ways_pct": 1.3,
+     "km_pct": 0.3
+    },
+    "lit": {
+     "ways_pct": 51.9,
+     "km_pct": 46.4
+    },
+    "name": {
+     "ways_pct": 97.6,
+     "km_pct": 99.0
+    },
+    "ref": {
+     "ways_pct": 0.1,
+     "km_pct": 0.0
+    },
+    "layer": {
+     "ways_pct": 2.4,
+     "km_pct": 0.3
+    },
+    "bridge": {
+     "ways_pct": 2.3,
+     "km_pct": 0.3
+    },
+    "tunnel": {
+     "ways_pct": 0.3,
+     "km_pct": 0.0
+    },
+    "lane_markings": {
+     "ways_pct": 16.4,
+     "km_pct": 14.8
+    },
+    "parking:*": {
+     "ways_pct": 4.0,
+     "km_pct": 4.1
+    },
+    "access/motor_vehicle/vehicle": {
+     "ways_pct": 3.8,
+     "km_pct": 5.0
+    }
+   }
+  },
+  "service": {
+   "ways": 8335,
+   "km": 615.2,
+   "coverage": {
+    "maxspeed": {
+     "ways_pct": 2.3,
+     "km_pct": 4.0
+    },
+    "maxspeed(plain)": {
+     "ways_pct": 2.2,
+     "km_pct": 3.9
+    },
+    "maxspeed:type|zone:maxspeed|source:maxspeed": {
+     "ways_pct": 0.1,
+     "km_pct": 0.0
+    },
+    "lanes": {
+     "ways_pct": 1.5,
+     "km_pct": 1.7
+    },
+    "width": {
+     "ways_pct": 0.4,
+     "km_pct": 0.6
+    },
+    "oneway": {
+     "ways_pct": 5.7,
+     "km_pct": 7.1
+    },
+    "surface": {
+     "ways_pct": 28.2,
+     "km_pct": 27.9
+    },
+    "smoothness": {
+     "ways_pct": 2.5,
+     "km_pct": 2.9
+    },
+    "sidewalk*": {
+     "ways_pct": 0.4,
+     "km_pct": 0.6
+    },
+    "cycleway*": {
+     "ways_pct": 0.3,
+     "km_pct": 0.9
+    },
+    "turn:lanes*": {
+     "ways_pct": 0.3,
+     "km_pct": 0.1
+    },
+    "lit": {
+     "ways_pct": 4.5,
+     "km_pct": 4.0
+    },
+    "name": {
+     "ways_pct": 1.7,
+     "km_pct": 3.3
+    },
+    "ref": {
+     "ways_pct": 0.7,
+     "km_pct": 0.5
+    },
+    "layer": {
+     "ways_pct": 1.3,
+     "km_pct": 0.6
+    },
+    "bridge": {
+     "ways_pct": 0.5,
+     "km_pct": 0.1
+    },
+    "tunnel": {
+     "ways_pct": 0.6,
+     "km_pct": 0.2
+    },
+    "lane_markings": {
+     "ways_pct": 0.3,
+     "km_pct": 0.5
+    },
+    "parking:*": {
+     "ways_pct": 0.3,
+     "km_pct": 0.5
+    },
+    "access/motor_vehicle/vehicle": {
+     "ways_pct": 22.5,
+     "km_pct": 30.2
+    }
+   }
+  },
+  "living_street": {
+   "ways": 463,
+   "km": 47.5,
+   "coverage": {
+    "maxspeed": {
+     "ways_pct": 1.5,
+     "km_pct": 0.8
+    },
+    "maxspeed(plain)": {
+     "ways_pct": 1.5,
+     "km_pct": 0.8
+    },
+    "maxspeed:type|zone:maxspeed|source:maxspeed": {
+     "ways_pct": 0.6,
+     "km_pct": 1.1
+    },
+    "lanes": {
+     "ways_pct": 0.2,
+     "km_pct": 0.4
+    },
+    "width": {
+     "ways_pct": 8.4,
+     "km_pct": 10.7
+    },
+    "oneway": {
+     "ways_pct": 4.5,
+     "km_pct": 5.5
+    },
+    "surface": {
+     "ways_pct": 71.3,
+     "km_pct": 71.4
+    },
+    "smoothness": {
+     "ways_pct": 5.8,
+     "km_pct": 4.7
+    },
+    "sidewalk*": {
+     "ways_pct": 1.5,
+     "km_pct": 1.9
+    },
+    "cycleway*": {
+     "ways_pct": 0.2,
+     "km_pct": 0.1
+    },
+    "turn:lanes*": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "lit": {
+     "ways_pct": 38.4,
+     "km_pct": 35.1
+    },
+    "name": {
+     "ways_pct": 95.2,
+     "km_pct": 97.4
+    },
+    "ref": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "layer": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "bridge": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "tunnel": {
+     "ways_pct": 0.6,
+     "km_pct": 0.3
+    },
+    "lane_markings": {
+     "ways_pct": 3.0,
+     "km_pct": 3.8
+    },
+    "parking:*": {
+     "ways_pct": 2.8,
+     "km_pct": 2.7
+    },
+    "access/motor_vehicle/vehicle": {
+     "ways_pct": 7.3,
+     "km_pct": 7.8
+    }
+   }
+  },
+  "track": {
+   "ways": 1667,
+   "km": 415.8,
+   "coverage": {
+    "maxspeed": {
+     "ways_pct": 0.3,
+     "km_pct": 0.8
+    },
+    "maxspeed(plain)": {
+     "ways_pct": 0.2,
+     "km_pct": 0.8
+    },
+    "maxspeed:type|zone:maxspeed|source:maxspeed": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "lanes": {
+     "ways_pct": 0.1,
+     "km_pct": 0.1
+    },
+    "width": {
+     "ways_pct": 5.0,
+     "km_pct": 6.4
+    },
+    "oneway": {
+     "ways_pct": 0.8,
+     "km_pct": 1.4
+    },
+    "surface": {
+     "ways_pct": 60.9,
+     "km_pct": 68.2
+    },
+    "smoothness": {
+     "ways_pct": 7.7,
+     "km_pct": 15.9
+    },
+    "sidewalk*": {
+     "ways_pct": 0.4,
+     "km_pct": 0.7
+    },
+    "cycleway*": {
+     "ways_pct": 1.4,
+     "km_pct": 2.8
+    },
+    "turn:lanes*": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "lit": {
+     "ways_pct": 4.7,
+     "km_pct": 5.3
+    },
+    "name": {
+     "ways_pct": 14.2,
+     "km_pct": 20.5
+    },
+    "ref": {
+     "ways_pct": 0.2,
+     "km_pct": 0.1
+    },
+    "layer": {
+     "ways_pct": 5.8,
+     "km_pct": 0.3
+    },
+    "bridge": {
+     "ways_pct": 5.7,
+     "km_pct": 0.3
+    },
+    "tunnel": {
+     "ways_pct": 0.2,
+     "km_pct": 0.0
+    },
+    "lane_markings": {
+     "ways_pct": 0.0,
+     "km_pct": 0.0
+    },
+    "parking:*": {
+     "ways_pct": 0.1,
+     "km_pct": 0.0
+    },
+    "access/motor_vehicle/vehicle": {
+     "ways_pct": 29.4,
+     "km_pct": 32.7
+    }
+   }
+  }
+ },
+ "values": {
+  "maxspeed": [
+   [
+    "50",
+    1740
+   ],
+   [
+    "30",
+    1297
+   ],
+   [
+    "60",
+    195
+   ],
+   [
+    "70",
+    106
+   ],
+   [
+    "20",
+    89
+   ],
+   [
+    "10",
+    82
+   ],
+   [
+    "120",
+    81
+   ],
+   [
+    "80",
+    48
+   ],
+   [
+    "100",
+    46
+   ],
+   [
+    "none",
+    20
+   ],
+   [
+    "5",
+    13
+   ],
+   [
+    "40",
+    12
+   ],
+   [
+    "3,6",
+    5
+   ]
+  ],
+  "maxspeed:type": [
+   [
+    "DE:zone30",
+    203
+   ],
+   [
+    "sign",
+    103
+   ],
+   [
+    "DE:urban",
+    96
+   ],
+   [
+    "DE:rural",
+    5
+   ],
+   [
+    "DE:zone20",
+    2
+   ],
+   [
+    "DE:zone10",
+    1
+   ]
+  ],
+  "zone:maxspeed": [
+   [
+    "DE:30",
+    6
+   ]
+  ],
+  "source:maxspeed": [
+   [
+    "DE:urban",
+    483
+   ],
+   [
+    "sign",
+    188
+   ],
+   [
+    "de:urban",
+    42
+   ],
+   [
+    "DE:zone:30",
+    29
+   ],
+   [
+    "DE:bicycle_road",
+    12
+   ],
+   [
+    "DE:zone30",
+    11
+   ],
+   [
+    "DE:rural",
+    6
+   ],
+   [
+    "DE:zone",
+    5
+   ],
+   [
+    "DE:274-60",
+    1
+   ]
+  ],
+  "lanes": [
+   [
+    "2",
+    1260
+   ],
+   [
+    "1",
+    539
+   ],
+   [
+    "3",
+    322
+   ],
+   [
+    "4",
+    147
+   ],
+   [
+    "5",
+    22
+   ],
+   [
+    "6",
+    6
+   ],
+   [
+    "12",
+    1
+   ]
+  ],
+  "oneway": [
+   [
+    "yes",
+    1564
+   ],
+   [
+    "no",
+    582
+   ],
+   [
+    "-1",
+    3
+   ]
+  ],
+  "surface": [
+   [
+    "asphalt",
+    4544
+   ],
+   [
+    "paving_stones",
+    1479
+   ],
+   [
+    "paved",
+    195
+   ],
+   [
+    "sett",
+    120
+   ],
+   [
+    "compacted",
+    97
+   ],
+   [
+    "concrete",
+    79
+   ],
+   [
+    "cobblestone",
+    77
+   ],
+   [
+    "unpaved",
+    59
+   ],
+   [
+    "gravel",
+    37
+   ],
+   [
+    "unhewn_cobblestone",
+    34
+   ],
+   [
+    "grass_paver",
+    20
+   ],
+   [
+    "fine_gravel",
+    17
+   ],
+   [
+    "ground",
+    17
+   ],
+   [
+    "concrete:plates",
+    9
+   ],
+   [
+    "pebblestone",
+    9
+   ]
+  ],
+  "sidewalk": [
+   [
+    "both",
+    566
+   ],
+   [
+    "right",
+    386
+   ],
+   [
+    "no",
+    295
+   ],
+   [
+    "left",
+    155
+   ],
+   [
+    "separate",
+    59
+   ],
+   [
+    "yes",
+    1
+   ]
+  ],
+  "cycleway": [
+   [
+    "track",
+    110
+   ],
+   [
+    "no",
+    93
+   ],
+   [
+    "lane",
+    30
+   ],
+   [
+    "separate",
+    8
+   ],
+   [
+    "opposite",
+    1
+   ]
+  ],
+  "lit": [
+   [
+    "yes",
+    2742
+   ],
+   [
+    "no",
+    384
+   ],
+   [
+    "limited",
+    19
+   ],
+   [
+    "disused",
+    3
+   ]
+  ],
+  "smoothness": [
+   [
+    "good",
+    670
+   ],
+   [
+    "excellent",
+    138
+   ],
+   [
+    "intermediate",
+    79
+   ],
+   [
+    "bad",
+    27
+   ],
+   [
+    "very_bad",
+    6
+   ]
+  ],
+  "width": [
+   [
+    "6",
+    120
+   ],
+   [
+    "5",
+    48
+   ],
+   [
+    "3",
+    44
+   ],
+   [
+    "4",
+    33
+   ],
+   [
+    "4.5",
+    22
+   ],
+   [
+    "3.5",
+    13
+   ],
+   [
+    "5.1",
+    11
+   ],
+   [
+    "5.3",
+    10
+   ],
+   [
+    "5.5",
+    9
+   ],
+   [
+    "2.5",
+    9
+   ],
+   [
+    "5.8",
+    9
+   ],
+   [
+    "7",
+    8
+   ],
+   [
+    "3.7",
+    7
+   ],
+   [
+    "6.5",
+    7
+   ],
+   [
+    "8",
+    7
+   ]
+  ],
+  "junction": [
+   [
+    "roundabout",
+    61
+   ],
+   [
+    "circular",
+    1
+   ]
+  ],
+  "lane_markings": [
+   [
+    "no",
+    638
+   ],
+   [
+    "yes",
+    50
+   ]
+  ],
+  "maxspeed_by_km": [
+   [
+    "50",
+    281.6
+   ],
+   [
+    "30",
+    257.0
+   ],
+   [
+    "120",
+    38.6
+   ],
+   [
+    "70",
+    19.1
+   ],
+   [
+    "60",
+    19.0
+   ],
+   [
+    "20",
+    9.3
+   ],
+   [
+    "100",
+    8.8
+   ],
+   [
+    "10",
+    7.2
+   ],
+   [
+    "80",
+    6.8
+   ],
+   [
+    "none",
+    2.9
+   ],
+   [
+    "5",
+    1.2
+   ],
+   [
+    "40",
+    0.9
+   ],
+   [
+    "3,6",
+    0.3
+   ]
+  ],
+  "track_surface": [
+   [
+    "asphalt",
+    200
+   ],
+   [
+    "ground",
+    167
+   ],
+   [
+    "compacted",
+    139
+   ],
+   [
+    "gravel",
+    108
+   ],
+   [
+    "grass",
+    105
+   ],
+   [
+    "unpaved",
+    86
+   ],
+   [
+    "concrete",
+    38
+   ],
+   [
+    "dirt",
+    37
+   ],
+   [
+    "fine_gravel",
+    19
+   ],
+   [
+    "paved",
+    19
+   ],
+   [
+    "concrete:lanes",
+    18
+   ],
+   [
+    "paving_stones",
+    18
+   ],
+   [
+    "pebblestone",
+    11
+   ],
+   [
+    "sand",
+    11
+   ],
+   [
+    "sett",
+    8
+   ]
+  ],
+  "track_tracktype": [
+   [
+    "grade2",
+    364
+   ],
+   [
+    "grade1",
+    326
+   ],
+   [
+    "grade3",
+    305
+   ],
+   [
+    "grade4",
+    161
+   ],
+   [
+    "grade5",
+    155
+   ]
+  ],
+  "sidewalk_cycleway_subkeys_top": [
+   [
+    "cycleway:both=no",
+    587
+   ],
+   [
+    "cycleway:right=track",
+    194
+   ],
+   [
+    "sidewalk:left=no",
+    153
+   ],
+   [
+    "sidewalk:right=separate",
+    137
+   ],
+   [
+    "cycleway:left=no",
+    135
+   ],
+   [
+    "cycleway:right=no",
+    127
+   ],
+   [
+    "cycleway:left=track",
+    124
+   ],
+   [
+    "sidewalk:both:surface=paving_stones",
+    115
+   ],
+   [
+    "sidewalk:right:surface=paving_stones",
+    97
+   ],
+   [
+    "cycleway:right=lane",
+    89
+   ],
+   [
+    "cycleway:right=separate",
+    89
+   ],
+   [
+    "sidewalk:left=separate",
+    65
+   ],
+   [
+    "sidewalk:right=yes",
+    56
+   ],
+   [
+    "sidewalk:right:bicycle=yes",
+    55
+   ],
+   [
+    "sidewalk:right:surface=asphalt",
+    55
+   ],
+   [
+    "cycleway:right:oneway=no",
+    50
+   ],
+   [
+    "sidewalk:right:foot=designated",
+    47
+   ],
+   [
+    "cycleway:left=separate",
+    47
+   ],
+   [
+    "sidewalk:right:oneway=no",
+    46
+   ],
+   [
+    "sidewalk:left:bicycle=yes",
+    45
+   ],
+   [
+    "cycleway:right:surface=paving_stones",
+    41
+   ],
+   [
+    "sidewalk:both=separate",
+    40
+   ],
+   [
+    "sidewalk:right:traffic_sign=DE:239;DE:1022-10",
+    38
+   ],
+   [
+    "sidewalk:left:foot=designated",
+    36
+   ],
+   [
+    "sidewalk:left:traffic_sign=DE:239;DE:1022-10",
+    36
+   ]
+  ]
+ },
+ "sidewalk_as_separate_ways": {
+  "footway=sidewalk": 0,
+  "footway=crossing": 0,
+  "cycleway=crossing": 0
+ },
+ "nodes": {
+  "highway_railway_counts": {
+   "highway=bus_stop": 1080,
+   "highway=crossing": 816,
+   "highway=street_lamp": 620,
+   "railway=signal": 545,
+   "railway=switch": 392,
+   "highway=turning_circle": 391,
+   "highway=traffic_signals": 284,
+   "railway=milestone": 224,
+   "railway=level_crossing": 188,
+   "railway=rail_brake": 101,
+   "highway=give_way": 83,
+   "railway=crossing": 78,
+   "railway=buffer_stop": 73,
+   "highway=stop": 57,
+   "highway=emergency_access_point": 35,
+   "railway=vacancy_detection": 26,
+   "railway=stop": 26,
+   "highway=milestone": 22,
+   "highway=elevator": 21,
+   "highway=motorway_junction": 20,
+   "highway=turning_loop": 15,
+   "highway=passing_place": 14,
+   "railway=halt": 7,
+   "railway=station": 7,
+   "railway=subway_entrance": 5,
+   "railway=yard": 4,
+   "railway=junction": 4,
+   "railway=balise_group": 4,
+   "railway=owner_change": 3,
+   "highway=mini_roundabout": 2,
+   "highway=speed_camera": 2,
+   "railway=railway_crossing": 2,
+   "highway=construction": 2,
+   "railway=defect_detector": 2,
+   "railway=tram_level_crossing": 2,
+   "railway=crossover": 1,
+   "railway=derail": 1,
+   "railway=hump_yard": 1,
+   "highway=proposed": 1,
+   "railway=radio": 1
+  },
+  "natural_tree_nodes": 29177,
+  "crossing_types": {
+   "uncontrolled": 283,
+   "traffic_signals": 254,
+   "<none>": 209,
+   "unmarked": 93,
+   "zebra": 29,
+   "marked": 23,
+   "informal": 1,
+   "yes": 1
+  },
+  "crossing_markings": {
+   "no": 74,
+   "zebra": 22,
+   "yes": 21,
+   "dashes": 14
+  },
+  "crossing_extra": {
+   "traffic_signals_with_crossing_tag": 139,
+   "crossing_has_tactile_paving": 596,
+   "crossing_has_kerb": 130,
+   "crossing_has_island": 366,
+   "give_way_with_direction=backward": 38,
+   "crossing_has_button_operated": 200,
+   "give_way_with_direction=forward": 33,
+   "crossing_has_traffic_signals": 7,
+   "stop_with_direction=N": 1,
+   "stop_with_direction=forward": 29,
+   "stop_with_direction=backward": 24,
+   "stop_with_direction=W": 1,
+   "crossing_has_supervised": 3
+  },
+  "traffic_signals_direction_tag": 141,
+  "traffic_signals_subkeys": {
+   "traffic_signals": 50,
+   "traffic_signals:direction": 141,
+   "traffic_signals=signal": 42,
+   "traffic_signals:sound": 27,
+   "traffic_signals:vibration": 24
+  },
+  "street_lamp_support": {
+   "<none>": 611,
+   "street_lamp": 1,
+   "pole": 8
+  },
+  "traffic_calming": {
+   "chicane": 22,
+   "bump": 20,
+   "choker": 15,
+   "island": 7,
+   "hump": 4,
+   "table": 4,
+   "rumble_strip": 4
+  },
+  "mini_roundabout": 2,
+  "other_top": [
+   [
+    "emergency=fire_hydrant",
+    2414
+   ],
+   [
+    "amenity=bench",
+    1219
+   ],
+   [
+    "barrier=gate",
+    1185
+   ],
+   [
+    "public_transport=platform",
+    1078
+   ],
+   [
+    "public_transport=stop_position",
+    1027
+   ],
+   [
+    "amenity=waste_basket",
+    421
+   ],
+   [
+    "amenity=bicycle_parking",
+    380
+   ],
+   [
+    "power=tower",
+    322
+   ],
+   [
+    "power=generator",
+    279
+   ],
+   [
+    "barrier=bollard",
+    265
+   ],
+   [
+    "barrier=lift_gate",
+    240
+   ],
+   [
+    "amenity=post_box",
+    180
+   ],
+   [
+    "parking_entrance",
+    135
+   ],
+   [
+    "amenity=parking_entrance",
+    135
+   ],
+   [
+    "amenity=recycling",
+    125
+   ],
+   [
+    "barrier=cycle_barrier",
+    113
+   ],
+   [
+    "amenity=restaurant",
+    104
+   ],
+   [
+    "amenity=charging_station",
+    95
+   ],
+   [
+    "amenity=parking",
+    79
+   ],
+   [
+    "barrier=kerb",
+    79
+   ],
+   [
+    "barrier=swing_gate",
+    72
+   ],
+   [
+    "traffic_sign=city_limit",
+    67
+   ],
+   [
+    "amenity=vending_machine",
+    51
+   ],
+   [
+    "amenity=parcel_locker",
+    49
+   ],
+   [
+    "barrier=block",
+    48
+   ],
+   [
+    "node_with_maxspeed",
+    47
+   ],
+   [
+    "amenity=fast_food",
+    46
+   ],
+   [
+    "amenity=doctors",
+    45
+   ],
+   [
+    "amenity=cafe",
+    43
+   ],
+   [
+    "traffic_sign=maxspeed",
+    42
+   ],
+   [
+    "man_made=mast",
+    39
+   ],
+   [
+    "amenity=toilets",
+    38
+   ],
+   [
+    "amenity=waste_disposal",
+    38
+   ],
+   [
+    "amenity=pharmacy",
+    33
+   ],
+   [
+    "man_made=petroleum_well",
+    31
+   ],
+   [
+    "power=switch",
+    29
+   ],
+   [
+    "amenity=bank",
+    28
+   ],
+   [
+    "amenity=kindergarten",
+    27
+   ],
+   [
+    "amenity=post_office",
+    26
+   ],
+   [
+    "man_made=surveillance",
+    26
+   ]
+  ]
+ },
+ "relations_in_clip": {
+  "multipolygon": 392,
+  "restriction": 372
+ },
+ "restrictions": {
+  "count": 372,
+  "by_type": {
+   "only_straight_on": 133,
+   "no_u_turn": 126,
+   "only_right_turn": 34,
+   "no_left_turn": 34,
+   "only_left_turn": 20,
+   "no_right_turn": 20,
+   "no_straight_on": 5
+  },
+  "via": {
+   "via_node": 334,
+   "via_way": 38
+  }
+ },
+ "buildings": {
+  "count": 53866,
+  "from_multipolygon_relations": 42,
+  "total_footprint_km2": 11.13,
+  "mean_footprint_m2": 206.5,
+  "tag_coverage_pct": {
+   "addr:housenumber": 66.22,
+   "height_or_levels": 24.36,
+   "building:levels": 24.31,
+   "roof:shape": 17.81,
+   "roof:levels": 17.06,
+   "name": 3.49,
+   "roof:material": 0.13,
+   "building:material": 0.12,
+   "height": 0.09,
+   "roof:colour": 0.06,
+   "building:colour": 0.05,
+   "roof:height": 0.03,
+   "building:min_level": 0.01,
+   "min_height": 0.0
+  },
+  "type_top15": [
+   [
+    "yes",
+    26162
+   ],
+   [
+    "house",
+    7205
+   ],
+   [
+    "detached",
+    4803
+   ],
+   [
+    "allotment_house",
+    3957
+   ],
+   [
+    "apartments",
+    3444
+   ],
+   [
+    "residential",
+    1599
+   ],
+   [
+    "semidetached_house",
+    1373
+   ],
+   [
+    "garage",
+    1087
+   ],
+   [
+    "greenhouse",
+    780
+   ],
+   [
+    "shed",
+    636
+   ],
+   [
+    "garages",
+    416
+   ],
+   [
+    "industrial",
+    303
+   ],
+   [
+    "farm_auxiliary",
+    269
+   ],
+   [
+    "terrace",
+    256
+   ],
+   [
+    "carport",
+    222
+   ]
+  ],
+  "distinct_types": 72
+ },
+ "landuse": {
+  "residential": {
+   "n": 839,
+   "km2": 44.24
+  },
+  "meadow": {
+   "n": 650,
+   "km2": 62.16
+  },
+  "farmland": {
+   "n": 535,
+   "km2": 74.48
+  },
+  "grass": {
+   "n": 478,
+   "km2": 1.83
+  },
+  "greenhouse_horticulture": {
+   "n": 256,
+   "km2": 2.63
+  },
+  "forest": {
+   "n": 231,
+   "km2": 69.3
+  },
+  "farmyard": {
+   "n": 214,
+   "km2": 2.74
+  },
+  "industrial": {
+   "n": 118,
+   "km2": 10.25
+  },
+  "allotments": {
+   "n": 87,
+   "km2": 3.6
+  },
+  "commercial": {
+   "n": 87,
+   "km2": 4.08
+  },
+  "village_green": {
+   "n": 66,
+   "km2": 0.09
+  },
+  "orchard": {
+   "n": 60,
+   "km2": 1.63
+  },
+  "railway": {
+   "n": 54,
+   "km2": 3.25
+  },
+  "retail": {
+   "n": 42,
+   "km2": 0.56
+  },
+  "construction": {
+   "n": 26,
+   "km2": 0.34
+  },
+  "cemetery": {
+   "n": 20,
+   "km2": 0.96
+  },
+  "garages": {
+   "n": 18,
+   "km2": 0.01
+  },
+  "brownfield": {
+   "n": 15,
+   "km2": 0.2
+  },
+  "basin": {
+   "n": 13,
+   "km2": 0.02
+  },
+  "religious": {
+   "n": 7,
+   "km2": 0.03
+  },
+  "greenfield": {
+   "n": 6,
+   "km2": 0.06
+  },
+  "recreation_ground": {
+   "n": 6,
+   "km2": 0.18
+  },
+  "education": {
+   "n": 4,
+   "km2": 0.14
+  },
+  "quarry": {
+   "n": 2,
+   "km2": 0.16
+  },
+  "sand": {
+   "n": 2,
+   "km2": 0.0
+  }
+ },
+ "natural_areas": {
+  "scrub": {
+   "n": 978,
+   "km2": 7.74
+  },
+  "water": {
+   "n": 746,
+   "km2": 20.97
+  },
+  "wood": {
+   "n": 350,
+   "km2": 8.01
+  },
+  "wetland": {
+   "n": 216,
+   "km2": 6.51
+  },
+  "grassland": {
+   "n": 115,
+   "km2": 1.7
+  },
+  "sand": {
+   "n": 87,
+   "km2": 0.08
+  },
+  "beach": {
+   "n": 33,
+   "km2": 0.15
+  },
+  "heath": {
+   "n": 16,
+   "km2": 1.02
+  },
+  "ground": {
+   "n": 1,
+   "km2": 0.0
+  },
+  "tree_group": {
+   "n": 1,
+   "km2": 0.0
+  },
+  "grass": {
+   "n": 1,
+   "km2": 0.0
+  },
+  "tree_row": {
+   "n": 1,
+   "km2": 0.0
+  }
+ },
+ "water_subtype": [
+  [
+   "pond",
+   97
+  ],
+  [
+   "river",
+   43
+  ],
+  [
+   "canal",
+   33
+  ],
+  [
+   "basin",
+   24
+  ],
+  [
+   "reservoir",
+   19
+  ],
+  [
+   "lake",
+   12
+  ],
+  [
+   "oxbow",
+   4
+  ],
+  [
+   "lock",
+   3
+  ],
+  [
+   "drain",
+   3
+  ],
+  [
+   "stream",
+   2
+  ]
+ ],
+ "leisure_areas": {
+  "pitch": {
+   "n": 306,
+   "km2": 0.57
+  },
+  "playground": {
+   "n": 301,
+   "km2": 0.23
+  },
+  "park": {
+   "n": 131,
+   "km2": 2.79
+  },
+  "garden": {
+   "n": 91,
+   "km2": 0.08
+  },
+  "sports_centre": {
+   "n": 60,
+   "km2": 0.81
+  },
+  "track": {
+   "n": 31,
+   "km2": 0.37
+  },
+  "swimming_area": {
+   "n": 11,
+   "km2": 0.02
+  },
+  "swimming_pool": {
+   "n": 11,
+   "km2": 0.0
+  },
+  "nature_reserve": {
+   "n": 10,
+   "km2": 13.76
+  },
+  "marina": {
+   "n": 9,
+   "km2": 0.18
+  },
+  "sports_hall": {
+   "n": 9,
+   "km2": 0.01
+  },
+  "horse_riding": {
+   "n": 8,
+   "km2": 0.17
+  }
+ },
+ "other_areas_top": [
+  [
+   "amenity=parking",
+   1360
+  ],
+  [
+   "amenity=parking_space",
+   303
+  ],
+  [
+   "man_made=silo",
+   121
+  ],
+  [
+   "man_made=bridge",
+   120
+  ],
+  [
+   "amenity=bicycle_parking",
+   87
+  ],
+  [
+   "amenity=school",
+   56
+  ],
+  [
+   "amenity=shelter",
+   46
+  ],
+  [
+   "man_made=pier",
+   43
+  ],
+  [
+   "amenity=kindergarten",
+   30
+  ],
+  [
+   "man_made=bunker_silo",
+   25
+  ],
+  [
+   "man_made=works",
+   17
+  ],
+  [
+   "man_made=embankment",
+   13
+  ],
+  [
+   "place=islet",
+   12
+  ],
+  [
+   "man_made=groyne",
+   11
+  ],
+  [
+   "man_made=street_cabinet",
+   11
+  ]
+ ]
+}
