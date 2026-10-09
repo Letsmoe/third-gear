@@ -44,6 +44,25 @@ float Random01(uint32 Hash, uint32 Stream)
 	return float(Value & 0xFFFFFF) / float(0x1000000);
 }
 
+/** Smooth value noise in [0, 1] at a position in noise cells (bilinear between hashed lattice points, smoothstepped). */
+float ValueNoise(float X, float Y, uint32 Salt)
+{
+	const int32 CellX = FMath::FloorToInt(X);
+	const int32 CellY = FMath::FloorToInt(Y);
+	const float FractionX = FMath::SmoothStep(0.f, 1.f, X - CellX);
+	const float FractionY = FMath::SmoothStep(0.f, 1.f, Y - CellY);
+	const auto Corner = [&](int32 OffsetX, int32 OffsetY) { return Random01(HashCell(CellX + OffsetX, CellY + OffsetY, Salt), 0); };
+	return FMath::Lerp(FMath::Lerp(Corner(0, 0), Corner(1, 0), FractionX), FMath::Lerp(Corner(0, 1), Corner(1, 1), FractionX), FractionY);
+}
+
+/** Two octaves of value noise over a world position in cm, with the larger octave 'FeatureCm' wide; in [0, 1]. */
+float PatchNoise(const FVector2D& PositionCm, float FeatureCm, uint32 Salt)
+{
+	const float X = float(PositionCm.X) / FeatureCm;
+	const float Y = float(PositionCm.Y) / FeatureCm;
+	return ValueNoise(X, Y, Salt) * 0.65f + ValueNoise(X * 2.7f, Y * 2.7f, Salt + 1u) * 0.35f;
+}
+
 /** Marks the raster cells whose centre lies inside the polygon (even-odd over all its rings). */
 void RasterizePolygon(const FWorldPolygon& Polygon, int32 NumX, int32 NumY, TArray<uint8>& Excluded)
 {
@@ -324,39 +343,105 @@ bool FGrassField::LoadAssets()
 		return FString::Printf(TEXT("%s/%s/%s_2k/StaticMeshes/%s.%s"), TuftFolder, Pack, Pack, Name, Name);
 	};
 
+	const auto AddMeshes = [&](FKind& Kind, const TCHAR* Pack, std::initializer_list<const TCHAR*> Names)
+	{
+		for (const TCHAR* Name : Names)
+		{
+			Kind.Meshes.Add(Cast<UStaticMesh>(Load(TuftPath(Pack, Name))));
+		}
+	};
+	const auto Material = [&](const TCHAR* Name)
+	{
+		return Cast<UMaterialInterface>(Load(FString::Printf(TEXT("/Game/Grass/Materials/MI_Grass%s.MI_Grass%s"), Name, Name)));
+	};
+
+	// Mown lawn far out: sparse, bigger tufts that carry the colour; the dense near ring below fills in the detail.
 	FKind Lawn;
 	Lawn.Name = TEXT("Lawn");
-	Lawn.SpacingCm = 15.f;
-	Lawn.RadiusCm = 1500.f;
-	Lawn.ScaleXY = FVector2f(1.3f, 1.9f);
+	Lawn.SpacingCm = 24.f;
+	Lawn.RadiusCm = 3000.f;
+	Lawn.ScaleXY = FVector2f(1.5f, 2.3f);
 	Lawn.ScaleZ = FVector2f(0.5f, 0.75f);
-	Lawn.Material = Cast<UMaterialInterface>(Load(TEXT("/Game/Grass/Materials/MI_GrassLawn.MI_GrassLawn")));
-	for (const TCHAR* Name : {TEXT("grass_medium_01_small_a_LOD0"), TEXT("grass_medium_01_small_b_LOD0"), TEXT("grass_medium_01_mid_c_LOD0")})
-	{
-		Lawn.Meshes.Add(Cast<UStaticMesh>(Load(TuftPath(TEXT("grass_medium_01"), Name))));
-	}
+	Lawn.Unevenness = 0.3f;
+	Lawn.Material = Material(TEXT("Lawn"));
+	AddMeshes(Lawn, TEXT("grass_medium_01"), {TEXT("grass_medium_01_small_a_LOD0"), TEXT("grass_medium_01_small_b_LOD0"), TEXT("grass_medium_01_mid_c_LOD0")});
+
+	// Fine, dense blades near the viewer.
+	FKind LawnDense;
+	LawnDense.Name = TEXT("LawnDense");
+	LawnDense.SpacingCm = 9.f;
+	LawnDense.RadiusCm = 800.f;
+	LawnDense.ScaleXY = FVector2f(1.0f, 1.6f);
+	LawnDense.ScaleZ = FVector2f(0.45f, 0.7f);
+	LawnDense.Unevenness = 0.3f;
+	LawnDense.Material = Material(TEXT("LawnDense"));
+	AddMeshes(LawnDense, TEXT("grass_medium_01"), {TEXT("grass_medium_01_tiny_a_LOD0"), TEXT("grass_medium_01_tiny_b_LOD0"), TEXT("grass_medium_01_tiny_c_LOD0"),
+		TEXT("grass_medium_01_tiny_d_LOD0"), TEXT("grass_medium_01_tiny_e_LOD0"), TEXT("grass_medium_01_tiny_f_LOD0")});
+
+	// Clover, plantain and daisies in patches within the lawn.
+	FKind Weeds;
+	Weeds.Name = TEXT("Weeds");
+	Weeds.SpacingCm = 45.f;
+	Weeds.RadiusCm = 1100.f;
+	Weeds.PatchShare = 0.5f;
+	Weeds.ScaleXY = FVector2f(0.6f, 1.1f);
+	Weeds.ScaleZ = FVector2f(0.6f, 1.1f);
+	Weeds.Material = Material(TEXT("Weeds"));
+	AddMeshes(Weeds, TEXT("weed_plant_02"), {TEXT("weed_plant_02_a_LOD0"), TEXT("weed_plant_02_b_LOD0"), TEXT("weed_plant_02_c_LOD0"), TEXT("weed_plant_02_d_LOD0"), TEXT("weed_plant_02_e_LOD0")});
 
 	FKind Meadow;
 	Meadow.Name = TEXT("Meadow");
-	Meadow.SpacingCm = 55.f;
+	Meadow.Source = ESource::Meadow;
+	Meadow.SpacingCm = 25.f;
 	Meadow.RadiusCm = 4500.f;
-	Meadow.ScaleXY = FVector2f(0.9f, 1.5f);
-	Meadow.ScaleZ = FVector2f(0.9f, 1.5f);
-	Meadow.Material = Cast<UMaterialInterface>(Load(TEXT("/Game/Grass/Materials/MI_GrassMeadow.MI_GrassMeadow")));
-	for (const TCHAR* Name : {TEXT("grass_medium_02_c"), TEXT("grass_medium_02_d"), TEXT("grass_medium_02_e")})
-	{
-		Meadow.Meshes.Add(Cast<UStaticMesh>(Load(TuftPath(TEXT("grass_medium_02"), Name))));
-	}
-	Meadow.Meshes.Add(Cast<UStaticMesh>(Load(TuftPath(TEXT("grass_medium_02"), TEXT("grass_medium_02_b")))));
+	Meadow.Unevenness = 0.35f;
+	Meadow.ScaleXY = FVector2f(0.9f, 1.6f);
+	Meadow.ScaleZ = FVector2f(1.0f, 2.2f);
+	Meadow.Material = Material(TEXT("Meadow"));
+	AddMeshes(Meadow, TEXT("grass_medium_02"), {TEXT("grass_medium_02_b"), TEXT("grass_medium_02_c"), TEXT("grass_medium_02_d"), TEXT("grass_medium_02_e")});
+
+	// Taller, fuller clumps standing out of the meadow, for a mixed sward height.
+	FKind MeadowTall;
+	MeadowTall.Name = TEXT("MeadowTall");
+	MeadowTall.Source = ESource::Meadow;
+	MeadowTall.SpacingCm = 38.f;
+	MeadowTall.RadiusCm = 3800.f;
+	MeadowTall.Unevenness = 0.4f;
+	MeadowTall.ScaleXY = FVector2f(0.9f, 1.4f);
+	MeadowTall.ScaleZ = FVector2f(1.2f, 2.6f);
+	MeadowTall.Material = Material(TEXT("MeadowTall"));
+	AddMeshes(MeadowTall, TEXT("grass_medium_01"), {TEXT("grass_medium_01_tall_a_LOD0"), TEXT("grass_medium_01_tall_b_LOD0"), TEXT("grass_medium_01_tall_c_LOD0"),
+		TEXT("grass_medium_01_large_a_LOD0"), TEXT("grass_medium_01_large_b_LOD0"), TEXT("grass_medium_01_large_c_LOD0")});
+
+	// Flowers in drifts through the meadow.
+	FKind Dandelion;
+	Dandelion.Name = TEXT("Dandelion");
+	Dandelion.Source = ESource::Meadow;
+	Dandelion.SpacingCm = 45.f;
+	Dandelion.RadiusCm = 2300.f;
+	Dandelion.PatchShare = 0.55f;
+	Dandelion.ScaleXY = FVector2f(1.2f, 2.0f);
+	Dandelion.ScaleZ = FVector2f(1.2f, 2.0f);
+	Dandelion.Material = Material(TEXT("Dandelion"));
+	AddMeshes(Dandelion, TEXT("dandelion_01"), {TEXT("dandelion_01_a_LOD0"), TEXT("dandelion_01_b_LOD0"), TEXT("dandelion_01_c_LOD0"), TEXT("dandelion_01_d_LOD0"), TEXT("dandelion_01_e_LOD0")});
+
+	FKind Celandine = Dandelion;
+	Celandine.Name = TEXT("Celandine");
+	Celandine.SpacingCm = 60.f;
+	Celandine.Material = Material(TEXT("Celandine"));
+	Celandine.Meshes.Reset();
+	AddMeshes(Celandine, TEXT("celandine_01"), {TEXT("celandine_01_a_LOD0"), TEXT("celandine_01_b_LOD0"), TEXT("celandine_01_c_LOD0"), TEXT("celandine_01_d_LOD0"), TEXT("celandine_01_e_LOD0")});
 
 	// Weeds in the seam between kerb and pavement: the lawn's tufts and material, small, only placed along pavement edges.
 	FKind Seam = Lawn;
 	Seam.Name = TEXT("Seam");
+	Seam.Source = ESource::Seam;
+	Seam.Unevenness = 0.f;
 	Seam.RadiusCm = 3500.f;
 	Seam.ScaleXY = FVector2f(0.3f, 0.9f);
 	Seam.ScaleZ = FVector2f(0.35f, 1.0f);
 
-	for (FKind* Kind : {&Lawn, &Meadow, &Seam})
+	for (FKind* Kind : {&Lawn, &Meadow, &Seam, &LawnDense, &Weeds, &MeadowTall, &Dandelion, &Celandine})
 	{
 		bool bComplete = Kind->Material != nullptr;
 		for (const TObjectPtr<UStaticMesh>& Mesh : Kind->Meshes)
@@ -426,12 +511,14 @@ void FGrassField::StartCell(const FIntPoint& Key, uint32 KindBits, const FTileFi
 		bool bMeadow;
 		bool bSeam;
 		bool bIncluded;
+		float PatchShare;
+		float Unevenness;
 	};
 	TArray<FKindParameters> Parameters;
 	for (int32 KindIndex = 0; KindIndex < Kinds.Num(); ++KindIndex)
 	{
 		const FKind& Kind = Kinds[KindIndex];
-		Parameters.Add({Kind.SpacingCm, Kind.ScaleXY, Kind.ScaleZ, Kind.Meshes.Num(), Kind.Name == TEXT("Meadow"), Kind.Name == TEXT("Seam"), (KindBits & (1u << KindIndex)) != 0});
+		Parameters.Add({Kind.SpacingCm, Kind.ScaleXY, Kind.ScaleZ, Kind.Meshes.Num(), Kind.Source == ESource::Meadow, Kind.Source == ESource::Seam, (KindBits & (1u << KindIndex)) != 0, Kind.PatchShare, Kind.Unevenness});
 	}
 
 	FCell& Cell = Cells.FindOrAdd(Key);
@@ -482,9 +569,15 @@ void FGrassField::StartCell(const FIntPoint& Key, uint32 KindBits, const FTileFi
 					{
 						continue;
 					}
+					if (Kind.PatchShare > 0.f && PatchNoise(Position, 400.f, 700u + uint32(KindIndex)) >= Kind.PatchShare)
+					{
+						continue;
+					}
+					// Slow noise makes the sward uneven: taller and shorter areas some metres across.
+					const float Evenness = 1.f + Kind.Unevenness * (PatchNoise(Position, 250.f, 900u) - 0.5f) * 2.f;
 					const float ScaleAcross = FMath::Lerp(Kind.ScaleXY.X, Kind.ScaleXY.Y, Random01(Hash, 3));
 					// Thin edges of a meadow are shorter.
-					const float ScaleUp = FMath::Lerp(Kind.ScaleZ.X, Kind.ScaleZ.Y, Random01(Hash, 4)) * (Kind.bMeadow ? 0.6f + 0.4f * Weight : 1.f);
+					const float ScaleUp = FMath::Lerp(Kind.ScaleZ.X, Kind.ScaleZ.Y, Random01(Hash, 4)) * (Kind.bMeadow ? 0.6f + 0.4f * Weight : 1.f) * Evenness;
 					const FQuat Yaw(FVector::UpVector, Random01(Hash, 5) * UE_TWO_PI);
 					const int32 MeshIndex = FMath::Min(int32(Random01(Hash, 6) * Kind.MeshCount), Kind.MeshCount - 1);
 					ByMesh[MeshIndex].Emplace(Yaw, FVector(Position.X, Position.Y, HeightCm - RootSinkCm), FVector(ScaleAcross, ScaleAcross, ScaleUp));
