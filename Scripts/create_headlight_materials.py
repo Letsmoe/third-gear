@@ -18,7 +18,7 @@ FOLDER = "/Game/Vehicles/Materials"
 mel = unreal.MaterialEditingLibrary
 
 COMMON_HLSL = """
-// The engine hands light functions the vector swizzled: z along the beam, y to the right, x up.
+// The engine hands light functions the vector swizzled: z along the beam, y to the right, and x up.
 float Depth = LightVec.z;
 if (Depth < 0.2 * length(LightVec))
 {
