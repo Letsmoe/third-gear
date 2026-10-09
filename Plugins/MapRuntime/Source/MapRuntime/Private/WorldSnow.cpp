@@ -1,6 +1,4 @@
 #include "WorldSnow.h"
-#include "Misc/CommandLine.h"
-#include "Misc/Parse.h"
 
 #include "WorldMeshBuilder.h"
 #include "WorldTileData.h"
@@ -10,7 +8,7 @@ using namespace UE::Geometry;
 
 namespace
 {
-constexpr float SnowCellMetres = 0.5f;
+constexpr float SnowCellMetres = 1.0f;
 constexpr float SnowMetresToCm = 100.f;
 /** Greatest distance to a road or footway edge that is measured, metres. */
 constexpr float SnowEdgeReach = 5.1f;
@@ -22,14 +20,6 @@ constexpr float SnowMaximumDepth = 1.2f;
 /** Vertex colour scales. */
 constexpr float SnowDepthPerColorStep = 0.005f;
 constexpr float SnowEdgeDistancePerColorStep = 0.02f;
-/** Largest flat block merged into two triangles, in cells. */
-constexpr int32 SnowMaxBlockCells = 8;
-/** How far the skirts of merged blocks hang below the surface, cm. */
-constexpr float SnowSkirtDepthCm = 6.f;
-/** Flatness tolerances for merging cells, metres. */
-constexpr float SnowSurfaceTolerance = 0.012f;
-constexpr float SnowDepthTolerance = 0.012f;
-constexpr float SnowEdgeTolerance = 0.4f;
 
 /** Direction the prevailing wind blows towards over Hamburg (from west-southwest), x east and y south. */
 const FVector2f SnowWindDirection(0.94f, -0.34f);
@@ -475,13 +465,13 @@ void ComputeSnowSurface(const FWorldTileData& Tile, FSnowSamples& Samples)
 			Smoothed[Index] = Samples.Ground[Index] + SnowBaseDepth(Samples.Class[Index]) * Variation;
 		}
 	}
-	for (int32 Pass = 0; Pass < 3; ++Pass)
+	for (int32 Pass = 0; Pass < 2; ++Pass)
 	{
 		BoxBlur(Samples, Smoothed);
 	}
 	// Lawn snow is smoothed much further: it hides the ground's small bumps and merges into big flat triangles.
 	TArray<float> SmoothedLawn = Smoothed;
-	for (int32 Pass = 0; Pass < 9; ++Pass)
+	for (int32 Pass = 0; Pass < 3; ++Pass)
 	{
 		BoxBlur(Samples, SmoothedLawn);
 	}
@@ -529,7 +519,7 @@ FColor SnowVertexColor(const FSnowSamples& Samples, int32 Index)
 		uint8(FMath::Clamp(FMath::RoundToInt(EdgeDistance / SnowEdgeDistancePerColorStep), 0, 255)));
 }
 
-/** Merges cells into flat blocks and writes the snow surface triangles. */
+/** Writes the snow surface as two triangles per grid cell. */
 class FSnowGridMesher
 {
 public:
@@ -543,11 +533,11 @@ public:
 	{
 		const int32 CellsX = Samples.CountX - 1;
 		const int32 CellsY = Samples.CountY - 1;
-		for (int32 Y = 0; Y < CellsY; Y += SnowMaxBlockCells)
+		for (int32 Y = 0; Y < CellsY; ++Y)
 		{
-			for (int32 X = 0; X < CellsX; X += SnowMaxBlockCells)
+			for (int32 X = 0; X < CellsX; ++X)
 			{
-				EmitBlock(X, Y, SnowMaxBlockCells);
+				EmitCell(X, Y);
 			}
 		}
 	}
@@ -582,79 +572,16 @@ private:
 		return true;
 	}
 
-	/** Prediction of a channel at a sample from the block's corners, which are split along the 00-11 diagonal. */
-	static float Predict(const TArray<float>& Values, const FSnowSamples& Samples, int32 X0, int32 Y0, int32 Size, int32 X, int32 Y)
+	/** The two triangles of one grid cell; cells with no snow are left out. */
+	void EmitCell(int32 X0, int32 Y0)
 	{
-		const float T = float(X - X0) / Size;
-		const float U = float(Y - Y0) / Size;
-		const float V00 = Values[Samples.Index(X0, Y0)];
-		const float V10 = Values[Samples.Index(X0 + Size, Y0)];
-		const float V01 = Values[Samples.Index(X0, Y0 + Size)];
-		const float V11 = Values[Samples.Index(X0 + Size, Y0 + Size)];
-		if (T >= U)
+		if (X0 >= Samples.CountX - 1 || Y0 >= Samples.CountY - 1 || IsBlockEmpty(X0, Y0, 1))
 		{
-			return V00 + T * (V10 - V00) + U * (V11 - V10);
-		}
-		return V00 + U * (V01 - V00) + T * (V11 - V01);
-	}
-
-	/** True when the block is flat enough in height, depth and edge distance to be two triangles. */
-	bool IsBlockFlat(int32 X0, int32 Y0, int32 Size) const
-	{
-		const int32 EndX = X0 + Size;
-		const int32 EndY = Y0 + Size;
-		if (EndX >= Samples.CountX || EndY >= Samples.CountY)
-		{
-			return false;
-		}
-		const ESnowClass Class = Samples.Class[Samples.Index(X0, Y0)];
-		for (int32 Y = Y0; Y <= EndY; ++Y)
-		{
-			for (int32 X = X0; X <= EndX; ++X)
-			{
-				const int32 Index = Samples.Index(X, Y);
-				if (Samples.bSkip[Index] || Samples.Class[Index] != Class)
-				{
-					return false;
-				}
-				const TArray<float>& EdgeDistances = Class == ESnowClass::Road ? Samples.RoadEdge : Samples.FootEdge;
-				const bool bEdgeMatters = Class != ESnowClass::Lawn;
-				// Lawn snow is 15 cm deep, so it can stray a few centimetres from a plane without exposing the ground.
-				const float ToleranceScale = Class == ESnowClass::Lawn ? 3.f : 1.f;
-				if (FMath::Abs(Samples.Surface[Index] - Predict(Samples.Surface, Samples, X0, Y0, Size, X, Y)) > SnowSurfaceTolerance * ToleranceScale
-					|| (bEdgeMatters && FMath::Abs(Samples.Depth[Index] - Predict(Samples.Depth, Samples, X0, Y0, Size, X, Y)) > SnowDepthTolerance)
-					|| (bEdgeMatters && FMath::Abs(EdgeDistances[Index] - Predict(EdgeDistances, Samples, X0, Y0, Size, X, Y)) > SnowEdgeTolerance))
-				{
-					return false;
-				}
-			}
-		}
-		return true;
-	}
-
-	void EmitBlock(int32 X0, int32 Y0, int32 Size)
-	{
-		if (X0 >= Samples.CountX - 1 || Y0 >= Samples.CountY - 1 || IsBlockEmpty(X0, Y0, Size))
-		{
-			return;
-		}
-		if (Size > 1 && !IsBlockFlat(X0, Y0, Size))
-		{
-			const int32 Half = Size / 2;
-			EmitBlock(X0, Y0, Half);
-			EmitBlock(X0 + Half, Y0, Half);
-			EmitBlock(X0, Y0 + Half, Half);
-			EmitBlock(X0 + Half, Y0 + Half, Half);
 			return;
 		}
 		const FVector3f Up(0.f, 0.f, 1.f);
-		if (Size > 1)
-		{
-			EmitFlatBlock(X0, Y0, Size);
-			return;
-		}
-		const int32 X1 = FMath::Min(X0 + Size, Samples.CountX - 1);
-		const int32 Y1 = FMath::Min(Y0 + Size, Samples.CountY - 1);
+		const int32 X1 = X0 + 1;
+		const int32 Y1 = Y0 + 1;
 		const int32 V00 = VertexAt(X0, Y0);
 		const int32 V10 = VertexAt(X1, Y0);
 		const int32 V11 = VertexAt(X1, Y1);
@@ -668,34 +595,6 @@ private:
 		{
 			Builder.AddTriangle(V00, V10, V01, 0, Up);
 			Builder.AddTriangle(V10, V11, V01, 0, Up);
-		}
-	}
-
-	/**
-	 * A flat block as two triangles with a short skirt hanging from each edge. A finer neighbour has vertices along the
-	 * shared edge that this block lacks, so the edges can differ by a few millimetres; the skirt closes that gap.
-	 */
-	void EmitFlatBlock(int32 X0, int32 Y0, int32 Size)
-	{
-		const int32 Corners[4][2] = {{X0, Y0}, {X0 + Size, Y0}, {X0 + Size, Y0 + Size}, {X0, Y0 + Size}};
-		int32 Top[4];
-		int32 Bottom[4];
-		for (int32 Corner = 0; Corner < 4; ++Corner)
-		{
-			const int32 X = FMath::Min(Corners[Corner][0], Samples.CountX - 1);
-			const int32 Y = FMath::Min(Corners[Corner][1], Samples.CountY - 1);
-			Top[Corner] = VertexAt(X, Y);
-			Bottom[Corner] = Builder.AddVertex(Builder.GetPosition(Top[Corner]) - FVector3f(0.f, 0.f, SnowSkirtDepthCm),
-				FVector2f(float(Tile.Origin.X) + X * SnowCellMetres, float(Tile.Origin.Y) + Y * SnowCellMetres), SnowVertexColor(Samples, Samples.Index(X, Y)));
-		}
-		const FVector3f Up(0.f, 0.f, 1.f);
-		Builder.AddTriangle(Top[0], Top[1], Top[2], 0, Up);
-		Builder.AddTriangle(Top[0], Top[2], Top[3], 0, Up);
-		const FVector3f Outward[4] = {FVector3f(0.f, -1.f, 0.f), FVector3f(1.f, 0.f, 0.f), FVector3f(0.f, 1.f, 0.f), FVector3f(-1.f, 0.f, 0.f)};
-		for (int32 Edge = 0; Edge < 4; ++Edge)
-		{
-			const int32 Next = (Edge + 1) % 4;
-			Builder.AddQuad(Top[Edge], Top[Next], Bottom[Next], Bottom[Edge], 0, Outward[Edge]);
 		}
 	}
 
@@ -840,48 +739,6 @@ void BuildRoofSnow(const FWorldTileData& Tile, const FWorldTileMeshes& Meshes, F
 }
 }
 
-/** Debug: logs edges used by one triangle only (holes and cracks in the snow surface), away from the tile border. */
-static void LogOpenSnowEdges(const FWorldTileData& Tile, const FWorldMeshBuilder& Snow)
-{
-	TMap<uint64, int32> Uses;
-	TMap<uint64, FVector3f> Where;
-	const auto Key = [&Snow](int32 A, int32 B)
-	{
-		const FVector3f& PositionA = Snow.GetPosition(A);
-		const FVector3f& PositionB = Snow.GetPosition(B);
-		const uint64 HashA = HashCombine(GetTypeHash(FIntVector(PositionA.X, PositionA.Y, PositionA.Z)), 0);
-		const uint64 HashB = HashCombine(GetTypeHash(FIntVector(PositionB.X, PositionB.Y, PositionB.Z)), 0);
-		return (FMath::Min(HashA, HashB) << 32) ^ FMath::Max(HashA, HashB);
-	};
-	for (int32 Triangle = 0; Triangle < Snow.NumTriangles(); ++Triangle)
-	{
-		const FIntVector3& Corners = Snow.GetTriangle(Triangle);
-		for (int32 Edge = 0; Edge < 3; ++Edge)
-		{
-			const int32 A = Corners[Edge];
-			const int32 B = Corners[(Edge + 1) % 3];
-			const uint64 EdgeKey = Key(A, B);
-			Uses.FindOrAdd(EdgeKey, 0)++;
-			Where.Add(EdgeKey, (Snow.GetPosition(A) + Snow.GetPosition(B)) * 0.5f);
-		}
-	}
-	int32 Open = 0;
-	for (const TPair<uint64, int32>& Pair : Uses)
-	{
-		const FVector3f& At = Where[Pair.Key];
-		const bool bBorder = At.X < 1.f || At.Y < 1.f || At.X > Tile.Size.X * 100.f - 1.f || At.Y > Tile.Size.Y * 100.f - 1.f;
-		if (Pair.Value == 1 && !bBorder)
-		{
-			if (Open < 12)
-			{
-				UE_LOG(LogTemp, Warning, TEXT("SnowDebug open edge at world (%.2f, %.2f, %.2f)"), Tile.Origin.X + At.X / 100.0, Tile.Origin.Y + At.Y / 100.0, At.Z / 100.0);
-			}
-			++Open;
-		}
-	}
-	UE_LOG(LogTemp, Warning, TEXT("SnowDebug tile %.0f,%.0f: %d triangles, %d open edges"), Tile.Origin.X, Tile.Origin.Y, Snow.NumTriangles(), Open);
-}
-
 void BuildWorldSnow(const FWorldTileData& Tile, const FWorldTileMeshes& Meshes, FWorldSnowMeshes& Out)
 {
 	FSnowSamples Samples;
@@ -898,10 +755,6 @@ void BuildWorldSnow(const FWorldTileData& Tile, const FWorldTileMeshes& Meshes, 
 	FWorldMeshBuilder Snow;
 	FSnowGridMesher(Tile, Samples, Snow).Build();
 	BuildRoofSnow(Tile, Meshes, Snow);
-	if (FParse::Param(FCommandLine::Get(), TEXT("SnowDebug")))
-	{
-		LogOpenSnowEdges(Tile, Snow);
-	}
 
 	// Near tiles have 4 x 4 ground chunks (WorldTileMesher.cpp); the snow follows them.
 	const int32 PerSide = 4;

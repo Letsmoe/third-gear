@@ -24,8 +24,7 @@ struct FWorldSnowMeshes
 
 /**
  * Builds the snow layer from the tile's data and its already built ground and building meshes: the ground heights
- * are rasterised into a 0.5 m grid, the snow surface is that grid plus a class dependent depth, smoothed so kerbs and
- * edges round off, with ploughed ridges along roads and drifts on the lee side of walls, then meshed with flat areas
- * merged into large triangles. Roofs get their own cap with a rounded rim. Pure function; runs on worker threads.
+ * are rasterised into a 1 m grid, the snow surface is that grid plus a class dependent depth, smoothed so kerbs and
+ * edges round off, with ploughed ridges along roads and drifts on the lee side of walls, then meshed as two triangles per cell. Roofs get their own cap with a rounded rim. Pure function; runs on worker threads.
  */
 void BuildWorldSnow(const FWorldTileData& Tile, const FWorldTileMeshes& Meshes, FWorldSnowMeshes& Out);

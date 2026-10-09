@@ -38,10 +38,10 @@ float footway = VertexFootway;
 float edge = VertexEdge * 5.1;
 
 // Wheel tracks: two per lane, at 0.8 m and 2.4 m from the road edge (lanes 3.2 m wide), and the ploughed ridge.
-float t1 = (edge - 0.8) / 0.16;
-float t2 = (edge - 2.4) / 0.16;
+float t1 = (edge - 0.8) / 0.3;
+float t2 = (edge - 2.4) / 0.3;
 float tracks = max(exp(-t1 * t1), exp(-t2 * t2)) * road;
-tracks *= saturate(0.55 + 0.6 * DgValueNoise(p / 4.0 + 8.0));
+tracks *= 0.7 * saturate(0.1 + 1.3 * DgValueNoise(p / 3.0 + 8.0));
 float ridge_x = (edge - 0.45) / 0.35;
 float ridge = exp(-ridge_x * ridge_x) * road;
 
