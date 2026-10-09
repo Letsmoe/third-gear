@@ -296,7 +296,9 @@ rides a camera over the lanes and prints violations by AI cars, collisions betwe
   (clutch capacity = 380 Nm × engagement² between pedal 0.8 and 0.25). Gear only engages with the clutch pressed or
   revs matched (else "grind", stays neutral); reverse only when nearly stopped. Open diff, FWD, 92 % driveline
   efficiency, ABS. Tyres: simplified Pacejka with combined slip (friction ellipse, μx 1.1, μy 0.99, load sensitivity),
-  semi-implicit wheel spin, low-speed clamps (parks without jitter). Suspension forces act along the ground normal
+  semi-implicit wheel spin, low-speed clamps (parks without jitter). Per-wheel surface grip (`CarSurfaceGrip.*`): the ground material under
+  each wheel plus wetness, snow and temperature scale grip, peak slip and rolling drag (wet 0.8, packed snow 0.34, ice 0.12,
+  aquaplaning above 70 km/h on flooded roads); `drive_test.sh -DriveTestSurface=wet|flood|snow|ice` measures them. Suspension forces act along the ground normal
   (Chaos' own version braked the car whenever the body pitched); body never sleeps, no linear damping; aero drag
   0.5·ρ·CdA·v². Compliance steer (0.2°/kN) gives realistic understeer.
 - **FFB**: kingpin torque = −(pneumatic trail, collapsing at the grip limit, + caster trail) × front lateral force,

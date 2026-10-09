@@ -255,12 +255,13 @@ FCarDrivetrain::FTireResult FCarDrivetrain::EvaluateTire(int32 Wheel, const FWhe
 	const float LateralScale = FMath::Clamp(P.TireLateralMuScale, 0.5f, 1.5f); // friction ellipse
 
 	// Normalised combined slip: s = 1 is the peak in any direction (friction circle).
-	const float KappaPeak = FMath::Max(0.01f, P.TirePeakSlipRatio);
-	const float TanAlphaPeak = FMath::Tan(FMath::DegreesToRadians(FMath::Max(1.f, P.TirePeakSlipAngleDeg)));
+	const float PeakSlipScale = FMath::Max(0.1f, Contact.PeakSlipScale);
+	const float KappaPeak = FMath::Max(0.01f, P.TirePeakSlipRatio * PeakSlipScale);
+	const float TanAlphaPeak = FMath::Tan(FMath::DegreesToRadians(FMath::Max(1.f, P.TirePeakSlipAngleDeg))) * PeakSlipScale;
 	const float Sx = Kappa / KappaPeak;
 	const float Sy = TanAlpha / TanAlphaPeak;
 	const float S = FMath::Sqrt(Sx * Sx + Sy * Sy);
-	const float C = FMath::Clamp(P.TireShapeC, 1.01f, 1.9f);
+	const float C = FMath::Clamp(P.TireShapeC * Contact.ShapeCScale, 1.01f, 1.9f);
 	const float B = FMath::Tan(UE_HALF_PI / C); // puts the peak of sin(C atan(B s)) at s = 1
 
 	float dFxdSx;
@@ -357,7 +358,7 @@ void FCarDrivetrain::Step(float Dt, const FCarDriverInput& Input, const FWheelCo
 
 			// ABS: release brake pressure while the wheel is locking, re-apply otherwise.
 			float &Abs = AbsFactor[i];
-			if (P.bABS && BrakePedal > 0.f && Speed > AbsMinSpeed && Tire.SlipRatio < -P.AbsSlipRatio)
+			if (P.bABS && BrakePedal > 0.f && Speed > AbsMinSpeed && Tire.SlipRatio < -P.AbsSlipRatio * Contacts[i].PeakSlipScale)
 			{
 				Abs = FMath::Max(0.05f, Abs - AbsReleaseRate * H);
 				bLastAbsActive = true;
@@ -373,7 +374,7 @@ void FCarDrivetrain::Step(float Dt, const FCarDriverInput& Input, const FWheelCo
 			{
 				Brake += P.HandbrakeTorque;
 			}
-			const float Rolling = P.RollingResistance * LastLoad[i] * R;
+			const float Rolling = (P.RollingResistance + Contacts[i].ExtraRollingResistance) * LastLoad[i] * R;
 			// Gear mesh losses scale with the transmitted torque; modelled as friction on the driven wheels.
 			const float DrivelineLoss = bDriven[i] ? (1.f - P.DrivetrainEfficiency) * FMath::Abs(LastClutchTorque * G) * 0.5f : 0.f;
 			BrakeLimit[i] = (Brake + Rolling + DrivelineLoss) * H;

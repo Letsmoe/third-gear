@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "CarSimTypes.h"
+#include "CarSurfaceGrip.h"
 #include "DriveTest.generated.h"
 
 class ACarPawn;
@@ -40,6 +41,13 @@ protected:
 	void AddWait(float Seconds);
 	void Report(const FString& Line);
 
+	/** Brakes from FromKmh with full pedal and reports the distance. The test surface starts at the brake point. */
+	void AddBrakingStep(float FromKmh);
+	/** Switches between the test surface (-DriveTestSurface=wet|flood|snow|ice) and dry asphalt. No-op without the switch. */
+	void ApplyTestSurface(bool bOn);
+	/** With -DriveTestSurface only 0-50, braking and ramp steer run (the other steps say nothing about grip). */
+	void KeepSurfaceSteps();
+
 	/** Keeps the car on the line y = LaneY (heading +X). */
 	void SteerToLane(const FCarTelemetry& T);
 	/** Full-throttle driving with clutch launch and upshifts at ShiftRpm. Returns current phase description. */
@@ -60,6 +68,8 @@ protected:
 	TArray<FString> Summary;
 
 	// Per-test scratch state
+	TOptional<FCarSurfaceConditions> TestSurface;
+	FString TestSurfaceName;
 	float LaneY = 0.f;
 	float ShiftRpm = 6200.f;
 	float LaunchRpm = 3000.f;

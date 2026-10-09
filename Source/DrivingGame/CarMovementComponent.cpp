@@ -2,6 +2,11 @@
 
 #include "CarDrivetrain.h"
 #include "CarSettings.h"
+#include "CarSurfaceGrip.h"
+#include "WeatherVisuals.h"
+#include "WorldSurfaceQuery.h"
+#include "Engine/World.h"
+#include "Misc/CommandLine.h"
 #include "CarWheels.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "HAL/IConsoleManager.h"
@@ -37,6 +42,10 @@ public:
 		// Chaos' own control inputs (throttle/brake/steering from the movement component) are not used.
 		FScopeLock Lock(&Shared->Lock);
 		Input = Shared->Input;
+		for (int32 i = 0; i < CarNumWheels; ++i)
+		{
+			Surface[i] = Shared->Surface[i];
+		}
 		if (Shared->ResetCounter != SeenResetCounter)
 		{
 			SeenResetCounter = Shared->ResetCounter;
@@ -147,7 +156,10 @@ public:
 			Contacts[i].Vx = WheelVelocity.X;
 			Contacts[i].Vy = WheelVelocity.Y;
 			Contacts[i].LoadN = FMath::Max(0.f, PWheel.GetWheelLoadForce() * 0.01f); // kg cm/s^2 -> N
-			Contacts[i].Grip = Grip;
+			Contacts[i].Grip = Grip * Surface[i].GripScale * AquaplaningGripFactor(i, FMath::Abs(WheelVelocity.X));
+			Contacts[i].PeakSlipScale = Surface[i].PeakSlipScale;
+			Contacts[i].ShapeCScale = Surface[i].ShapeCScale;
+			Contacts[i].ExtraRollingResistance = Surface[i].ExtraRollingResistance;
 		}
 
 		const float MassPerWheel = RigidHandle ? RigidHandle->M() / FMath::Max(1, NumWheels) : Params.MassKg / CarNumWheels;
@@ -211,6 +223,20 @@ public:
 	}
 
 private:
+	/**
+	 * Grip left on standing water at this road speed: the front tyres float up first from about 70 km/h and are
+	 * mostly gone by 90 km/h, the rear tyres follow in the front's wake with less loss.
+	 */
+	float AquaplaningGripFactor(int32 Wheel, float SpeedMps) const
+	{
+		if (Surface[Wheel].Aquaplaning <= 0.f)
+		{
+			return 1.f;
+		}
+		const float Floating = CarSurfaceGrip::Ramp(19.5f, 25.f, SpeedMps) * Surface[Wheel].Aquaplaning;
+		return 1.f - (Wheel < 2 ? 0.7f : 0.35f) * Floating;
+	}
+
 	void CacheGeometry()
 	{
 		if (WheelbaseM > 0.f || PVehicle->Suspension.Num() < CarNumWheels)
@@ -258,6 +284,7 @@ private:
 	TSharedRef<FCarSharedState, ESPMode::ThreadSafe> Shared;
 	FCarDrivetrain Drivetrain;
 	FCarDriverInput Input;
+	FCarWheelSurface Surface[CarNumWheels];
 	int32 SeenResetCounter = 0;
 	double SimTime = 0.0;
 	float MeanSteerDeg = 0.f;
@@ -380,4 +407,79 @@ void UCarMovementComponent::ResetDrivetrain(bool bEngineRunning)
 	FScopeLock Lock(&Shared->Lock);
 	Shared->bResetEngineRunning = bEngineRunning;
 	++Shared->ResetCounter;
+}
+
+void UCarMovementComponent::SetSurfaceConditionsOverride(const FCarSurfaceConditions& Conditions)
+{
+	bSurfaceOverride = true;
+	SurfaceOverride = Conditions;
+	SurfaceUpdateCountdown = 0.f;
+}
+
+void UCarMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	UpdateWheelSurfaces(DeltaTime);
+}
+
+FCarSurfaceConditions UCarMovementComponent::CurrentSurfaceConditions() const
+{
+	if (bSurfaceOverride)
+	{
+		return SurfaceOverride;
+	}
+	FCarSurfaceConditions Conditions;
+	const UWeatherVisualsSubsystem* Visuals = GetWorld() ? GetWorld()->GetSubsystem<UWeatherVisualsSubsystem>() : nullptr;
+	if (Visuals)
+	{
+		Conditions.Wetness = Visuals->GetWetness();
+		Conditions.SnowCover = Visuals->GetSnowCover();
+		Conditions.TemperatureCelsius = Visuals->GetState().TemperatureCelsius;
+	}
+	return Conditions;
+}
+
+void UCarMovementComponent::UpdateWheelSurfaces(float DeltaTime)
+{
+	// Grip changes slowly (weather, material borders), so ten updates a second are plenty.
+	constexpr float UpdateIntervalSeconds = 0.1f;
+	SurfaceUpdateCountdown -= DeltaTime;
+	if (SurfaceUpdateCountdown > 0.f)
+	{
+		return;
+	}
+	SurfaceUpdateCountdown = UpdateIntervalSeconds;
+
+	const USkeletalMeshComponent* Mesh = Cast<USkeletalMeshComponent>(UpdatedComponent);
+	const UCarSettings* Settings = GetDefault<UCarSettings>();
+	if (!Mesh || Settings->WheelBones.Num() < CarNumWheels)
+	{
+		return;
+	}
+	// A drive test without an explicit surface runs on dry asphalt whatever the map's weather is.
+	if (!bSurfaceOverride && FParse::Param(FCommandLine::Get(), TEXT("DriveTest")))
+	{
+		SetSurfaceConditionsOverride(FCarSurfaceConditions());
+	}
+
+	const FCarSurfaceConditions Conditions = CurrentSurfaceConditions();
+	FCarWheelSurface Surfaces[CarNumWheels];
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(CarWheelSurface), /*bTraceComplex=*/true, GetOwner());
+	Params.bReturnFaceIndex = true;
+	for (int32 Wheel = 0; Wheel < CarNumWheels; ++Wheel)
+	{
+		const FVector Start = Mesh->GetSocketLocation(Settings->WheelBones[Wheel]);
+		FHitResult Hit;
+		const bool bHitGround = GetWorld()->LineTraceSingleByChannel(Hit, Start, Start - FVector(0.f, 0.f, 150.f), ECC_Visibility, Params);
+		const FName GroundName = bHitGround ? FindWorldSurfaceName(Hit) : NAME_None;
+		// Position-based variation: snow depth and grip differ from wheel to wheel and from patch to patch.
+		const float Variation = FMath::Sin(Start.X * 0.013f + Start.Y * 0.021f) * FMath::Sin(Start.Y * 0.017f - Start.X * 0.007f);
+		Surfaces[Wheel] = CarSurfaceGrip::Evaluate(CarSurfaceGrip::Classify(GroundName), Conditions, Variation);
+	}
+
+	FScopeLock Lock(&Shared->Lock);
+	for (int32 Wheel = 0; Wheel < CarNumWheels; ++Wheel)
+	{
+		Shared->Surface[Wheel] = Surfaces[Wheel];
+	}
 }
