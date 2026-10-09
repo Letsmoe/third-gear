@@ -137,7 +137,7 @@ FACADES = {
     # Kit materials by typology class (typology.md).
     "Facade_ClinkerDeepRed": dict(set="ms:brick_facade_efa35b96", tile=(2, 2), value=0.55, hue=-0.012, saturation=1.0, recolor=(0.40, 0.24, 0.26),
                                   amount=0.5, parallax=0.012, tint=(0.8, 1.15)),
-    "Facade_ClinkerYellowBrown": dict(set="ms:brick_wall_5d318a8f", tile=(4, 2), hue=0.062, saturation=0.95, value=1.25,
+    "Facade_ClinkerYellowBrown": dict(set="ms:brick_wall_5d318a8f", tile=(4, 2), hue=0.04, saturation=1.2, value=1.05,
                                       parallax=0.012, tint=(0.8, 1.15)),
     "Facade_BrickGruenderzeit": dict(set="ms:brick_wall_5d318a8f", tile=(4, 2), value=1.0, saturation=1.1, parallax=0.012,
                                      tint=(0.75, 1.15)),
@@ -185,7 +185,7 @@ FACADES = {
 # Weathering by class: Age (0 new, 1 neglected; each building scales it by its own hash), effect amounts and the colour of
 # repairs. Brick takes repairs and moss but not flaking paint; render fades, flakes and streaks; concrete streaks heavily.
 RENDER_WEATHER = dict(Age=0.6, FadeAmount=1.0, FlakeAmount=0.7, MossAmount=0.9, RepairColor=(0.80, 0.78, 0.72))
-BRICK_WEATHER = dict(Age=0.6, FadeAmount=0.0, FlakeAmount=0.0, MossAmount=0.8, RepairAmount=0.8, RepairColor=(0.58, 0.56, 0.52))
+BRICK_WEATHER = dict(Age=0.6, FadeAmount=0.0, FlakeAmount=0.0, MossAmount=0.8, RepairAmount=0.8, RepairColor=(0.44, 0.42, 0.39))
 CONCRETE_WEATHER = dict(Age=0.7, StreakAmount=1.2, FadeAmount=0.2, FlakeAmount=0.0, RepairColor=(0.62, 0.60, 0.56))
 CLASS_WEATHER = {
     "Facade_Brick": BRICK_WEATHER, "Facade_ClinkerDeepRed": BRICK_WEATHER, "Facade_ClinkerYellowBrown": BRICK_WEATHER,
@@ -220,7 +220,7 @@ return Weathered.Color;
 
 # Instance parameters of the weathering layer and their defaults (class settings override them, see FACADES "weather").
 WEATHERING_DEFAULTS = dict(Age=0.6, StreakAmount=1.0, PlinthAmount=1.0, MossAmount=1.0, RepairAmount=1.0, FadeAmount=1.0,
-                           FlakeAmount=0.0, PlinthHeight=0.6)
+                           FlakeAmount=0.0, PlinthHeight=0.45)
 
 
 def weathering_default(kind):
@@ -242,7 +242,7 @@ def add_weathering(m, wall_uv, vertex_color, color, rough, normal):
     node = expr(m, unreal.MaterialExpressionCustom, -400, 900, code=WEATHERING_HLSL, description="FacadeWeathering",
                 output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3,
                 include_file_paths=[cm.TERRAIN_INCLUDE, *WEATHERING_INCLUDES])
-    names = ["UV", "Variation", "NormalY", "Color", "Rough", "Nrm", "FloorHeight", "RepairColor", *WEATHERING_DEFAULTS]
+    names = ["UV", "Variation", "NormalY", "EaveHeight", "Color", "Rough", "Nrm", "FloorHeight", "RepairColor", *WEATHERING_DEFAULTS]
     node.set_editor_property("inputs", [custom_input(n) for n in ("WeatherAtlas", "WeatherMoss", "WeatherFlake", *names)])
     node.set_editor_property("additional_outputs", [
         cm.custom_output("NormalOut", unreal.CustomMaterialOutputType.CMOT_FLOAT3),
@@ -258,6 +258,9 @@ def add_weathering(m, wall_uv, vertex_color, color, rough, normal):
     normal_y = expr(m, unreal.MaterialExpressionComponentMask, -500, 1250, r=False, g=True, b=False, a=False)
     link(expr(m, unreal.MaterialExpressionVertexNormalWS, -700, 1250), "", normal_y, "")
     link(normal_y, "", node, "NormalY")
+    eave = expr(m, unreal.MaterialExpressionMultiply, -500, 1350, const_b=255.0 / 6.0)  # blue holds 6 units per metre
+    link(vertex_color, "B", eave, "A")
+    link(eave, "", node, "EaveHeight")
     link(*color, node, "Color")
     link(*rough, node, "Rough")
     link(*normal, node, "Nrm")

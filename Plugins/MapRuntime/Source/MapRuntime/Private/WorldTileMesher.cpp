@@ -752,7 +752,9 @@ void BuildBuilding(const FWorldTileData& Tile, const FWorldBuilding& Building, F
 	const FString Roof = Tile.Names.IsValidIndex(Building.Roof) ? Tile.Names[Building.Roof] : FString(TEXT("Roof_Flat"));
 	const int32 FacadeMaterial = MaterialSlot(Meshes, Facade);
 	const int32 RoofMaterial = MaterialSlot(Meshes, Roof);
-	const FColor Color(Building.Tint, Building.Variation, 0, 255);
+	// Blue carries the eave height (6 units per metre, up to 42 m) so the facade material can run rain streaks down from the cornice.
+	const uint8 EaveCode = uint8(FMath::Clamp(Building.EaveHeight * 6.f, 0.f, 255.f));
+	const FColor Color(Building.Tint, Building.Variation, EaveCode, 255);
 	for (const TArray<FVector2f>& Ring : Building.Footprint.Rings)
 	{
 		BuildWalls(Building, Ring, FacadeMaterial, Color, Meshes.Buildings);

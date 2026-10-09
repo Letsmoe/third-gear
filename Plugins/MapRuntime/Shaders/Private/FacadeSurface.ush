@@ -88,6 +88,12 @@ float DgFacadeBrightness(float BuildingTint, float TintMin, float TintMax, float
  */
 void DgFacadeFineGrain(float2 Metres, float Strength, out float2 Tilt, out float RoughnessOffset)
 {
+	Tilt = 0;
+	RoughnessOffset = 0;
+	if (Strength <= 0.0)
+	{
+		return;
+	}
 	float Step = 0.004;
 	float Fine = DgWearNoise(Metres, 150.0, 0.3) * 0.5 + DgWearNoise(Metres, 61.0, 1.1) * 0.5;
 	float FineX = DgWearNoise(Metres + float2(Step, 0), 150.0, 0.3) * 0.5 + DgWearNoise(Metres + float2(Step, 0), 61.0, 1.1) * 0.5;
