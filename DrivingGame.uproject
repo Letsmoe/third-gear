@@ -58,6 +58,13 @@
 		{
 			"Name": "MapRuntime",
 			"Enabled": true
+		},
+		{
+			"Name": "Isobar",
+			"Enabled": true
 		}
+	],
+	"AdditionalPluginDirectories": [
+		"/home/moritz/Documents/personal/isobar"
 	]
 }
