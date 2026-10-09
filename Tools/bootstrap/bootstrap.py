@@ -92,7 +92,7 @@ def python_run():
 
 def geodata_done():
     """Every geodata preparation step has finished."""
-    steps = ["osm_city", "dgm5", "glo30_city", "street_trees_city"]
+    steps = ["osm_city", "dgm5", "glo30_city", "terrain_grid", "street_trees_city"]
     return all(os.path.exists(os.path.join(data_root.geodata_dir(), ".done", step)) for step in steps)
 
 

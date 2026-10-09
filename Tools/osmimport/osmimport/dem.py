@@ -1,13 +1,16 @@
 """Terrain heights: mosaic of 5 m DGM tiles (Hamburg > Niedersachsen) with Copernicus GLO-30 as fallback, served on a
 1 m grid.
 
-The 5 m tiles are averaged from the states' 1 m DGM by Tools/bootstrap/prepare_geodata.py.
+The 5 m tiles are averaged from the states' 1 m DGM by Tools/bootstrap/prepare_geodata.py, which also writes the
+whole mosaic over the city box once as a plain grid file (TERRAIN_GRID, format in write_terrain_grid) for the world
+builder. Areas inside it are read from there; anything beyond (horizon tiles) is mosaicked from the tiles.
 
 The mosaic is a regular grid in world coordinates (see geo.py): row 0 is the northern edge (smallest y).
 """
 import glob
 import os
 import re
+import struct
 from dataclasses import dataclass
 
 import numpy as np
@@ -22,6 +25,12 @@ TILE_RE = re.compile(r"dgm5_32_(\d+)_(\d+)_(hh|ni)")
 COARSE_RES = 5
 # Water holes in the DGM are filled at this percentile of their bank heights: near the lowest bank, the water level.
 BANK_PERCENTILE = 5
+# The terrain grid file under the geodata root, and its header: magic, version, west easting, north northing, cell
+# size, columns, rows. The float32 heights follow row by row from the north.
+TERRAIN_GRID = os.path.join("raw", "terrain_5m.grid")
+TERRAIN_GRID_HEADER = struct.Struct("<4sIddfII")
+TERRAIN_GRID_MAGIC = b"TGH5"
+TERRAIN_GRID_VERSION = 1
 
 
 @dataclass
@@ -72,13 +81,49 @@ def build_mosaic(area: Area, geodata_root: str, margin: float = 100.0) -> Height
     e0, n0, e1, n1 = area.utm_bounds(margin)
     e0, n0 = np.floor(e0), np.floor(n0)
     e1, n1 = np.ceil(e1), np.ceil(n1)
-    coarse = _coarse_mosaic(e0, n0, e1, n1, os.path.join(geodata_root, "raw"))
+    coarse = load_terrain_grid(geodata_root)
+    if coarse is None or not _covers(coarse, e0, n0, e1, n1):
+        coarse = _coarse_mosaic(e0, n0, e1, n1, os.path.join(geodata_root, "raw"))
     xs = e0 + np.arange(int(e1 - e0)) + 0.5
     ys = n1 - np.arange(int(n1 - n0)) - 0.5
     # The coarse grid runs north to south like the fine one, so sampling it with -northing as y keeps rows in order.
     z = coarse.sample(xs[None, :], -ys[:, None]).astype(np.float32)
     # world: x = E - origin_e, y = origin_n - N; row 0 = northern edge (n1)
     return HeightGrid(z=z, x0=e0 - area.origin_e, y0=area.origin_n - n1, res=1.0)
+
+
+def write_terrain_grid(geodata_root: str, e0: float, n0: float, e1: float, n1: float):
+    """Writes the 5 m mosaic of a UTM box, gaps filled, as the terrain grid file."""
+    grid = _coarse_mosaic(e0, n0, e1, n1, os.path.join(geodata_root, "raw"))
+    rows, columns = grid.z.shape
+    path = os.path.join(geodata_root, TERRAIN_GRID)
+    with open(path + ".part", "wb") as output:
+        output.write(TERRAIN_GRID_HEADER.pack(TERRAIN_GRID_MAGIC, TERRAIN_GRID_VERSION, grid.x0, -grid.y0,
+                                              grid.res, columns, rows))
+        output.write(np.ascontiguousarray(grid.z, dtype="<f4").tobytes())
+    os.replace(path + ".part", path)
+
+
+def load_terrain_grid(geodata_root: str):
+    """The terrain grid file as a HeightGrid in UTM eastings and negated northings (memory-mapped), or None."""
+    path = os.path.join(geodata_root, TERRAIN_GRID)
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as source:
+        magic, version, west, north, cell, columns, rows = TERRAIN_GRID_HEADER.unpack(
+            source.read(TERRAIN_GRID_HEADER.size))
+    if magic != TERRAIN_GRID_MAGIC or version != TERRAIN_GRID_VERSION:
+        raise RuntimeError(f"{path} is not a terrain grid of version {TERRAIN_GRID_VERSION}")
+    z = np.memmap(path, dtype="<f4", mode="r", offset=TERRAIN_GRID_HEADER.size, shape=(rows, columns))
+    return HeightGrid(z=z, x0=west, y0=-north, res=cell)
+
+
+def _covers(grid: HeightGrid, e0, n0, e1, n1) -> bool:
+    """True when the grid (in UTM eastings and negated northings) covers the UTM box with a cell to spare."""
+    rows, columns = grid.z.shape
+    west, north = grid.x0, -grid.y0
+    east, south = west + columns * grid.res, north - rows * grid.res
+    return west + grid.res <= e0 and e1 <= east - grid.res and south + grid.res <= n0 and n1 <= north - grid.res
 
 
 def _coarse_mosaic(e0, n0, e1, n1, raw) -> HeightGrid:

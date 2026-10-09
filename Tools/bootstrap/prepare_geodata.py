@@ -7,6 +7,7 @@ Layout written (what Tools/osmimport expects):
   osm/hamburg.osm.pbf                        the same, clipped to the city bbox
   raw/dgm5/*.tif                             5 m terrain in 1 km tiles, averaged from the Hamburg and Lower Saxony DGM1
   raw/copernicus_glo30/*.tif                 GLO-30 fallback (links)
+  raw/terrain_5m.grid                        the 5 m terrain of the city box plus TERRAIN_GRID_MARGIN, gaps filled
   raw/strassenbaeume/strassenbaeume_bbox.geojson   street tree register of the city bbox (link)
 
 Every step writes a marker file and is skipped on the next run unless --force is given.
@@ -37,6 +38,8 @@ CITY_KM_NORTH = (5916, 5957)
 CITY_WGS84 = (9.72, 53.385, 10.35, 53.76)
 # The terrain is averaged over squares of this many 1 m cells.
 TERRAIN_CELL = 5
+# The terrain grid file reaches this far beyond the city box, metres.
+TERRAIN_GRID_MARGIN = 2000
 OSM_SOURCES = ["osm_hamburg", "osm_schleswig_holstein", "osm_niedersachsen"]
 TILE_KM_RE = re.compile(r"_32_(\d+)_(\d+)_")
 # Hamburg tiles use -9999 for no data despite their header.
@@ -151,6 +154,15 @@ def prepare_glo30(geodata):
             link(path, os.path.join(geodata, "raw", "copernicus_glo30", os.path.basename(path)))
 
 
+def prepare_terrain_grid(geodata):
+    """The 5 m terrain of the city box as one grid file, with the GLO-30 tiles linked first for its fallback."""
+    sys.path.insert(0, os.path.join(TOOLS_DIR, "osmimport"))
+    from osmimport import dem
+    margin = TERRAIN_GRID_MARGIN
+    dem.write_terrain_grid(geodata, CITY_KM_EAST[0] * 1000 - margin, CITY_KM_NORTH[0] * 1000 - margin,
+                           CITY_KM_EAST[1] * 1000 + margin, CITY_KM_NORTH[1] * 1000 + margin)
+
+
 def prepare_street_trees(geodata):
     """Links the street tree register of the city bbox."""
     for path in download_files("street_trees_hamburg", "*.geojson"):
@@ -161,6 +173,7 @@ STEPS = [
     ("osm_city", prepare_osm),
     ("dgm5", prepare_terrain),
     ("glo30_city", prepare_glo30),
+    ("terrain_grid", prepare_terrain_grid),
     ("street_trees_city", prepare_street_trees),
 ]
 

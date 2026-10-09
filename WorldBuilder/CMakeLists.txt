@@ -3,7 +3,11 @@
 #   cmake -S WorldBuilder -B WorldBuilder/Build -G Ninja -DCMAKE_BUILD_TYPE=Release
 #   cmake --build WorldBuilder/Build
 #
-# The library has no Unreal dependency, so the game can later compile the same sources into a plugin.
+# The libraries have no Unreal dependency, so the game can later compile the same sources into a plugin.
+#
+# Layout: Source/<Part>/ holds one library each (Core: OSM, projection, terrain, geometry and the tile format; Streets:
+# the street model; Buildings: building typing and roofs). Programs/<name>.cpp each become an executable: worldbuilder
+# links everything, Streets*.cpp and Buildings*.cpp only Core and their own part, so the parts build independently.
 cmake_minimum_required(VERSION 3.24)
 project(WorldBuilder LANGUAGES CXX)
 
@@ -13,7 +17,7 @@ if(NOT CMAKE_BUILD_TYPE)
 	set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Header-only libraries, fetched at a pinned version instead of copied into the repository.
+# Header-only and small libraries, fetched at a pinned version instead of copied into the repository.
 include(FetchContent)
 FetchContent_Declare(protozero
 	GIT_REPOSITORY https://github.com/mapbox/protozero.git
@@ -25,20 +29,53 @@ FetchContent_Declare(libosmium
 	GIT_TAG v2.22.0
 	GIT_SHALLOW TRUE
 	SOURCE_SUBDIR _none)
-FetchContent_MakeAvailable(protozero libosmium)
+FetchContent_Declare(clipper2
+	GIT_REPOSITORY https://github.com/AngusJohnson/Clipper2.git
+	GIT_TAG Clipper2_1.5.4
+	GIT_SHALLOW TRUE
+	SOURCE_SUBDIR _none)
+FetchContent_MakeAvailable(protozero libosmium clipper2)
 
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
-add_library(WorldBuilderCore STATIC
-	Source/Projection.cpp
-	Source/OsmReader.cpp)
-target_include_directories(WorldBuilderCore
-	PUBLIC Source
-	PRIVATE ${protozero_SOURCE_DIR}/include ${libosmium_SOURCE_DIR}/include)
-target_link_libraries(WorldBuilderCore PRIVATE ZLIB::ZLIB Threads::Threads)
-target_compile_options(WorldBuilderCore PRIVATE -Wall -Wextra)
+# Clipper2 (Boost licence): polygon booleans and offsets on integer coordinates.
+file(GLOB Clipper2Sources ${clipper2_SOURCE_DIR}/CPP/Clipper2Lib/src/*.cpp)
+add_library(Clipper2 STATIC ${Clipper2Sources})
+target_include_directories(Clipper2 SYSTEM PUBLIC ${clipper2_SOURCE_DIR}/CPP/Clipper2Lib/include)
 
-add_executable(worldbuilder Programs/WorldBuilderMain.cpp)
-target_link_libraries(worldbuilder PRIVATE WorldBuilderCore)
-target_compile_options(worldbuilder PRIVATE -Wall -Wextra)
+set(WorldBuilderWarnings -Wall -Wextra)
+
+# One part's library from Source/<Folder>, linked to the libraries after the folder.
+function(world_builder_library Name Folder)
+	file(GLOB_RECURSE Sources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Source/${Folder}/*.cpp)
+	# A part with no sources yet is an empty interface library, so everything that links it still configures.
+	if(Sources)
+		add_library(${Name} STATIC ${Sources})
+		target_include_directories(${Name} PUBLIC Source/${Folder})
+		target_compile_options(${Name} PRIVATE ${WorldBuilderWarnings})
+		target_link_libraries(${Name} PUBLIC ${ARGN})
+	else()
+		add_library(${Name} INTERFACE)
+		target_link_libraries(${Name} INTERFACE ${ARGN})
+	endif()
+endfunction()
+
+world_builder_library(WorldBuilderCore Core Clipper2 ZLIB::ZLIB Threads::Threads)
+target_include_directories(WorldBuilderCore SYSTEM PRIVATE ${protozero_SOURCE_DIR}/include ${libosmium_SOURCE_DIR}/include)
+world_builder_library(WorldBuilderStreets Streets WorldBuilderCore)
+world_builder_library(WorldBuilderBuildings Buildings WorldBuilderCore)
+
+file(GLOB Programs CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Programs/*.cpp)
+foreach(Program ${Programs})
+	get_filename_component(ProgramName ${Program} NAME_WE)
+	add_executable(${ProgramName} ${Program})
+	target_compile_options(${ProgramName} PRIVATE ${WorldBuilderWarnings})
+	if(ProgramName MATCHES "^Streets")
+		target_link_libraries(${ProgramName} PRIVATE WorldBuilderStreets)
+	elseif(ProgramName MATCHES "^Buildings")
+		target_link_libraries(${ProgramName} PRIVATE WorldBuilderBuildings)
+	else()
+		target_link_libraries(${ProgramName} PRIVATE WorldBuilderCore WorldBuilderStreets WorldBuilderBuildings)
+	endif()
+endforeach()
