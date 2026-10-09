@@ -170,14 +170,16 @@ def world_done():
     """The world data and horizon of every default region have been compiled."""
     return all(os.path.exists(os.path.join(data_root.world_dir(region), "world.json"))
                and os.path.exists(os.path.join(data_root.world_dir(region), "horizon", "horizon.json"))
+               and os.path.exists(os.path.join(data_root.world_dir(region), "lanes.json"))
                for region in WORLD_REGIONS)
 
 
 def world_run():
-    """Compiles the world data tiles the game streams and the low-detail horizon around them."""
+    """Compiles the world data tiles the game streams, the low-detail horizon around them and the AI traffic lanes."""
     for region in WORLD_REGIONS:
         run([data_root.venv_python("osmimport"), "-I", "Tools/osmimport/build_world.py", region])
         run([data_root.venv_python("osmimport"), "-I", "Tools/osmimport/build_horizon_world.py", region])
+        run([data_root.venv_python("osmimport"), "-I", "Tools/osmimport/build_lanes.py", region])
 
 
 STEPS = {
