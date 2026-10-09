@@ -62,6 +62,13 @@
 		{
 			"Name": "AndroidFileServer",
 			"Enabled": false
+		},
+		{
+			"Name": "Isobar",
+			"Enabled": true
 		}
+	],
+	"AdditionalPluginDirectories": [
+		"/home/moritz/Documents/personal/isobar"
 	]
 }
