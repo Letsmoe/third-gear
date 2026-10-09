@@ -79,6 +79,35 @@ struct FWorldPlant
 	float TrunkDiameter = 0.f;
 };
 
+enum class EWorldPoiKind : uint8
+{
+	Lamp = 0,
+	SignalHead = 1,
+	Sign = 2,
+};
+
+/** One piece of street furniture (worldtile.py POIS): a street lamp, the pole of a signal head, or a sign pole. */
+struct FWorldPoi
+{
+	EWorldPoiKind Kind = EWorldPoiKind::Lamp;
+	uint8 Flags = 0;
+	/** Name index of the sign graphic (signs), else 0. */
+	uint16 Variant = 0;
+	/** Name index of the additional sign below the first one, or NoVariant. */
+	uint16 Variant2 = 0xFFFF;
+	/** x, y relative to the tile corner; z absolute (foot of the pole). */
+	FVector3f Position = FVector3f::ZeroVector;
+	/** Direction of travel the object faces, degrees (world yaw); lamps: direction from the pole to the road. */
+	float YawDegrees = 0.f;
+	/** Lamp: mast height m and arm length m. Signal head: pole height m. */
+	float Param0 = 0.f;
+	float Param1 = 0.f;
+	/** Signal head: id of the approach in traffic.json. */
+	uint32 Link = 0;
+
+	static constexpr uint16 NoVariant = 0xFFFF;
+};
+
 /** Terrain and road heights and land cover on the tile's vertex grid (row 0 at the tile's y origin). */
 struct FWorldTileGrid
 {
@@ -125,6 +154,7 @@ struct MAPRUNTIME_API FWorldTileData
 	TArray<FWorldMarking> Markings;
 	TArray<FWorldBuilding> Buildings;
 	TArray<FWorldPlant> Plants;
+	TArray<FWorldPoi> Pois;
 
 	/** Reads a .tgtile file. Returns false and fills Error when the file is missing or malformed. */
 	static bool Load(const FString& Path, FWorldTileData& Out, FString& Error);

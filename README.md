@@ -15,7 +15,8 @@ Most content isn't in this repository: some is third-party, and most is generate
 5. Download the textures with the scripts in `Tools/asset_fetch/` (Poly Haven and ambientCG, all CC0) and import them with `Scripts/import_textures.py`.
 6. Add the free **City Sample Vehicles** pack to your Fab library, then fetch it with `Tools/asset_fetch/fab_download.py "City Sample Vehicles" <dir>` and move its `Content/CitySampleVehicles` into `Content/`.
 7. Bake the trees with `Scripts/bake_vegetation.py`.
-8. Fetch the geodata as described in `GeoData/REPORT.md`, then build and import a map with `Tools/osmimport/build_area.py`, `Scripts/create_materials.py` and `Scripts/import_osm_area.py`.
+8. Build the street furniture: `blender -b --factory-startup -P Tools/furniture/make_models.py -- <data root>/furniture`, then `Scripts/create_furniture_assets.py` for the meshes, sign textures and materials.
+9. Fetch the geodata as described in `GeoData/REPORT.md`, then build and import a map with `Tools/osmimport/build_area.py`, `Scripts/create_materials.py` and `Scripts/import_osm_area.py`.
 
 `CLAUDE.md` documents the whole project in detail: the map pipeline, the car physics, the wheel setup and the tools.
 

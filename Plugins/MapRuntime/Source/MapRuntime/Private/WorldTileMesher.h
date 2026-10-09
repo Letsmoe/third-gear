@@ -4,6 +4,7 @@
 #include "WorldMeshBuilder.h"
 
 struct FWorldTileData;
+struct FWorldFurnitureInstances;
 
 /** How much of a tile is built, by its distance from the viewer. */
 enum class EWorldTileDetail : uint8
@@ -63,6 +64,8 @@ struct FWorldTileMeshes
 	/** Trunk collision cylinders: base point (cm, tile-relative) and diameter (cm). */
 	TArray<FVector> TrunkBases;
 	TArray<float> TrunkDiameters;
+	/** Lamps, signal poles and signs (near detail only), or null. */
+	TSharedPtr<FWorldFurnitureInstances> Furniture;
 };
 
 /**

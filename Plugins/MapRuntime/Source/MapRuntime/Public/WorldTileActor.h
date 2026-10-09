@@ -9,6 +9,23 @@ class UInstancedStaticMeshComponent;
 class UMaterialInterface;
 class UStaticMesh;
 namespace UE::Geometry { class FDynamicMesh3; }
+struct FWorldFurnitureInstances;
+class FTrafficNetwork;
+enum class ESignalAspect : uint8;
+
+/** The street furniture meshes and sign materials, resolved by the world streamer. */
+struct FFurnitureMeshes
+{
+	UStaticMesh* Lamp = nullptr;
+	UStaticMesh* SignalPole = nullptr;
+	UStaticMesh* SignalHead = nullptr;
+	UStaticMesh* SignPlate = nullptr;
+	UStaticMesh* SignClamp = nullptr;
+	/** Sign poles by visible height in cm. */
+	TMap<int32, UStaticMesh*> SignPoles;
+	/** Material per sign graphic name. */
+	TMap<FString, UMaterialInterface*> SignMaterials;
+};
 
 /**
  * The generated content of one world tile at one detail level: ground chunks, markings and buildings as dynamic
@@ -39,6 +56,20 @@ public:
 	void AddTrunkColliders(const TArray<FVector>& Bases, const TArray<float>& Diameters);
 
 	/**
+	 * Adds one part of the tile's street furniture (lamps, signal poles, signal heads, sign poles, one sign graphic ...),
+	 * so spawning it is spread over several steps. Returns true after the last part. Near detail only.
+	 */
+	bool AddFurnitureStep(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes, int32 Step);
+
+	/** Turns on collision for the next furniture component that doesn't have it yet; false when all have it. */
+	bool EnableNextFurnitureCollision();
+
+	/** Sets the lens glow of every signal head to what its signal shows at TimeSeconds of traffic time. */
+	void UpdateSignalHeads(const FTrafficNetwork& Network, double TimeSeconds);
+
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	/**
 	 * The ground chunk without collision nearest to LocationCm and within RadiusCm, or INDEX_NONE.
 	 * OutDistanceCm receives its distance.
 	 */
@@ -59,6 +90,22 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UDynamicMeshComponent>> GroundChunks;
+
+	UInstancedStaticMeshComponent* AddFurnitureInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow, bool bCollision);
+
+	/** Furniture components that block the car once the viewer is close, and how many of them already do. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UInstancedStaticMeshComponent>> FurnitureColliders;
+	int32 FurnitureCollidersEnabled = 0;
+
+	/** Hands the tile's lamp and signal lights to the traffic subsystem and registers the signal heads. */
+	void RegisterFurnitureLights(const FWorldFurnitureInstances& Furniture);
+
+	/** The signal head component and what each of its instances currently shows. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInstancedStaticMeshComponent> SignalHeadComponent;
+	TArray<int32> HeadApproachIds;
+	TArray<uint8> HeadShownAspects;
 
 	TArray<FBox2D> GroundChunkBounds;
 	TArray<bool> GroundChunkHasCollision;
