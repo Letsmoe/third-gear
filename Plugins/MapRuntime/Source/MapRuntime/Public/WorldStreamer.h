@@ -9,6 +9,7 @@ class UMaterialInterface;
 class UStaticMesh;
 class UTexture;
 struct FWorldStreamerShared;
+class FGrassField;
 struct FFurnitureMeshes;
 struct FWorldTileBuild;
 
@@ -106,6 +107,9 @@ private:
 	/** Resolves materials and plant models and measures the models; called once before the first build. */
 	void PrepareAssets();
 
+	/** Loads the swaying materials of one plant model if every slot has one. */
+	void LoadPlantWindMaterials(const FString& ModelKey, const UStaticMesh& PlantMesh);
+
 	/** Loads the street furniture meshes and the sign master material. */
 	void PrepareFurniture();
 
@@ -149,6 +153,9 @@ private:
 
 	UMaterialInterface* FindMaterial(const FString& Section);
 
+	/** Keeps the 3D grass around the viewer up to date (GrassField.h); -NoGrass turns it off. */
+	void UpdateGrass(const FVector& Location);
+
 	TArray<FTileState> Tiles;
 	FString WorldDir;
 	TSharedPtr<class FJsonObject> Start;
@@ -159,6 +166,9 @@ private:
 
 	UPROPERTY(Transient)
 	TMap<FString, TObjectPtr<UStaticMesh>> LoadedPlantModels;
+
+	/** Per plant model, the wind-swaying material for every slot (Scripts/create_tree_wind_materials.py); empty if absent. */
+	TMap<FString, TArray<TObjectPtr<UMaterialInterface>>> LoadedPlantWindMaterials;
 
 	/** Street furniture meshes by asset name, and the sign materials by graphic name. */
 	UPROPERTY(Transient)
@@ -172,6 +182,8 @@ private:
 
 	/** Finished builds being spawned, nearest first. */
 	TArray<TSharedPtr<struct FTileSpawnJob>> SpawnJobs;
+	TSharedPtr<FGrassField> Grass;
+	bool bGrassFailed = false;
 	float SecondsSinceUpdate = 0.f;
 	int32 BuildsInFlight = 0;
 	bool bIndexLoaded = false;
