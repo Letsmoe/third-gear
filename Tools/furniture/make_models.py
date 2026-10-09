@@ -159,8 +159,8 @@ def smoothstep(edge0, edge1, x):
 HEAD_CENTER_Z = 3.0
 CELL_PITCH = 0.305
 HOUSING_FRONT_X = -0.335
-VISOR_LENGTH = 0.25
-VISOR_RADIUS = 0.128
+VISOR_LENGTH = 0.31
+VISOR_RADIUS = 0.132
 
 
 def visor(part, center_z, material):
@@ -172,7 +172,7 @@ def visor(part, center_z, material):
         angle = angle_start + (angle_end - angle_start) * i / steps_angle
         # length along X: full over the top half, shorter toward the open bottom
         height_factor = smoothstep(-0.55, 0.35, math.sin(angle))
-        length = VISOR_LENGTH * (0.30 + 0.70 * height_factor)
+        length = VISOR_LENGTH * (0.22 + 0.78 * height_factor)
         row = []
         for j in range(steps_length + 1):
             x = HOUSING_FRONT_X - length * j / steps_length

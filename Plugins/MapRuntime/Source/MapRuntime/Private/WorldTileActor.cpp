@@ -162,32 +162,33 @@ UInstancedStaticMeshComponent* AWorldTileActor::AddFurnitureInstances(UStaticMes
 	Component->SetCastShadow(bCastShadow);
 	if (bCollision)
 	{
-		Component->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+		// Creating a physics body per instance is the expensive part: it waits until the viewer is near (EnableNextFurnitureCollision).
+		FurnitureColliders.Add(Component);
 	}
 	return Component;
 }
 
-void AWorldTileActor::AddFurniture(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes)
+bool AWorldTileActor::EnableNextFurnitureCollision()
 {
-	AddFurnitureInstances(Meshes.Lamp, Furniture.Lamps, true, true);
-	AddFurnitureInstances(Meshes.SignalPole, Furniture.SignalPoles, true, true);
-	for (const TPair<int32, TArray<FTransform>>& Poles : Furniture.SignPoles)
+	if (FurnitureCollidersEnabled >= FurnitureColliders.Num())
 	{
-		UStaticMesh* const* Mesh = Meshes.SignPoles.Find(Poles.Key);
-		AddFurnitureInstances(Mesh ? *Mesh : nullptr, Poles.Value, true, true);
+		return false;
 	}
-	AddFurnitureInstances(Meshes.SignClamp, Furniture.SignClamps, false, false);
-	for (const TPair<FString, TArray<FTransform>>& Plates : Furniture.SignPlates)
+	FurnitureColliders[FurnitureCollidersEnabled++]->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+	return true;
+}
+
+bool AWorldTileActor::AddFurnitureStep(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes, int32 Step)
+{
+	TArray<TFunction<void()>> Parts;
+	Parts.Add([&]() { AddFurnitureInstances(Meshes.Lamp, Furniture.Lamps, true, true); });
+	Parts.Add([&]() { AddFurnitureInstances(Meshes.SignalPole, Furniture.SignalPoles, true, true); });
+	Parts.Add([&]()
 	{
-		UInstancedStaticMeshComponent* Component = AddFurnitureInstances(Meshes.SignPlate, Plates.Value, false, false);
-		UMaterialInterface* const* Material = Meshes.SignMaterials.Find(Plates.Key);
-		if (Component && Material && *Material)
+		if (!Meshes.SignalHead || Furniture.SignalHeads.IsEmpty())
 		{
-			Component->SetMaterial(0, *Material);
+			return;
 		}
-	}
-	if (Meshes.SignalHead && !Furniture.SignalHeads.IsEmpty())
-	{
 		// Lens glow comes from three per-instance floats (red, amber, green) that UpdateSignalHeads keeps current.
 		UInstancedStaticMeshComponent* Component = NewObject<UInstancedStaticMeshComponent>(this);
 		Component->SetStaticMesh(Meshes.SignalHead);
@@ -199,7 +200,35 @@ void AWorldTileActor::AddFurniture(const FWorldFurnitureInstances& Furniture, co
 		SignalHeadComponent = Component;
 		HeadApproachIds = Furniture.HeadApproaches;
 		HeadShownAspects.Init(255, HeadApproachIds.Num());
+	});
+	for (const TPair<int32, TArray<FTransform>>& Poles : Furniture.SignPoles)
+	{
+		Parts.Add([&]()
+		{
+			UStaticMesh* const* Mesh = Meshes.SignPoles.Find(Poles.Key);
+			AddFurnitureInstances(Mesh ? *Mesh : nullptr, Poles.Value, true, true);
+		});
 	}
+	Parts.Add([&]() { AddFurnitureInstances(Meshes.SignClamp, Furniture.SignClamps, false, false); });
+	for (const TPair<FString, TArray<FTransform>>& Plates : Furniture.SignPlates)
+	{
+		Parts.Add([&]()
+		{
+			UInstancedStaticMeshComponent* Component = AddFurnitureInstances(Meshes.SignPlate, Plates.Value, false, false);
+			UMaterialInterface* const* Material = Meshes.SignMaterials.Find(Plates.Key);
+			if (Component && Material && *Material)
+			{
+				Component->SetMaterial(0, *Material);
+			}
+		});
+	}
+	Parts.Add([&]() { RegisterFurnitureLights(Furniture); });
+	Parts[Step]();
+	return Step + 1 >= Parts.Num();
+}
+
+void AWorldTileActor::RegisterFurnitureLights(const FWorldFurnitureInstances& Furniture)
+{
 	UTrafficSubsystem* Traffic = GetWorld()->GetSubsystem<UTrafficSubsystem>();
 	if (!Traffic)
 	{
@@ -218,7 +247,6 @@ void AWorldTileActor::AddFurniture(const FWorldFurnitureInstances& Furniture, co
 	if (SignalHeadComponent)
 	{
 		Traffic->RegisterSignalTile(this);
-		bRegisteredWithTraffic = true;
 		UpdateSignalHeads(Traffic->GetNetwork(), Traffic->GetTrafficTime());
 	}
 }

@@ -57,6 +57,8 @@ struct FTileSpawnJob
 	int32 NextStep = 0;
 	double SpawnSeconds = 0.0;
 	double LongestStepSeconds = 0.0;
+	/** Next part of the street furniture to add (see AWorldTileActor::AddFurnitureStep). */
+	int32 FurnitureStep = 0;
 };
 
 /** State shared with worker tasks, which may still finish after the streamer is gone. */
@@ -229,6 +231,16 @@ void AWorldStreamer::PrepareFurniture()
 		}
 	}
 	SignMasterMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/World/Furniture/M_SignFace.M_SignFace"), nullptr, LOAD_NoWarn);
+	// Loading a sign texture the first time a tile needs it stalls that frame, so load them all up front.
+	TArray<FAssetData> Textures;
+	FAssetRegistryModule::GetRegistry().GetAssetsByPath(FName(TEXT("/Game/World/Furniture/Signs")), Textures);
+	for (const FAssetData& Asset : Textures)
+	{
+		if (UTexture* Texture = Cast<UTexture>(Asset.GetAsset()))
+		{
+			SignTextures.Add(Texture);
+		}
+	}
 }
 
 UMaterialInterface* AWorldStreamer::FindSignMaterial(const FString& GraphicName)
@@ -454,7 +466,10 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 			{
 				Furniture.SignMaterials.Add(Plates.Key, FindSignMaterial(Plates.Key));
 			}
-			Actor->AddFurniture(*Meshes.Furniture, Furniture);
+			if (!Actor->AddFurnitureStep(*Meshes.Furniture, Furniture, Job.FurnitureStep++))
+			{
+				--Job.NextStep; // more parts to add: come back to this step
+			}
 		}
 	}
 	else
@@ -535,6 +550,28 @@ void AWorldStreamer::EnableCollisionNear(const FVector& Location, int32 MaxChunk
 			return;
 		}
 		BestActor->EnableChunkCollision(BestChunk, bCookNow);
+	}
+}
+
+void AWorldStreamer::EnableFurnitureCollisionNear(const FVector& Location, int32 MaxComponents)
+{
+	const FVector2D Viewer(Location);
+	int32 Enabled = 0;
+	for (const FTileState& Tile : Tiles)
+	{
+		AWorldTileActor* Actor = Tile.Actor.Get();
+		if (!Actor || Tile.ShownDetail != int32(EWorldTileDetail::Near) || DistanceToBox2D(Tile.Bounds, Viewer) > CollisionDistance)
+		{
+			continue;
+		}
+		while (Enabled < MaxComponents && Actor->EnableNextFurnitureCollision())
+		{
+			++Enabled;
+		}
+		if (Enabled >= MaxComponents)
+		{
+			return;
+		}
 	}
 }
 
@@ -623,6 +660,7 @@ void AWorldStreamer::LoadAroundBlocking(const FVector& Location)
 	}
 	RunSpawnJobs(/*BudgetSeconds=*/MAX_dbl, /*bCookNow=*/true);
 	EnableCollisionNear(Location, MAX_int32, /*bCookNow=*/true);
+	EnableFurnitureCollisionNear(Location, MAX_int32);
 	UE_LOG(LogWorldStreamer, Log, TEXT("Loaded %d tiles around %s in %.2f s"), Builds.Num(), *Location.ToString(),
 		FPlatformTime::Seconds() - StartTime);
 }
@@ -683,6 +721,7 @@ void AWorldStreamer::Tick(float DeltaSeconds)
 	if (bHasViewer)
 	{
 		EnableCollisionNear(Location, 1, /*bCookNow=*/false);
+		EnableFurnitureCollisionNear(Location, 1);
 	}
 	SecondsSinceUpdate += DeltaSeconds;
 	if (bHasViewer && SecondsSinceUpdate >= UpdateIntervalSeconds)

@@ -7,6 +7,7 @@
 class AWorldTileActor;
 class UMaterialInterface;
 class UStaticMesh;
+class UTexture;
 struct FWorldStreamerShared;
 struct FFurnitureMeshes;
 struct FWorldTileBuild;
@@ -131,6 +132,9 @@ private:
 	/** Turns on collision for up to MaxChunks ground chunks near Location, nearest first. */
 	void EnableCollisionNear(const FVector& Location, int32 MaxChunks, bool bCookNow);
 
+	/** Turns on collision for up to MaxComponents street furniture components of tiles within CollisionDistance of Location. */
+	void EnableFurnitureCollisionNear(const FVector& Location, int32 MaxComponents);
+
 	void Unload(FTileState& Tile);
 
 	/** Location the world is generated around: the player's camera, else the first player start. */
@@ -159,6 +163,8 @@ private:
 	TMap<FString, TObjectPtr<UMaterialInterface>> SignMaterials;
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> SignMasterMaterial;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UTexture>> SignTextures;
 
 	/** Finished builds being spawned, nearest first. */
 	TArray<TSharedPtr<struct FTileSpawnJob>> SpawnJobs;

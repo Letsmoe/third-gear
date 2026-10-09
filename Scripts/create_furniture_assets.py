@@ -25,7 +25,7 @@ asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
 
 # material name -> (colour sRGB, roughness, metallic)
 SOLIDS = {
-    "SignalHousing": ((0.20, 0.22, 0.235), 0.5, 0.0),       # RAL 7016 anthracite, powder coated
+    "SignalHousing": ((0.23, 0.25, 0.26), 0.45, 0.0),       # RAL 7016 anthracite, powder coated
     "SignalPole": ((0.62, 0.64, 0.65), 0.55, 0.35),           # hot-dip galvanised
     "FurnitureMetalGalv": ((0.62, 0.64, 0.65), 0.55, 0.35),
     "FurnitureCap": ((0.03, 0.03, 0.03), 0.6, 0.0),
@@ -33,7 +33,7 @@ SOLIDS = {
     "LampHousing": ((0.45, 0.47, 0.48), 0.45, 0.4),
 }
 
-NIGHT_LENS_HLSL = "return Tint * Intensity * lerp(7000.0, 140.0, saturate(Night));"
+NIGHT_LENS_HLSL = "return Tint * Intensity * lerp(7000.0, 60.0, saturate(Night));"
 LAMP_LENS_HLSL = "return Tint * Night * 2500.0;"
 # Retroreflective sheeting returns light toward its source: at night the car's headlight cone lights the face.
 SIGN_RETRO_HLSL = """

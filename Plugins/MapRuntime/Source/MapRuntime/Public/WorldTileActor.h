@@ -55,8 +55,14 @@ public:
 	/** Invisible cylinders at the trunks so the car can hit trees: base points (tile-relative) and diameters, cm. */
 	void AddTrunkColliders(const TArray<FVector>& Bases, const TArray<float>& Diameters);
 
-	/** Adds the lamps, signal poles and heads, and signs of the tile (near detail only). */
-	void AddFurniture(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes);
+	/**
+	 * Adds one part of the tile's street furniture (lamps, signal poles, signal heads, sign poles, one sign graphic ...),
+	 * so spawning it is spread over several steps. Returns true after the last part. Near detail only.
+	 */
+	bool AddFurnitureStep(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes, int32 Step);
+
+	/** Turns on collision for the next furniture component that doesn't have it yet; false when all have it. */
+	bool EnableNextFurnitureCollision();
 
 	/** Sets the lens glow of every signal head to what its signal shows at TimeSeconds of traffic time. */
 	void UpdateSignalHeads(const FTrafficNetwork& Network, double TimeSeconds);
@@ -87,12 +93,19 @@ private:
 
 	UInstancedStaticMeshComponent* AddFurnitureInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow, bool bCollision);
 
+	/** Furniture components that block the car once the viewer is close, and how many of them already do. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UInstancedStaticMeshComponent>> FurnitureColliders;
+	int32 FurnitureCollidersEnabled = 0;
+
+	/** Hands the tile's lamp and signal lights to the traffic subsystem and registers the signal heads. */
+	void RegisterFurnitureLights(const FWorldFurnitureInstances& Furniture);
+
 	/** The signal head component and what each of its instances currently shows. */
 	UPROPERTY(Transient)
 	TObjectPtr<UInstancedStaticMeshComponent> SignalHeadComponent;
 	TArray<int32> HeadApproachIds;
 	TArray<uint8> HeadShownAspects;
-	bool bRegisteredWithTraffic = false;
 
 	TArray<FBox2D> GroundChunkBounds;
 	TArray<bool> GroundChunkHasCollision;
