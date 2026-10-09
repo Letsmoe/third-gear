@@ -162,8 +162,20 @@ def trees_done():
 
 
 def trees_run():
-    """Bakes the engine's sample trees into static Nanite meshes."""
+    """Bakes the engine's sample trees into static Nanite meshes and gives them their wind materials."""
     run_editor_script("bake_vegetation.py")
+    run_editor_script("create_tree_wind_materials.py")
+
+
+def grass_done():
+    """The grass tufts and their materials exist."""
+    return os.path.exists(os.path.join(REPO, "Content", "Grass", "Materials", "M_GrassTuft.uasset"))
+
+
+def grass_run():
+    """Imports the Poly Haven grass tufts and creates the grass materials."""
+    run_editor_script("import_grass_models.py")
+    run_editor_script("create_grass_materials.py")
 
 
 def world_done():
@@ -193,6 +205,7 @@ STEPS = {
     "textures": (textures_done, textures_run),
     "materials": (materials_done, materials_run),
     "trees": (trees_done, trees_run),
+    "grass": (grass_done, grass_run),
     "world": (world_done, world_run),
 }
 

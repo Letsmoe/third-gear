@@ -20,6 +20,7 @@
 #include "Tasks/Task.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "TrafficSubsystem.h"
+#include "GrassField.h"
 #include "WorldFurniture.h"
 #include "WorldTileActor.h"
 #include "WorldTileData.h"
@@ -732,8 +733,43 @@ void AWorldStreamer::BeginPlay()
 	UpdateWanted(Location);
 }
 
+void AWorldStreamer::UpdateGrass(const FVector& Location)
+{
+	if (bGrassFailed || FParse::Param(FCommandLine::Get(), TEXT("NoGrass")))
+	{
+		return;
+	}
+	if (!Grass)
+	{
+		Grass = MakeShared<FGrassField>(this);
+		bGrassFailed = !Grass->LoadAssets();
+		if (bGrassFailed)
+		{
+			Grass.Reset();
+			return;
+		}
+	}
+	Grass->Update(Location, [this](const FBox2D& RectangleCm, TArray<FGrassTileSource>& OutTiles)
+	{
+		for (const FTileState& Tile : Tiles)
+		{
+			if (Tile.bHorizon || !Tile.Data.IsValid() || !Tile.Bounds.Intersect(RectangleCm))
+			{
+				continue;
+			}
+			FGrassTileSource& Source = OutTiles.AddDefaulted_GetRef();
+			Source.BoundsCm = Tile.Bounds;
+			Source.Data = Tile.Data;
+		}
+	});
+}
+
 void AWorldStreamer::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (Grass)
+	{
+		Grass->Clear();
+	}
 	if (Shared)
 	{
 		Shared->bCancelled = true;
@@ -772,6 +808,10 @@ void AWorldStreamer::Tick(float DeltaSeconds)
 	{
 		EnableCollisionNear(Location, 1, /*bCookNow=*/false);
 		EnableFurnitureCollisionNear(Location, 1);
+	}
+	if (bHasViewer)
+	{
+		UpdateGrass(Location);
 	}
 	SecondsSinceUpdate += DeltaSeconds;
 	if (bHasViewer && SecondsSinceUpdate >= UpdateIntervalSeconds)
