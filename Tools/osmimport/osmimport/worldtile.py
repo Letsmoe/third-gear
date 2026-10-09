@@ -30,6 +30,8 @@ Sections:
         SIGNAL_HEAD: link = approach id in traffic.json, param0 pole height m, flags 1 = pole on the left.
         SIGN: variant = name of the graphic (Zeichen_274-30), variant2 = name of an additional sign below it or 0xFFFF.
         Signal junctions, phases and the speed limit ways are in traffic.json next to world.json.
+  LEAF  optional, settled fallen leaves (leaves.py) on the GRID vertex grid: u32 nx, u32 ny, u8 depth[ny*nx] in half
+        centimetres at the peak of leaf fall (0..254; 255 is never written). Readers that don't know it skip it.
 """
 import struct
 import zlib
@@ -111,6 +113,7 @@ class TileWriter:
         self.buildings = []
         self.plants = []
         self.pois = []
+        self.leaf = None
 
     def set_grid(self, terrain, road, cover, cell, holes=None):
         """terrain, road: (ny, nx) heights in metres at the tile's vertex grid; cover: (ny, nx, 3) weights 0..1;
@@ -118,6 +121,7 @@ class TileWriter:
         base = float(np.floor(min(terrain.min(), road.min())))
         to_cm = lambda z: np.clip(np.round((z - base) * 100.0), 0, HOLE - 1).astype("<u2")  # noqa: E731
         ny, nx = terrain.shape
+        self.grid_nx, self.grid_ny = nx, ny
         terrain_cm = to_cm(terrain)
         if holes is not None:
             terrain_cm[holes] = HOLE
@@ -169,6 +173,11 @@ class TileWriter:
         self.pois.append(struct.pack("<BBHHxx6fI", kind, flags, variant, variant2,
                                      x - self.x0, y - self.y0, z, yaw, param0, param1, link))
 
+    def set_leaf_field(self, depth):
+        """depth: (ny, nx) u8 settled leaf depth on the grid's vertices."""
+        ny, nx = depth.shape
+        self.leaf = struct.pack("<II", nx, ny) + np.ascontiguousarray(depth, dtype=np.uint8).tobytes()
+
     def is_empty(self):
         return self.grid is None
 
@@ -177,6 +186,8 @@ class TileWriter:
         for tag, records in ((b"SURF", self.surfaces), (b"MARK", self.markings), (b"BLDG", self.buildings),
                              (b"VEGE", self.plants), (b"POIS", self.pois)):
             sections.append((tag, struct.pack("<I", len(records)) + b"".join(records)))
+        if self.leaf is not None:
+            sections.append((b"LEAF", self.leaf))
         with open(path, "wb") as f:
             f.write(b"TGT1" + struct.pack("<Iddff", VERSION, self.x0, self.y0, self.x1 - self.x0, self.y1 - self.y0))
             f.write(struct.pack("<I", len(sections)))

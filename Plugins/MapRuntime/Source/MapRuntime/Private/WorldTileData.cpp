@@ -118,6 +118,18 @@ void ReadGrid(FByteReader& Reader, FWorldTileGrid& Grid)
 	Reader.GetArray(Grid.Cover, Count * 3);
 }
 
+/** The optional LEAF section: depth per vertex of the GRID section, ignored when its size doesn't match. */
+void ReadLeafField(FByteReader& Reader, FWorldTileGrid& Grid)
+{
+	const uint32 NumX = Reader.Get<uint32>();
+	const uint32 NumY = Reader.Get<uint32>();
+	if (int32(NumX) != Grid.NumX || int32(NumY) != Grid.NumY)
+	{
+		return;
+	}
+	Reader.GetArray(Grid.LeafDepth, int64(NumX) * NumY);
+}
+
 void ReadSurfaces(FByteReader& Reader, TArray<FWorldSurface>& Surfaces)
 {
 	const uint32 Count = Reader.Get<uint32>();
@@ -216,6 +228,7 @@ bool ReadSection(uint32 Tag, TConstArrayView<uint8> Raw, FWorldTileData& Out)
 	{
 	case MakeTag("NAME"): ReadNames(Reader, Out.Names); break;
 	case MakeTag("GRID"): ReadGrid(Reader, Out.Grid); break;
+	case MakeTag("LEAF"): ReadLeafField(Reader, Out.Grid); break;
 	case MakeTag("SURF"): ReadSurfaces(Reader, Out.Surfaces); break;
 	case MakeTag("MARK"): ReadMarkings(Reader, Out.Markings); break;
 	case MakeTag("BLDG"): ReadBuildings(Reader, Out.Buildings); break;
@@ -252,6 +265,22 @@ FColor FWorldTileGrid::CoverAtVertex(int32 X, int32 Y) const
 	Y = FMath::Clamp(Y, 0, NumY - 1);
 	const int32 Index = (Y * NumX + X) * 3;
 	return FColor(Cover[Index], Cover[Index + 1], Cover[Index + 2], 255);
+}
+
+uint8 FWorldTileGrid::LeafDepthAtVertex(int32 X, int32 Y) const
+{
+	if (LeafDepth.IsEmpty())
+	{
+		return NoLeafField;
+	}
+	X = FMath::Clamp(X, 0, NumX - 1);
+	Y = FMath::Clamp(Y, 0, NumY - 1);
+	return LeafDepth[Y * NumX + X];
+}
+
+uint8 FWorldTileGrid::LeafDepthAt(float LocalX, float LocalY) const
+{
+	return LeafDepthAtVertex(FMath::RoundToInt(LocalX / CellSize), FMath::RoundToInt(LocalY / CellSize));
 }
 
 float FWorldTileGrid::SampleBilinear(const TArray<uint16>& Heights, float LocalX, float LocalY) const

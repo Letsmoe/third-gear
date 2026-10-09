@@ -119,6 +119,10 @@ struct FWorldTileGrid
 	TArray<uint16> RoadCm;
 	/** Blend weights meadow, field, forest per vertex, 0..255. */
 	TArray<uint8> Cover;
+	/** Settled fallen leaves at the peak of leaf fall per vertex, half centimetres of depth (compiler: leaves.py).
+	 * Empty when the tile has none; the materials read NoLeafField (255) as "no data". */
+	TArray<uint8> LeafDepth;
+	static constexpr uint8 NoLeafField = 255;
 
 	/** Terrain value of a grid point without ground: horizon tiles leave the region's area to its own tiles. */
 	static constexpr uint16 HoleValue = 0xFFFF;
@@ -137,6 +141,12 @@ struct FWorldTileGrid
 
 	/** Land cover weights at grid vertex. */
 	FColor CoverAtVertex(int32 X, int32 Y) const;
+
+	/** Settled leaf depth at grid vertex, or NoLeafField. */
+	uint8 LeafDepthAtVertex(int32 X, int32 Y) const;
+
+	/** Settled leaf depth at a tile-local position (nearest vertex), or NoLeafField. */
+	uint8 LeafDepthAt(float LocalX, float LocalY) const;
 
 private:
 	float SampleBilinear(const TArray<uint16>& Heights, float LocalX, float LocalY) const;

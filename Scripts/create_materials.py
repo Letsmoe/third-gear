@@ -72,6 +72,9 @@ return lit * warm * interior * lerp(1.0, 0.75, curtain) * lerp(0.8, 3.0, frac(r 
 # Snow and fallen leaves from the season (/Game/World/MPC_Weather SnowCover, FallenLeaves), on level surfaces only.
 # SnowKeep and LeafKeep (instance parameters) say how much a surface holds: traffic clears roads, facades hold none.
 # Snow thins out in patches at its edges; leaves lie in drifts. x = snow, y = leaves.
+# Catch is the vertex colour alpha: the settled leaf depth of the tile (leaves.py) at the peak of leaf fall, 255 = no
+# field (kerbs, facades, old tiles), which keeps the plain noise drifts. With a field, depth in cm times today's
+# FallenLeaves decides: under 0.12 cm nothing, over about 0.9 cm a closed carpet, in between patchy.
 SEASON_MASK_HLSL = """
 float up = saturate((NormalZ - 0.6) / 0.3);
 float2 p = WorldPos.xy / 100.0;
@@ -79,7 +82,13 @@ float n = DgValueNoise(p / 2.3) * 0.6 + DgValueNoise(p / 0.6 + 4.2) * 0.4;
 float snow = saturate((Snow * SnowKeep * 1.25 - 0.25 * n) / 0.08) * up;
 float drift = DgValueNoise(p / 1.1 + 9.7) * 0.7 + DgValueNoise(p / 0.25 + 1.3) * 0.3;
 // Drifts, not a carpet: even at the peak of leaf fall about a third of a pavement or lawn is covered.
-float leaves = saturate((Leaves * LeafKeep * 0.7 - drift + 0.05) / 0.08) * up * (1.0 - snow);
+float leaves = saturate((Leaves * LeafKeep * 0.7 - drift + 0.05) / 0.08);
+if (Catch < 0.999)
+{
+    float settled_cm = Catch * 127.5 * Leaves * LeafKeep;
+    leaves = saturate((settled_cm - 0.12 - 0.5 * drift) / 0.15);
+}
+leaves *= up * (1.0 - snow);
 return float2(snow, leaves);
 """
 # The ground's snow uses the scans only for grain: SNOW_TONE_HLSL brings their brightness to a physical albedo and adds
@@ -310,17 +319,21 @@ def snow_toned(m, samples, x, y):
     return [(tone, ""), (tone, "NormalOut"), (tone, "RoughOut")]
 
 
-def add_season(m, color, rough, normal, snow_keep, leaf_keep):
+def add_season(m, color, rough, normal, snow_keep, leaf_keep, vertex_color=None):
     """Lays snow and fallen leaves over the surface by the season; colour, roughness and normal are (node, pin)
-    pairs, and so are the results. Without the weather collection the inputs pass through unchanged."""
+    pairs, and so are the results. vertex_color: node whose alpha is the settled leaf depth (see SEASON_MASK_HLSL).
+    Without the weather collection the inputs pass through unchanged."""
     collection = unreal.load_asset(WEATHER_COLLECTION) if eal.does_asset_exist(WEATHER_COLLECTION) else None
     if collection is None or tex(SNOW_SET, "BaseColor") is None:
         unreal.log_warning("create_materials: no weather collection or snow textures, no seasons")
         return color, rough, normal
     mask = expr(m, unreal.MaterialExpressionCustom, 400, 1300, code=SEASON_MASK_HLSL,
                 output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT2, description="SeasonMask",
-                inputs=[custom_input(n) for n in ("Snow", "Leaves", "SnowKeep", "LeafKeep", "WorldPos", "NormalZ")])
+                inputs=[custom_input(n) for n in ("Snow", "Leaves", "SnowKeep", "LeafKeep", "WorldPos", "NormalZ", "Catch")])
     mask.set_editor_property("include_file_paths", [TERRAIN_INCLUDE])
+    if vertex_color is None:
+        vertex_color = expr(m, unreal.MaterialExpressionVertexColor, 100, 1900)
+    link(vertex_color, "A", mask, "Catch")
     link(expr(m, unreal.MaterialExpressionCollectionParameter, 100, 1300, collection=collection,
               parameter_name="SnowCover"), "", mask, "Snow")
     link(expr(m, unreal.MaterialExpressionCollectionParameter, 100, 1400, collection=collection,
@@ -542,7 +555,7 @@ def build_master():
     out_rough = switch(rough_glass, rough_scaled, -150, 200)
     out_normal = switch(normal_windows, normal, -150, -100)
     (out_color, _), (out_rough, _), (out_normal, _) = add_season(m, (out_color, ""), (out_rough, ""),
-                                                                 (out_normal, ""), snow_keep=1.0, leaf_keep=0.0)
+                                                                 (out_normal, ""), snow_keep=1.0, leaf_keep=0.0, vertex_color=vcol)
     out_color, out_rough, out_normal = add_wetness(m, out_color, out_rough, out_normal)
     add_lit_windows(m, texcoord, vcol, glass_mask)
     mel.connect_material_property(out_color, "", unreal.MaterialProperty.MP_BASE_COLOR)
@@ -649,11 +662,12 @@ def build_terrain_master():
     custom.set_editor_property("include_file_paths", [TERRAIN_INCLUDE])
     custom.set_editor_property("code", TERRAIN_HLSL)
     link(expr(m, unreal.MaterialExpressionTextureCoordinate, -900, -300), "", custom, "UV")
-    link(expr(m, unreal.MaterialExpressionVertexColor, -900, -200), "", custom, "VC")
+    terrain_colors = expr(m, unreal.MaterialExpressionVertexColor, -900, -200)
+    link(terrain_colors, "", custom, "VC")
     for src, pin in sources:
         link(src, "", custom, pin)
     color, rough, normal = add_season(m, (custom, ""), (custom, "Roughness"), (custom, "Normal"),
-                                      snow_keep=1.0, leaf_keep=1.0)
+                                      snow_keep=1.0, leaf_keep=1.0, vertex_color=terrain_colors)
     mel.connect_material_property(color[0], color[1], unreal.MaterialProperty.MP_BASE_COLOR)
     mel.connect_material_property(normal[0], normal[1], unreal.MaterialProperty.MP_NORMAL)
     mel.connect_material_property(rough[0], rough[1], unreal.MaterialProperty.MP_ROUGHNESS)

@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bootstrap"))
 import data_root  # noqa: E402
 from build_area import MARKING_STYLE, SURFACE_SECTIONS, find_start  # noqa: E402
-from osmimport import buildings, canopy, dem, furniture, geo, landcover, osm, paths, roads, terrain, vegetation  # noqa: E402
+from osmimport import buildings, canopy, dem, furniture, geo, landcover, leaves, osm, paths, roads, terrain, vegetation  # noqa: E402
 from osmimport import worldtile  # noqa: E402
 
 GRID_CELL = 1.0
@@ -320,9 +320,16 @@ def main():
     zebra_nodes = sum(1 for point in data.points if point.tags.get("highway") == "crossing"
                       and (point.tags.get("crossing") in {"zebra", "marked"} or point.tags.get("crossing_ref") == "zebra"))
     log(f"zebra crossings: {len(builder.zebras)} striped of {zebra_nodes} crossing nodes tagged zebra or marked")
+    leaf_field = leaves.LeafField(area, net, surfaces, building_union, plants)
+    leaf_started = time.time()
+    leaf_field.compute()
+    log(f"leaves: settled in {time.time() - leaf_started:.1f} s for {len(list(area.tiles()))} tiles, "
+        f"deepest pile {leaf_field.depth_cm.max():.1f} cm")
+    leaf_field.save_debug(os.path.join(out_dir, "leaves_debug.npz"), plants)
     writers = {(ix, iy): worldtile.TileWriter((x0, y0, x1, y1)) for ix, iy, x0, y0, x1, y1 in area.tiles()}
     for (ix, iy), writer in writers.items():
         write_grid(writer, (writer.x0, writer.y0, writer.x1, writer.y1), ground, net, cover, canopy_grid)
+        writer.set_leaf_field(leaf_field.tile_codes(writer.x0, writer.y0, writer.grid_nx, writer.grid_ny))
         write_surfaces(writer, net, surfaces)
         write_markings(writer, net, zebra_cutout)
     write_stop_lines(writers, traffic["junctions"])

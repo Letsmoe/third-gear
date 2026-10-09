@@ -228,7 +228,9 @@ void BuildTerrain(const FWorldTileData& Tile, const FDetailSettings& Settings, F
 		{
 			const float LocalX = X * Grid.CellSize;
 			const float LocalY = Y * Grid.CellSize;
-			Builder.AddVertex(ToCm(LocalX, LocalY, Grid.TerrainAtVertex(X, Y)), WorldUV(Tile, LocalX, LocalY), Grid.CoverAtVertex(X, Y));
+			FColor Cover = Grid.CoverAtVertex(X, Y);
+			Cover.A = Grid.LeafDepthAtVertex(X, Y);  // settled fallen leaves, scaled by the season in the material
+			Builder.AddVertex(ToCm(LocalX, LocalY, Grid.TerrainAtVertex(X, Y)), WorldUV(Tile, LocalX, LocalY), Cover);
 		}
 	}
 	const int32 Columns = Xs.Num();
@@ -284,7 +286,8 @@ void BuildSurface(const FWorldTileData& Tile, const FWorldSurface& Surface, cons
 	for (const FVector2d& Vertex : Vertices)
 	{
 		const float Z = Tile.SurfaceHeightAt(Surface, Vertex.X, Vertex.Y) + Settings.SurfaceLift;
-		Builder.AddVertex(ToCm(Vertex.X, Vertex.Y, Z), WorldUV(Tile, Vertex.X, Vertex.Y));
+		const uint8 LeafDepth = Tile.Grid.LeafDepthAt(Vertex.X, Vertex.Y);  // alpha: settled fallen leaves
+		Builder.AddVertex(ToCm(Vertex.X, Vertex.Y, Z), WorldUV(Tile, Vertex.X, Vertex.Y), FColor(255, 255, 255, LeafDepth));
 	}
 	for (const FIndex3i& Triangle : Triangles)
 	{
