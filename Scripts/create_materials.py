@@ -681,6 +681,50 @@ PLAIN = {
 }
 
 
+# Worn road paint, one profile for every marking material (zebra bars, lane, edge and stop lines): the masks come from
+# Plugins/MapRuntime/Shaders/Private/MarkingWear.ush. Dirt greys the white, chips show the asphalt (more at the ragged
+# edges), tyre polish darkens and smooths the wheel tracks, and a noise bump roughens the normal.
+MARKING_WEAR_INCLUDE = "/Plugin/MapRuntime/Private/MarkingWear.ush"
+MARKING_WEAR_PREAMBLE = """
+float2 Tilt;
+float3 Wear = DgMarkingWearMasks(WorldPos.xy, LineUV, LineColor.rg, Tilt);
+"""
+MARKING_WEAR_COLOR_HLSL = MARKING_WEAR_PREAMBLE + """
+float3 paint = lerp(Base, float3(0.32, 0.30, 0.27), Wear.x);
+paint = lerp(paint, float3(0.22, 0.22, 0.23), Wear.z * 0.55);
+return lerp(paint, float3(0.06, 0.06, 0.065), Wear.y * 0.9);
+"""
+MARKING_WEAR_ROUGHNESS_HLSL = MARKING_WEAR_PREAMBLE + """
+float rough = lerp(0.62, 0.88, saturate(Wear.x * 1.2));
+rough = lerp(rough, 0.45, Wear.z * 0.6);
+return lerp(rough, 0.92, Wear.y);
+"""
+MARKING_WEAR_NORMAL_HLSL = MARKING_WEAR_PREAMBLE + """
+return normalize(float3(Tilt * 0.6, 1.0));
+"""
+
+
+def add_marking_wear(m, base):
+    """Colour, roughness and normal expressions of worn road paint with the given base colour expression."""
+    world = expr(m, unreal.MaterialExpressionWorldPosition, -900, 0)
+    texcoord = expr(m, unreal.MaterialExpressionTextureCoordinate, -900, 150)
+    vertex_color = expr(m, unreal.MaterialExpressionVertexColor, -900, 300)
+    results = []
+    for code, output, y in ((MARKING_WEAR_COLOR_HLSL, unreal.CustomMaterialOutputType.CMOT_FLOAT3, -100),
+                            (MARKING_WEAR_ROUGHNESS_HLSL, unreal.CustomMaterialOutputType.CMOT_FLOAT1, 250),
+                            (MARKING_WEAR_NORMAL_HLSL, unreal.CustomMaterialOutputType.CMOT_FLOAT3, 450)):
+        node = expr(m, unreal.MaterialExpressionCustom, -400, y, code=code, output_type=output, description="MarkingWear",
+                    inputs=[custom_input("WorldPos"), custom_input("LineUV"), custom_input("LineColor"),
+                            custom_input("Base")])
+        node.set_editor_property("include_file_paths", [TERRAIN_INCLUDE, MARKING_WEAR_INCLUDE])
+        link(world, "", node, "WorldPos")
+        link(texcoord, "", node, "LineUV")
+        link(vertex_color, "", node, "LineColor")
+        link(base, "", node, "Base")
+        results.append(node)
+    return results
+
+
 def build_plain(section, color, roughness, metallic):
     """Single-colour material M_<section>, rebuilt in place."""
     path = f"{FOLDER}/M_{section}"
@@ -692,9 +736,16 @@ def build_plain(section, color, roughness, metallic):
     m.set_editor_property("used_with_nanite", True)
     base = expr(m, unreal.MaterialExpressionConstant3Vector, -400, 0,
                 constant=unreal.LinearColor(*[c ** 2.2 for c in color], 1.0))  # sRGB -> linear
-    mel.connect_material_property(base, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    mel.connect_material_property(expr(m, unreal.MaterialExpressionConstant, -400, 200, r=roughness), "",
-                                  unreal.MaterialProperty.MP_ROUGHNESS)
+    if section.startswith("Marking_"):
+        worn_color, worn_rough, worn_normal = add_marking_wear(m, base)
+        wet_color, wet_rough, wet_normal = add_wetness(m, worn_color, worn_rough, worn_normal)
+        mel.connect_material_property(wet_color, "", unreal.MaterialProperty.MP_BASE_COLOR)
+        mel.connect_material_property(wet_rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+        mel.connect_material_property(wet_normal, "", unreal.MaterialProperty.MP_NORMAL)
+    else:
+        mel.connect_material_property(base, "", unreal.MaterialProperty.MP_BASE_COLOR)
+        mel.connect_material_property(expr(m, unreal.MaterialExpressionConstant, -400, 200, r=roughness), "",
+                                      unreal.MaterialProperty.MP_ROUGHNESS)
     if metallic:
         mel.connect_material_property(expr(m, unreal.MaterialExpressionConstant, -400, 300, r=metallic), "",
                                       unreal.MaterialProperty.MP_METALLIC)
