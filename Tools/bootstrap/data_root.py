@@ -22,6 +22,7 @@ CHECKOUT_LINKS = {
     "Content/CitySampleVehicles": "unreal/CitySampleVehicles",
     "Content/Textures": "unreal/Textures",
     "Content/Vegetation": "unreal/Vegetation",
+    "Content/Grass": "unreal/Grass",
     "Content/World": "unreal/World",
     "DerivedDataCache": "ddc",
     "Tools/osmimport/.venv": "venvs/osmimport",

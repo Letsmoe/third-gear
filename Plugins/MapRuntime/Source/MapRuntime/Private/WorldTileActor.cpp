@@ -102,12 +102,26 @@ UInstancedStaticMeshComponent* AWorldTileActor::AddInstances(UStaticMesh* Mesh, 
 	return Component;
 }
 
-void AWorldTileActor::AddPlants(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, int32 CullDistanceCm)
+void AWorldTileActor::AddPlants(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, int32 CullDistanceCm,
+	const TArray<UMaterialInterface*>& WindMaterials, int32 WindDistanceCm)
 {
-	if (Mesh && !Transforms.IsEmpty())
+	if (!Mesh || Transforms.IsEmpty())
 	{
-		AddInstances(Mesh, Transforms, CullDistanceCm);
+		return;
 	}
+	UInstancedStaticMeshComponent* Component = AddInstances(Mesh, Transforms, CullDistanceCm);
+	if (WindMaterials.IsEmpty())
+	{
+		return;
+	}
+	for (int32 Slot = 0; Slot < WindMaterials.Num(); ++Slot)
+	{
+		Component->SetMaterial(Slot, WindMaterials[Slot]);
+	}
+	Component->SetWorldPositionOffsetDisableDistance(WindDistanceCm);
+	// Swaying trees would otherwise be re-rendered into the virtual shadow maps every frame (about 14 ms in the park
+	// of bergedorf_core at VR resolution). Their shadows stay at the rest pose, which a few centimetres of sway don't show.
+	Component->ShadowCacheInvalidationBehavior = EShadowCacheInvalidationBehavior::Static;
 }
 
 void AWorldTileActor::AddTrunkColliders(const TArray<FVector>& Bases, const TArray<float>& Diameters)

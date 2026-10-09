@@ -1,0 +1,127 @@
+// Wind sway for vegetation materials (Custom node IncludeFilePaths "/Plugin/MapRuntime/Private/WindSway.ush").
+// Positions and offsets are in Unreal centimetres; wind comes from MPC_Weather (WindSpeed in m/s including gusts,
+// WindDirection as a world-space unit vector pointing where the wind blows).
+#pragma once
+
+float DgWindHash(float2 q)
+{
+	q = frac(q * float2(123.34, 456.21));
+	q += dot(q, q + 45.32);
+	return frac(q.x * q.y);
+}
+
+// Smooth value noise in [0, 1], one feature per unit.
+float DgWindNoise(float2 q)
+{
+	float2 i = floor(q);
+	float2 f = frac(q);
+	f = f * f * (3 - 2 * f);
+	return lerp(lerp(DgWindHash(i), DgWindHash(i + float2(1, 0)), f.x), lerp(DgWindHash(i + float2(0, 1)), DgWindHash(i + 1), f.x), f.y);
+}
+
+// Gusts are patches about 30 m across that travel with the wind, so a gust crosses the scene instead of the whole
+// scene pulsing at once. Returns 0..1.
+float DgWindGustPatch(float2 worldPositionCm, float2 windDirection, float seconds)
+{
+	const float GustTravelMetresPerSecond = 7.0;
+	const float GustSizeMetres = 30.0;
+	float2 travelled = worldPositionCm * 0.01 - windDirection * GustTravelMetresPerSecond * seconds;
+	float large = DgWindNoise(travelled / GustSizeMetres);
+	float small = DgWindNoise(travelled / (GustSizeMetres * 0.37) + 17.3);
+	return saturate(large * 0.75 + small * 0.25);
+}
+
+// Wind speed at a position in m/s: the mean-plus-gust speed from the weather, modulated by the travelling gust patches.
+float DgWindLocalSpeed(float2 worldPositionCm, float2 windDirection, float windSpeed, float seconds)
+{
+	float patch = DgWindGustPatch(worldPositionCm, windDirection, seconds);
+	return windSpeed * (0.55 + 0.9 * patch);
+}
+
+// Two incommensurate sines: an oscillation that does not visibly repeat.
+float DgWindOscillation(float seconds, float frequencyHertz, float phase)
+{
+	const float TwoPi = 6.2831853;
+	return 0.65 * sin(TwoPi * frequencyHertz * seconds + phase) + 0.35 * sin(TwoPi * frequencyHertz * 1.618 * seconds + phase * 2.3 + 1.1);
+}
+
+// Sway of a tree in world-space centimetres.
+//   localPosition      vertex in the tree's own space (cm), origin at the trunk base, z up
+//   treeHeightCm       height of the unscaled model; crownRadiusCm its horizontal reach
+//   worldHeightCm      the same height as placed in the world (scale applied)
+//   trunkBend, branchSway, leafFlutter  0..1 weights per material (bark on the trunk and boughs, foliage, ...)
+//   fadeDistanceCm     sway fades out towards this camera distance, where the engine stops evaluating it
+float3 DgTreeWind(float3 worldPosition, float3 localPosition, float3 cameraPosition, float seconds, float instanceRandom,
+	float windSpeed, float2 windDirection, float treeHeightCm, float crownRadiusCm, float worldHeightCm,
+	float trunkBend, float branchSway, float leafFlutter, float fadeDistanceCm)
+{
+	const float TwoPi = 6.2831853;
+	float fade = 1.0 - smoothstep(fadeDistanceCm * 0.5, fadeDistanceCm, distance(worldPosition, cameraPosition));
+	float localSpeed = DgWindLocalSpeed(worldPosition.xy, windDirection, windSpeed, seconds);
+	// Dynamic pressure grows with the square of the speed; 10 m/s (a fresh breeze) is the reference.
+	float load = (localSpeed * localSpeed) / 100.0;
+	float2 acrossWind = float2(-windDirection.y, windDirection.x);
+	float phase = instanceRandom * TwoPi;
+	float heightFraction = saturate(localPosition.z / max(treeHeightCm, 1.0));
+	float reachFraction = saturate(length(localPosition.xy) / max(crownRadiusCm, 1.0));
+	float worldHeightMetres = worldHeightCm * 0.01;
+
+	// Trunk: the whole tree leans with the mean wind and rocks at its natural frequency (a 12 m tree about 0.3 Hz).
+	// The tip of a tree moves about 3 % of its height at 10 m/s.
+	float trunkFrequency = clamp(3.6 / max(worldHeightMetres, 3.0), 0.12, 0.7);
+	float bendShape = pow(heightFraction, 1.8);
+	float lean = 0.03 * worldHeightCm * load * bendShape * trunkBend;
+	float rockAlong = DgWindOscillation(seconds, trunkFrequency, phase);
+	float rockAcross = DgWindOscillation(seconds, trunkFrequency * 0.83, phase + 2.0);
+	float2 trunk = windDirection * lean * (1.0 + 0.45 * rockAlong) + acrossWind * lean * 0.25 * rockAcross;
+
+	// Boughs: swing faster than the trunk, more the further out and higher up they are, out of phase with each other.
+	float boughPhase = phase + dot(localPosition.xy, float2(0.021, 0.017)) + localPosition.z * 0.004;
+	float boughFrequency = 0.9 + 0.8 * frac(instanceRandom * 7.31);
+	float boughWeight = reachFraction * smoothstep(0.1, 0.55, heightFraction) * branchSway;
+	float boughAmplitude = 0.011 * worldHeightCm * load * boughWeight;
+	float boughAlong = DgWindOscillation(seconds, boughFrequency, boughPhase);
+	float boughAcross = DgWindOscillation(seconds, boughFrequency * 0.77, boughPhase + 1.7);
+	float2 bough = windDirection * boughAmplitude * (0.5 + boughAlong) + acrossWind * boughAmplitude * 0.6 * boughAcross;
+
+	// Leaves: small and quick, in all directions, growing with speed more than with pressure.
+	float flutterPhase = dot(worldPosition, float3(0.31, 0.43, 0.27)) + instanceRandom * 40.0;
+	float flutterFrequency = 3.5 + 2.5 * frac(instanceRandom * 3.7);
+	float flutterAmplitude = 2.2 * saturate(localSpeed / 12.0) * leafFlutter * smoothstep(0.2, 0.6, heightFraction);
+	float3 flutter = float3(sin(TwoPi * flutterFrequency * seconds + flutterPhase),
+		cos(TwoPi * flutterFrequency * 1.31 * seconds + flutterPhase * 1.7),
+		sin(TwoPi * flutterFrequency * 0.87 * seconds + flutterPhase * 0.6)) * flutterAmplitude;
+
+	float3 offset = float3(trunk + bough, 0.0) + flutter;
+	// A leaning trunk shortens: keep the tip's length by dropping it a little.
+	offset.z -= dot(trunk, trunk) / max(worldHeightCm, 1.0) * bendShape * 0.5;
+	return offset * fade;
+}
+
+// Sway of a grass tuft in world-space centimetres, relative to the tuft's own position, plus the shrinking that makes
+// tufts vanish with distance (a tuft's random number decides how far out it survives, so density thins out).
+//   tuftHeightCm       height of this tuft as placed in the world
+//   fadeStartCm, fadeEndCm  camera distance range over which tufts disappear
+float3 DgGrassWind(float3 worldPosition, float3 tuftPosition, float3 cameraPosition, float seconds, float instanceRandom,
+	float windSpeed, float2 windDirection, float tuftHeightCm, float fadeStartCm, float fadeEndCm)
+{
+	const float TwoPi = 6.2831853;
+	float3 fromRoot = worldPosition - tuftPosition;
+	float heightFraction = saturate(fromRoot.z / max(tuftHeightCm, 1.0));
+	float survival = 1.0 - smoothstep(fadeStartCm, fadeEndCm, distance(tuftPosition, cameraPosition));
+	float scale = saturate((survival - instanceRandom * 0.9) * 4.0);
+
+	float localSpeed = DgWindLocalSpeed(tuftPosition.xy, windDirection, windSpeed, seconds);
+	float load = (localSpeed * localSpeed) / 100.0;
+	float2 acrossWind = float2(-windDirection.y, windDirection.x);
+	// Waves run through a meadow along the wind: a swell about 4 m long every second or so.
+	float wavePhase = dot(tuftPosition.xy, windDirection) * (TwoPi / 420.0) - TwoPi * 0.9 * seconds;
+	float wave = 0.5 + 0.5 * sin(wavePhase + sin(dot(tuftPosition.xy, acrossWind) * 0.004) * 2.0);
+	float flutter = sin(TwoPi * (1.3 + instanceRandom) * 2.1 * seconds + instanceRandom * 40.0);
+	// Lean with the wind (about 30 % of the height at 10 m/s), swell and flutter on top, growing with height squared.
+	float bend = heightFraction * heightFraction * tuftHeightCm * load * (0.25 + 0.2 * wave + 0.05 * flutter + 0.02);
+	float sideways = heightFraction * heightFraction * tuftHeightCm * load * 0.06 * sin(wavePhase * 1.7 + instanceRandom * 20.0);
+	float2 sway = windDirection * bend + acrossWind * sideways;
+	float3 offset = float3(sway, -dot(sway, sway) / max(tuftHeightCm, 1.0) * 0.5);
+	return (fromRoot + offset) * scale - fromRoot;
+}

@@ -162,22 +162,36 @@ def trees_done():
 
 
 def trees_run():
-    """Bakes the engine's sample trees into static Nanite meshes."""
+    """Bakes the engine's sample trees into static Nanite meshes and gives them their wind materials."""
     run_editor_script("bake_vegetation.py")
+    run_editor_script("create_tree_wind_materials.py")
+
+
+def grass_done():
+    """The grass tufts and their materials exist."""
+    return os.path.exists(os.path.join(REPO, "Content", "Grass", "Materials", "M_GrassTuft.uasset"))
+
+
+def grass_run():
+    """Imports the Poly Haven grass tufts and creates the grass materials."""
+    run_editor_script("import_grass_models.py")
+    run_editor_script("create_grass_materials.py")
 
 
 def world_done():
     """The world data and horizon of every default region have been compiled."""
     return all(os.path.exists(os.path.join(data_root.world_dir(region), "world.json"))
                and os.path.exists(os.path.join(data_root.world_dir(region), "horizon", "horizon.json"))
+               and os.path.exists(os.path.join(data_root.world_dir(region), "lanes.json"))
                for region in WORLD_REGIONS)
 
 
 def world_run():
-    """Compiles the world data tiles the game streams and the low-detail horizon around them."""
+    """Compiles the world data tiles the game streams, the low-detail horizon around them and the AI traffic lanes."""
     for region in WORLD_REGIONS:
         run([data_root.venv_python("osmimport"), "-I", "Tools/osmimport/build_world.py", region])
         run([data_root.venv_python("osmimport"), "-I", "Tools/osmimport/build_horizon_world.py", region])
+        run([data_root.venv_python("osmimport"), "-I", "Tools/osmimport/build_lanes.py", region])
 
 
 STEPS = {
@@ -191,6 +205,7 @@ STEPS = {
     "textures": (textures_done, textures_run),
     "materials": (materials_done, materials_run),
     "trees": (trees_done, trees_run),
+    "grass": (grass_done, grass_run),
     "world": (world_done, world_run),
 }
 
