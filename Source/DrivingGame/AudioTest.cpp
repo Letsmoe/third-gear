@@ -2,6 +2,7 @@
 
 #include "CarAudioComponent.h"
 #include "CarPawn.h"
+#include "CarRadioComponent.h"
 #include "CarSettings.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "WorldSurfaceQuery.h"
@@ -221,6 +222,29 @@ void AAudioTestRunner::AddAmbienceScenes(float StartX)
 	}, [](const FCarTelemetry&) { return true; });
 }
 
+void AAudioTestRunner::AddRadioScenes(float StartX)
+{
+	const auto RadioAction = [this](TFunction<void(UCarRadioComponent&)> Action)
+	{
+		return [this, Action]()
+		{
+			if (UCarRadioComponent* Radio = Car.IsValid() ? Car->GetCarRadio() : nullptr)
+			{
+				Action(*Radio);
+			}
+		};
+	};
+	AddPlace(StartX, -30.f, 0.f, true, 2.f);
+	AddScene(TEXT("radio_first_station"), 16.f, nullptr, nullptr);
+	AddScene(TEXT("radio_next_station"), 16.f, RadioAction([](UCarRadioComponent& Radio) { Radio.NextStation(); }), nullptr);
+	AddScene(TEXT("radio_off"), 4.f, RadioAction([](UCarRadioComponent& Radio) { Radio.ToggleRadio(); }), nullptr);
+	AddScene(TEXT("radio_on_again"), 12.f, RadioAction([](UCarRadioComponent& Radio) { Radio.ToggleRadio(); }), nullptr);
+	AddStep(TEXT("finish_recording"), [this]()
+	{
+		if (UCarAudioComponent* Audio = GetAudio()) { Audio->FinishMixerRecording(); }
+	}, [](const FCarTelemetry&) { return true; });
+}
+
 void AAudioTestRunner::BuildSteps()
 {
 	// -AudioProbe="x,y;x,y": only park the car at these points (metres) and let the audio component log the surface it finds.
@@ -231,6 +255,11 @@ void AAudioTestRunner::BuildSteps()
 		return;
 	}
 	const float StartX = -1900.f;
+	if (FParse::Param(FCommandLine::Get(), TEXT("RadioTest")))
+	{
+		AddRadioScenes(StartX);
+		return;
+	}
 	if (FParse::Param(FCommandLine::Get(), TEXT("AmbienceTest")))
 	{
 		AddAmbienceScenes(StartX);

@@ -42,4 +42,16 @@ public:
 	/** Wind, rain, birds and traffic relative to the master volume, 0..1. For the sound system to read. */
 	UPROPERTY(Config, EditAnywhere, Category = "Audio", meta = (ClampMin = "0", ClampMax = "1"))
 	float AmbienceVolume = 1.f;
+
+	/** Car radio relative to the master volume, 0..1. */
+	UPROPERTY(Config, EditAnywhere, Category = "Audio", meta = (ClampMin = "0", ClampMax = "1"))
+	float RadioVolume = 0.6f;
+
+	/** Whether the radio is switched on. Kept between sessions; it still stays silent while the ignition is off. */
+	UPROPERTY(Config, EditAnywhere, Category = "Audio")
+	bool bRadioOn = false;
+
+	/** Index of the tuned station in URadioSettings::Stations. Kept between sessions. */
+	UPROPERTY(Config, EditAnywhere, Category = "Audio", meta = (ClampMin = "0"))
+	int32 RadioStationIndex = 0;
 };

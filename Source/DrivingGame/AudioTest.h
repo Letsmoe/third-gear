@@ -29,6 +29,8 @@ private:
 	class UCarAudioComponent* GetAudio() const;
 	void AddCruiseScenes(float StartX);
 	void AddAmbienceScenes(float StartX);
+	/** -RadioTest (with -RadioStation=<n>): the first station, the next one, radio off, radio on again. */
+	void AddRadioScenes(float StartX);
 	void AddWeatherScene(const FString& Label, float Seconds, float RainMmPerHour, float WindMps, float ThunderActivity, float SunAltitude,
 		TFunction<void(float)> Extra);
 	void AddSurfaceProbes(const FString& Points);
