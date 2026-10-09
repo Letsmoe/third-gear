@@ -5,6 +5,15 @@
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 
+const TArray<FName>& UCarSettings::GetUserEditableProperties()
+{
+	static const TArray<FName> Names = {
+		GET_MEMBER_NAME_CHECKED(UCarSettings, FfbFullScaleNm),
+		GET_MEMBER_NAME_CHECKED(UCarSettings, FfbMaxForce),
+	};
+	return Names;
+}
+
 UCarSettings::UCarSettings()
 {
 	// Placeholder model: the UE vehicle template sports car (copied to /Game/Vehicles/SportsCar).
@@ -25,6 +34,7 @@ UCarSettings::UCarSettings()
 	Attach(Wheel, TEXT("Phys_Wheel_BL"), -90.f);
 	Attach(Wheel, TEXT("Phys_Wheel_BR"), 90.f);
 	DashboardTextMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Vehicles/Materials/M_DashboardText.M_DashboardText")));
+	MenuPanelMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/UI/M_MenuPanel.M_MenuPanel")));
 	WheelBones = {TEXT("Phys_Wheel_FL"), TEXT("Phys_Wheel_FR"), TEXT("Phys_Wheel_BL"), TEXT("Phys_Wheel_BR")};
 
 	// VW EA211 1.4 TSI 150 PS (CZDA): 250 Nm from 1500 to 3500 rpm, 110 kW from 5000 to 6000 rpm.

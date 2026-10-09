@@ -46,6 +46,9 @@ public:
 
 	FCarSimParams MakeSimParams() const;
 
+	/** Names of the properties the in-game settings menu edits and saves as per-user overrides (the force feedback feel). */
+	static const TArray<FName>& GetUserEditableProperties();
+
 	// ---------------- Assets (swap these to change the car model) ----------------
 
 	/** Skeletal mesh with a physics asset; needs one bone per wheel. */
@@ -86,6 +89,10 @@ public:
 	/** Emissive text material for the readout (Scripts/vehicle_materials.py). */
 	UPROPERTY(Config, EditAnywhere, Category = "Assets")
 	TSoftObjectPtr<UMaterialInterface> DashboardTextMaterial;
+
+	/** Exposure-independent translucent material for the menu panel floating in front of the driver in VR (Scripts/create_menu_material.py). */
+	UPROPERTY(Config, EditAnywhere, Category = "Assets")
+	TSoftObjectPtr<UMaterialInterface> MenuPanelMaterial;
 
 	// ---------------- Chassis ----------------
 
