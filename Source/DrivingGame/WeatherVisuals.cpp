@@ -65,6 +65,17 @@ namespace WeatherVisualsDetail
 	 * atmosphere that lights a real sky, so the clear sky came out about two stops darker than sunlit asphalt.
 	 */
 	constexpr float ClearSkyGain = 1.8f;
+	/**
+	 * Exposure under a closed cloud deck. A thick stratus deck passes only 10 to 25 % of clear-sky illuminance, but
+	 * a camera on auto exposure and the eye both adapt almost completely to it (a clear day is EV100 15 by the
+	 * sunny-16 rule, a thick overcast about EV100 12), so the adaptation goes from 0.75 on clear days to 1.0.
+	 * On top, auto exposure meters for a mid grey while an overcast scene is mostly pale cloud, snow and light
+	 * walls: it ends up about one and a half stops brighter than the nominal metering, which is the compensation photographers
+	 * dial in for snow. Clear days, twilight and night are not touched (both are weighted by Overcast * Daylight).
+	 */
+	constexpr float ClearExposureAdaptation = 0.75f;
+	constexpr float OvercastExposureAdaptation = 1.0f;
+	constexpr float OvercastExposureCompensationEV = 1.5f;
 
 	const TCHAR* RainMaterialPath = TEXT("/Game/World/Materials/M_RainStreaks.M_RainStreaks");
 	const TCHAR* LeavesMaterialPath = TEXT("/Game/World/Materials/M_FallingLeaves.M_FallingLeaves");
@@ -552,8 +563,12 @@ void UWeatherVisualsSubsystem::ApplyExposure()
 	const FIsobarCalendar Calendar = IsobarCalendarAt(Weather->GetWeatherSeconds());
 	const FIsobarSunPosition Position = IsobarSunAtTimeOfDay(WeatherVisualsDetail::MapLatitudeDegrees, Calendar.DayOfYear, Calendar.DayFraction);
 	const float Relative = WeatherVisualsDetail::RelativeGroundIlluminance(float(Position.GetAltitudeDegrees()), SunTransmission(), Current.CloudCover);
-	// The eye adapts only part of the way: a dull day still looks duller than a sunny one.
-	const float EV100 = FMath::Max(WeatherVisualsDetail::CalibratedEV100 + 0.75f * FMath::Log2(FMath::Max(Relative, 1e-6f)), WeatherVisualsDetail::NightEV100);
+	// The eye adapts only part of the way on a clear day: a dull day still looks duller than a sunny one. Under a
+	// closed deck by day the adaptation is almost complete and a compensation applies (see the constants).
+	const float OvercastDaylight = WeatherVisualsDetail::SmoothStep01(0.5f, 1.f, Current.CloudCover) * WeatherVisualsDetail::SmoothStep01(3.f, 10.f, float(Position.GetAltitudeDegrees()));
+	const float Adaptation = FMath::Lerp(WeatherVisualsDetail::ClearExposureAdaptation, WeatherVisualsDetail::OvercastExposureAdaptation, OvercastDaylight);
+	const float Compensation = WeatherVisualsDetail::OvercastExposureCompensationEV * OvercastDaylight;
+	const float EV100 = FMath::Max(WeatherVisualsDetail::CalibratedEV100 + Adaptation * FMath::Log2(FMath::Max(Relative, 1e-6f)) - Compensation, WeatherVisualsDetail::NightEV100);
 	Volume->Settings.AutoExposureMinBrightness = EV100;
 	Volume->Settings.AutoExposureMaxBrightness = EV100;
 	// The VR menu panel cancels the exposure with an explicit gain (GameMenuPanel.cpp); keep it in step.
