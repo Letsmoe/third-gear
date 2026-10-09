@@ -12,6 +12,7 @@
 #include "IsobarTime.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
+#include "HAL/IConsoleManager.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "WeatherSubsystem.h"
@@ -368,6 +369,12 @@ void UWeatherVisualsSubsystem::ApplyExposure()
 	const float EV100 = FMath::Max(WeatherVisualsDetail::CalibratedEV100 + 0.75f * FMath::Log2(FMath::Max(Relative, 1e-6f)), WeatherVisualsDetail::NightEV100);
 	Volume->Settings.AutoExposureMinBrightness = EV100;
 	Volume->Settings.AutoExposureMaxBrightness = EV100;
+	// The VR menu panel cancels the exposure with an explicit gain (GameMenuPanel.cpp); keep it in step.
+	static IConsoleVariable* PanelExposure = IConsoleManager::Get().FindConsoleVariable(TEXT("dg.MenuPanelExposureEv"));
+	if (PanelExposure)
+	{
+		PanelExposure->Set(EV100, ECVF_SetByCode);
+	}
 }
 
 void UWeatherVisualsSubsystem::ApplyMaterialParameters()
