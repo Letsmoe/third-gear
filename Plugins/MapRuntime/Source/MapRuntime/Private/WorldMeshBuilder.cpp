@@ -119,58 +119,114 @@ void FWorldMeshBuilder::AddQuad(int32 A, int32 B, int32 C, int32 D, int32 Materi
 	AddTriangle(A, C, D, Material, FacingHint);
 }
 
-FDynamicMesh3 FWorldMeshBuilder::ToDynamicMesh() const
+namespace
 {
-	const TArray<FVector3f> Normals = ComputeVertexNormals(Positions, Triangles);
-	const FTangentFrames Frames = ComputeTangentFrames(Positions, UVs, Triangles, Normals);
-
-	FDynamicMesh3 Mesh;
-	Mesh.EnableAttributes();
-	FDynamicMeshAttributeSet& Attributes = *Mesh.Attributes();
-	Attributes.EnablePrimaryColors();
-	Attributes.EnableMaterialID();
-	Attributes.EnableTangents();
-	FDynamicMeshUVOverlay& UVOverlay = *Attributes.PrimaryUV();
-	FDynamicMeshNormalOverlay& NormalOverlay = *Attributes.PrimaryNormals();
-	FDynamicMeshNormalOverlay& TangentOverlay = *Attributes.PrimaryTangents();
-	FDynamicMeshNormalOverlay& BitangentOverlay = *Attributes.PrimaryBiTangents();
-	FDynamicMeshColorOverlay& ColorOverlay = *Attributes.PrimaryColors();
-	FDynamicMeshMaterialAttribute& MaterialIDs = *Attributes.GetMaterialID();
-
-	// Mesh vertex and overlay element per builder vertex; splitting a vertex appends a copy of both.
-	const auto AppendCopy = [&](int32 Source) -> int32
+/** Writes triangles of a builder into one dynamic mesh, copying each builder vertex in on first use. */
+class FDynamicMeshWriter
+{
+public:
+	FDynamicMeshWriter(const TArray<FVector3f>& InPositions, const TArray<FVector2f>& InUVs, const TArray<FColor>& InColors,
+		const TArray<FVector3f>& InNormals, const FTangentFrames& InFrames)
+		: Positions(InPositions), UVs(InUVs), Colors(InColors), Normals(InNormals), Frames(InFrames)
 	{
-		const int32 Vertex = Mesh.AppendVertex(FVector3d(Positions[Source]));
-		UVOverlay.AppendElement(UVs[Source]);
-		NormalOverlay.AppendElement(Normals[Source]);
-		TangentOverlay.AppendElement(Frames.Tangents[Source]);
-		BitangentOverlay.AppendElement(Frames.Bitangents[Source]);
-		ColorOverlay.AppendElement(FVector4f(Colors[Source].R / 255.f, Colors[Source].G / 255.f, Colors[Source].B / 255.f, Colors[Source].A / 255.f));
-		return Vertex;
-	};
-	for (int32 Index = 0; Index < Positions.Num(); ++Index)
-	{
-		AppendCopy(Index); // element IDs equal vertex IDs for these
+		Mesh.EnableAttributes();
+		FDynamicMeshAttributeSet& Attributes = *Mesh.Attributes();
+		Attributes.EnablePrimaryColors();
+		Attributes.EnableMaterialID();
+		Attributes.EnableTangents();
+		VertexMap.Init(INDEX_NONE, Positions.Num());
 	}
-	for (int32 Index = 0; Index < Triangles.Num(); ++Index)
+
+	/** Adds a triangle of builder vertices; vertices that would make an edge non-manifold are split. */
+	void AddTriangle(const FIntVector3& Source, int32 Material)
 	{
-		FIndex3i Triangle(Triangles[Index].X, Triangles[Index].Y, Triangles[Index].Z);
+		FIndex3i Triangle(VertexFor(Source.X), VertexFor(Source.Y), VertexFor(Source.Z));
 		int32 TriangleID = Mesh.AppendTriangle(Triangle);
 		if (TriangleID == FDynamicMesh3::NonManifoldID)
 		{
-			Triangle = FIndex3i(AppendCopy(Triangle.A), AppendCopy(Triangle.B), AppendCopy(Triangle.C));
+			Triangle = FIndex3i(AppendCopy(Source.X), AppendCopy(Source.Y), AppendCopy(Source.Z));
 			TriangleID = Mesh.AppendTriangle(Triangle);
 		}
 		if (TriangleID < 0)
 		{
-			continue;
+			return;
 		}
-		UVOverlay.SetTriangle(TriangleID, Triangle);
-		NormalOverlay.SetTriangle(TriangleID, Triangle);
-		TangentOverlay.SetTriangle(TriangleID, Triangle);
-		BitangentOverlay.SetTriangle(TriangleID, Triangle);
-		ColorOverlay.SetTriangle(TriangleID, Triangle);
-		MaterialIDs.SetValue(TriangleID, TriangleMaterials[Index]);
+		FDynamicMeshAttributeSet& Attributes = *Mesh.Attributes();
+		Attributes.PrimaryUV()->SetTriangle(TriangleID, Triangle);
+		Attributes.PrimaryNormals()->SetTriangle(TriangleID, Triangle);
+		Attributes.PrimaryTangents()->SetTriangle(TriangleID, Triangle);
+		Attributes.PrimaryBiTangents()->SetTriangle(TriangleID, Triangle);
+		Attributes.PrimaryColors()->SetTriangle(TriangleID, Triangle);
+		Attributes.GetMaterialID()->SetValue(TriangleID, Material);
 	}
-	return Mesh;
+
+	FDynamicMesh3 Mesh;
+
+private:
+	/** This mesh's copy of a builder vertex, created on first use. Element IDs equal vertex IDs. */
+	int32 VertexFor(int32 Source)
+	{
+		if (VertexMap[Source] == INDEX_NONE)
+		{
+			VertexMap[Source] = AppendCopy(Source);
+		}
+		return VertexMap[Source];
+	}
+
+	int32 AppendCopy(int32 Source)
+	{
+		FDynamicMeshAttributeSet& Attributes = *Mesh.Attributes();
+		const int32 Vertex = Mesh.AppendVertex(FVector3d(Positions[Source]));
+		Attributes.PrimaryUV()->AppendElement(UVs[Source]);
+		Attributes.PrimaryNormals()->AppendElement(Normals[Source]);
+		Attributes.PrimaryTangents()->AppendElement(Frames.Tangents[Source]);
+		Attributes.PrimaryBiTangents()->AppendElement(Frames.Bitangents[Source]);
+		const FColor& Color = Colors[Source];
+		Attributes.PrimaryColors()->AppendElement(FVector4f(Color.R / 255.f, Color.G / 255.f, Color.B / 255.f, Color.A / 255.f));
+		return Vertex;
+	}
+
+	const TArray<FVector3f>& Positions;
+	const TArray<FVector2f>& UVs;
+	const TArray<FColor>& Colors;
+	const TArray<FVector3f>& Normals;
+	const FTangentFrames& Frames;
+	/** Builder vertex to this mesh's vertex, or INDEX_NONE. */
+	TArray<int32> VertexMap;
+};
+}
+
+FDynamicMesh3 FWorldMeshBuilder::ToDynamicMesh() const
+{
+	TArray<FDynamicMesh3> Meshes = ToDynamicMeshes(1, [](const FVector3f&) { return 0; });
+	return MoveTemp(Meshes[0]);
+}
+
+TArray<FDynamicMesh3> FWorldMeshBuilder::ToDynamicMeshes(int32 NumChunks, TFunctionRef<int32(const FVector3f&)> ChunkOf) const
+{
+	// Normals and tangents come from the whole mesh, so chunk borders don't show as lighting seams.
+	const TArray<FVector3f> Normals = ComputeVertexNormals(Positions, Triangles);
+	const FTangentFrames Frames = ComputeTangentFrames(Positions, UVs, Triangles, Normals);
+	// Reserved up front: TArray moves elements bitwise when it grows, which would break the pointer each mesh's
+	// attribute set keeps to its mesh.
+	TArray<FDynamicMeshWriter> Writers;
+	Writers.Reserve(NumChunks);
+	for (int32 Chunk = 0; Chunk < NumChunks; ++Chunk)
+	{
+		Writers.Emplace(Positions, UVs, Colors, Normals, Frames);
+	}
+	for (int32 Index = 0; Index < Triangles.Num(); ++Index)
+	{
+		const FIntVector3& Triangle = Triangles[Index];
+		const FVector3f Centroid = (Positions[Triangle.X] + Positions[Triangle.Y] + Positions[Triangle.Z]) / 3.f;
+		const int32 Chunk = FMath::Clamp(ChunkOf(Centroid), 0, NumChunks - 1);
+		Writers[Chunk].AddTriangle(Triangle, TriangleMaterials[Index]);
+	}
+	TArray<FDynamicMesh3> Meshes;
+	Meshes.Reserve(NumChunks);
+	for (FDynamicMeshWriter& Writer : Writers)
+	{
+		Meshes.Add(MoveTemp(Writer.Mesh));
+	}
+	return Meshes;
 }

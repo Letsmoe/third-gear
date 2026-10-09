@@ -54,9 +54,13 @@ public:
 	UPROPERTY(EditAnywhere, Category = "World")
 	int32 MaxBuildsInFlight = 4;
 
-	/** Finished tiles spawned per frame at most, to keep frame times even. */
+	/** Game thread time per frame for turning finished tiles into components, ms (at least one step runs). */
 	UPROPERTY(EditAnywhere, Category = "World")
-	int32 MaxSpawnsPerFrame = 1;
+	float SpawnBudgetMs = 2.f;
+
+	/** Ground chunks of near tiles get collision within this distance of the viewer, cm. */
+	UPROPERTY(EditAnywhere, Category = "World")
+	float CollisionDistance = 15000.f;
 
 	/** Where the world data says the drive starts (on a road, facing along it), at eye height. False without data. */
 	bool GetStartTransform(FTransform& OutTransform);
@@ -91,14 +95,29 @@ private:
 	/** Resolves materials and plant models and measures the models; called once before the first build. */
 	void PrepareAssets();
 
+	/** Loads every M_* material in MaterialFolder up front. */
+	void PreloadMaterials();
+
 	/** Detail level the tile should have for a viewer at Location (cm), or -1 to unload it. */
 	int32 WantedDetail(const FTileState& Tile, const FVector2D& Location) const;
 
 	/** Starts meshing a tile on a worker thread. */
 	void StartBuild(int32 TileIndex, int32 Detail);
 
-	/** Replaces a tile's actor with the finished build. */
-	void ApplyBuild(FWorldTileBuild& Build, bool bCookNow);
+	/** Queues a finished build for spawning; false when it is stale or failed. */
+	bool AcceptBuild(const TSharedPtr<FWorldTileBuild>& Build);
+
+	/**
+	 * Does the next piece of a spawn job: spawning the actor, one ground chunk, the markings, the buildings, one
+	 * plant model, and finally swapping it in for the tile's previous actor. True when the job is finished or dropped.
+	 */
+	bool RunSpawnStep(struct FTileSpawnJob& Job, bool bCookNow);
+
+	/** Runs spawn steps, nearest tile first, until BudgetSeconds have passed (at least one step). */
+	void RunSpawnJobs(double BudgetSeconds, bool bCookNow);
+
+	/** Turns on collision for up to MaxChunks ground chunks near Location, nearest first. */
+	void EnableCollisionNear(const FVector& Location, int32 MaxChunks, bool bCookNow);
 
 	void Unload(FTileState& Tile);
 
@@ -121,8 +140,8 @@ private:
 	UPROPERTY(Transient)
 	TMap<FString, TObjectPtr<UStaticMesh>> LoadedPlantModels;
 
-	/** Finished builds waiting to be spawned, nearest first. */
-	TArray<TSharedPtr<FWorldTileBuild>> ReadyBuilds;
+	/** Finished builds being spawned, nearest first. */
+	TArray<TSharedPtr<struct FTileSpawnJob>> SpawnJobs;
 	float SecondsSinceUpdate = 0.f;
 	int32 BuildsInFlight = 0;
 	bool bIndexLoaded = false;

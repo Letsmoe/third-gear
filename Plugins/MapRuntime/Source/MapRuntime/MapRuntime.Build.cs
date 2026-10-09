@@ -21,6 +21,7 @@ public class MapRuntime : ModuleRules
 			"GeometryFramework",
 			"GeometryAlgorithms",
 			"Json",
+			"AssetRegistry",
 		});
 	}
 }

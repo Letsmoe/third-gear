@@ -4,12 +4,17 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "UDynamicMesh.h"
-#include "WorldTileMesher.h"
 
 namespace
 {
-constexpr int32 ShrubCullDistanceCm = 40000;
 constexpr float TrunkColliderHeightCm = 400.f;
+
+/** Shortest distance from a point to a rectangle (0 inside). */
+double DistanceToBox(const FBox2D& Box, const FVector2D& Point)
+{
+	const FVector2D Clamped(FMath::Clamp(Point.X, Box.Min.X, Box.Max.X), FMath::Clamp(Point.Y, Box.Min.Y, Box.Max.Y));
+	return FVector2D::Distance(Clamped, Point);
+}
 }
 
 AWorldTileActor::AWorldTileActor()
@@ -28,34 +33,53 @@ void AWorldTileActor::RegisterNew(UPrimitiveComponent* Component)
 	AddInstanceComponent(Component);
 }
 
-UDynamicMeshComponent* AWorldTileActor::AddMeshComponent(const TCHAR* Name, UE::Geometry::FDynamicMesh3&& Mesh,
-	const TArray<UMaterialInterface*>& Materials, bool bCollision, bool bCookNow, bool bCastShadow)
+UDynamicMeshComponent* AWorldTileActor::AddMeshComponent(UE::Geometry::FDynamicMesh3&& Mesh, const TArray<UMaterialInterface*>& Materials,
+	bool bCastShadow)
 {
 	if (Mesh.TriangleCount() == 0)
 	{
 		return nullptr;
 	}
-	UDynamicMeshComponent* Component = NewObject<UDynamicMeshComponent>(this, Name);
+	UDynamicMeshComponent* Component = NewObject<UDynamicMeshComponent>(this);
 	Component->SetTangentsType(EDynamicMeshComponentTangentsMode::ExternallyProvided);
 	Component->SetCastShadow(bCastShadow);
 	Component->GetDynamicMesh()->SetMesh(MoveTemp(Mesh));
 	Component->ConfigureMaterialSet(Materials);
-	if (bCollision)
-	{
-		Component->bUseAsyncCooking = !bCookNow;
-		Component->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
-		Component->SetComplexAsSimpleCollisionEnabled(true, /*bImmediateUpdate=*/false);
-	}
-	else
-	{
-		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	}
+	Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	RegisterNew(Component);
-	if (bCollision)
-	{
-		Component->UpdateCollision(/*bOnlyIfPending=*/false);
-	}
 	return Component;
+}
+
+void AWorldTileActor::EnableCollision(UDynamicMeshComponent* Component, bool bCookNow)
+{
+	Component->bUseAsyncCooking = !bCookNow;
+	Component->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+	Component->SetComplexAsSimpleCollisionEnabled(true, /*bImmediateUpdate=*/false);
+	Component->UpdateCollision(/*bOnlyIfPending=*/false);
+}
+
+void AWorldTileActor::AddGroundChunk(UE::Geometry::FDynamicMesh3&& Mesh, const FBox2D& WorldBoundsCm, const TArray<UMaterialInterface*>& Materials)
+{
+	if (UDynamicMeshComponent* Component = AddMeshComponent(MoveTemp(Mesh), Materials, /*bCastShadow=*/true))
+	{
+		GroundChunks.Add(Component);
+		GroundChunkBounds.Add(WorldBoundsCm);
+		GroundChunkHasCollision.Add(false);
+	}
+}
+
+void AWorldTileActor::AddMarkings(UE::Geometry::FDynamicMesh3&& Mesh, const TArray<UMaterialInterface*>& Materials)
+{
+	AddMeshComponent(MoveTemp(Mesh), Materials, /*bCastShadow=*/false);
+}
+
+void AWorldTileActor::AddBuildings(UE::Geometry::FDynamicMesh3&& Mesh, const TArray<UMaterialInterface*>& Materials, bool bCollision, bool bCookNow)
+{
+	UDynamicMeshComponent* Component = AddMeshComponent(MoveTemp(Mesh), Materials, /*bCastShadow=*/true);
+	if (Component && bCollision)
+	{
+		EnableCollision(Component, bCookNow);
+	}
 }
 
 UInstancedStaticMeshComponent* AWorldTileActor::AddInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, int32 CullDistanceCm)
@@ -70,6 +94,14 @@ UInstancedStaticMeshComponent* AWorldTileActor::AddInstances(UStaticMesh* Mesh, 
 	RegisterNew(Component);
 	Component->AddInstances(Transforms, /*bShouldReturnIndices=*/false, /*bWorldSpace=*/false);
 	return Component;
+}
+
+void AWorldTileActor::AddPlants(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, int32 CullDistanceCm)
+{
+	if (Mesh && !Transforms.IsEmpty())
+	{
+		AddInstances(Mesh, Transforms, CullDistanceCm);
+	}
 }
 
 void AWorldTileActor::AddTrunkColliders(const TArray<FVector>& Bases, const TArray<float>& Diameters)
@@ -93,22 +125,27 @@ void AWorldTileActor::AddTrunkColliders(const TArray<FVector>& Bases, const TArr
 	Component->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
 }
 
-void AWorldTileActor::Populate(FWorldTileMeshes& Meshes, const TArray<UMaterialInterface*>& Materials,
-	const TMap<FString, TObjectPtr<UStaticMesh>>& PlantModels, bool bCollision, bool bCookNow)
+int32 AWorldTileActor::FindChunkNeedingCollision(const FVector2D& LocationCm, double RadiusCm, double& OutDistanceCm) const
 {
-	AddMeshComponent(TEXT("Ground"), MoveTemp(Meshes.GroundMesh), Materials, bCollision, bCookNow, /*bCastShadow=*/true);
-	AddMeshComponent(TEXT("Markings"), MoveTemp(Meshes.MarkingsMesh), Materials, false, false, /*bCastShadow=*/false);
-	AddMeshComponent(TEXT("Buildings"), MoveTemp(Meshes.BuildingsMesh), Materials, bCollision, bCookNow, /*bCastShadow=*/true);
-	for (const FWorldPlantInstances& Group : Meshes.Plants)
+	int32 Best = INDEX_NONE;
+	OutDistanceCm = RadiusCm;
+	for (int32 Chunk = 0; Chunk < GroundChunks.Num(); ++Chunk)
 	{
-		const TObjectPtr<UStaticMesh>* Mesh = PlantModels.Find(Group.Model);
-		if (Mesh && *Mesh && !Group.Transforms.IsEmpty())
+		const double Distance = DistanceToBox(GroundChunkBounds[Chunk], LocationCm);
+		if (!GroundChunkHasCollision[Chunk] && Distance <= OutDistanceCm)
 		{
-			AddInstances(*Mesh, Group.Transforms, Group.Model == TEXT("shrub") ? ShrubCullDistanceCm : 0);
+			Best = Chunk;
+			OutDistanceCm = Distance;
 		}
 	}
-	if (bCollision)
+	return Best;
+}
+
+void AWorldTileActor::EnableChunkCollision(int32 Chunk, bool bCookNow)
+{
+	if (GroundChunks.IsValidIndex(Chunk) && !GroundChunkHasCollision[Chunk])
 	{
-		AddTrunkColliders(Meshes.TrunkBases, Meshes.TrunkDiameters);
+		EnableCollision(GroundChunks[Chunk], bCookNow);
+		GroundChunkHasCollision[Chunk] = true;
 	}
 }

@@ -46,3 +46,4 @@ Tools/wheeltest/wheeltest
 /Content/Developers
 Content/Maps/*
 !Content/Maps/ProvingGround.umap
+!Content/Maps/Streamed.umap

@@ -42,8 +42,15 @@ struct FWorldTileMeshes
 	FWorldMeshBuilder Markings;
 	/** Walls and roofs. */
 	FWorldMeshBuilder Buildings;
-	/** The three builders as dynamic meshes, converted at the end of BuildWorldTileMeshes. */
-	UE::Geometry::FDynamicMesh3 GroundMesh;
+	/**
+	 * The builders as dynamic meshes, converted at the end of BuildWorldTileMeshes. The ground is split into
+	 * ChunksPerSide² square chunks (row-major from the tile corner), so spawning and collision cooking can be
+	 * spread over frames and collision limited to the chunks near the car.
+	 */
+	TArray<UE::Geometry::FDynamicMesh3> GroundChunks;
+	int32 ChunksPerSide = 1;
+	/** Chunk edge lengths in cm. */
+	FVector2f ChunkSizeCm = FVector2f::ZeroVector;
 	UE::Geometry::FDynamicMesh3 MarkingsMesh;
 	UE::Geometry::FDynamicMesh3 BuildingsMesh;
 	TArray<FWorldPlantInstances> Plants;

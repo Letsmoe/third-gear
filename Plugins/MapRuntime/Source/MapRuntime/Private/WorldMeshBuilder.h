@@ -36,6 +36,12 @@ public:
 	 */
 	UE::Geometry::FDynamicMesh3 ToDynamicMesh() const;
 
+	/**
+	 * Like ToDynamicMesh, split into NumChunks meshes by ChunkOf(triangle centroid in cm). Normals and tangents are
+	 * computed before the split, so the pieces join without lighting seams.
+	 */
+	TArray<UE::Geometry::FDynamicMesh3> ToDynamicMeshes(int32 NumChunks, TFunctionRef<int32(const FVector3f&)> ChunkOf) const;
+
 private:
 	TArray<FVector3f> Positions;
 	TArray<FVector2f> UVs;

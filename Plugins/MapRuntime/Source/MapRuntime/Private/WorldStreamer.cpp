@@ -1,5 +1,7 @@
 #include "WorldStreamer.h"
 
+#include "Algo/Sort.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Async/ParallelFor.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Containers/Queue.h"
@@ -26,6 +28,7 @@ namespace
 {
 constexpr float EyeHeightCm = 120.f;
 constexpr float UpdateIntervalSeconds = 0.25f;
+constexpr int32 ShrubCullDistanceCm = 40000;
 }
 
 /** One tile meshed at one detail level by a worker. */
@@ -37,6 +40,18 @@ struct FWorldTileBuild
 	TUniquePtr<FWorldTileMeshes> Meshes;
 	FString Error;
 	double BuildSeconds = 0.0;
+};
+
+/** A finished build being turned into components a few steps per frame (see AWorldStreamer::RunSpawnStep). */
+struct FTileSpawnJob
+{
+	TSharedPtr<FWorldTileBuild> Build;
+	TWeakObjectPtr<AWorldTileActor> Actor;
+	/** Materials by slot; kept alive by AWorldStreamer::Materials. */
+	TArray<UMaterialInterface*> Materials;
+	int32 NextStep = 0;
+	double SpawnSeconds = 0.0;
+	double LongestStepSeconds = 0.0;
 };
 
 /** State shared with worker tasks, which may still finish after the streamer is gone. */
@@ -154,6 +169,22 @@ void AWorldStreamer::PrepareAssets()
 		Context->PlantModelSizes.Add(Model.Key, FVector2f(float(FMath::Max(Size.X, Size.Y)), float(Size.Z)));
 	}
 	MeshingContext = Context;
+	PreloadMaterials();
+}
+
+void AWorldStreamer::PreloadMaterials()
+{
+	// Loading a material the first time a tile needs it stalls that frame for tens of milliseconds.
+	TArray<FAssetData> Assets;
+	FAssetRegistryModule::GetRegistry().GetAssetsByPath(FName(*MaterialFolder), Assets);
+	for (const FAssetData& Asset : Assets)
+	{
+		const FString Name = Asset.AssetName.ToString();
+		if (Name.StartsWith(TEXT("M_")))
+		{
+			FindMaterial(Name.RightChop(2));
+		}
+	}
 }
 
 UMaterialInterface* AWorldStreamer::FindMaterial(const FString& Section)
@@ -237,41 +268,158 @@ void AWorldStreamer::Unload(FTileState& Tile)
 	Tile.PendingDetail = INDEX_NONE;
 }
 
-void AWorldStreamer::ApplyBuild(FWorldTileBuild& Build, bool bCookNow)
+bool AWorldStreamer::AcceptBuild(const TSharedPtr<FWorldTileBuild>& Build)
 {
+	FTileState& Tile = Tiles[Build->TileIndex];
+	if (Build->Detail != Tile.PendingDetail)
+	{
+		return false; // superseded while it was being built
+	}
+	if (!Build->Meshes)
+	{
+		UE_LOG(LogWorldStreamer, Error, TEXT("Tile %s: %s"), *Tile.Path, *Build->Error);
+		Tile.PendingDetail = INDEX_NONE;
+		Tile.FailedDetail = Build->Detail;
+		return false;
+	}
+	Tile.Data = Build->Data;
+	TSharedPtr<FTileSpawnJob> Job = MakeShared<FTileSpawnJob>();
+	Job->Build = Build;
+	SpawnJobs.Add(Job);
+	return true;
+}
+
+bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
+{
+	FWorldTileBuild& Build = *Job.Build;
+	FWorldTileMeshes& Meshes = *Build.Meshes;
 	FTileState& Tile = Tiles[Build.TileIndex];
-	if (Build.Detail != Tile.PendingDetail)
+	AWorldTileActor* Actor = Job.Actor.Get();
+	if (Build.Detail != Tile.PendingDetail || (Job.NextStep > 0 && !Actor))
 	{
-		return; // superseded while it was being built
+		if (Actor)
+		{
+			Actor->Destroy(); // the tile moved on to another detail level, or was unloaded
+		}
+		return true;
 	}
-	Tile.PendingDetail = INDEX_NONE;
-	if (!Build.Meshes)
-	{
-		UE_LOG(LogWorldStreamer, Error, TEXT("Tile %s: %s"), *Tile.Path, *Build.Error);
-		Tile.FailedDetail = Build.Detail;
-		return;
-	}
-	Tile.Data = Build.Data;
 	const double StartTime = FPlatformTime::Seconds();
-	TArray<UMaterialInterface*> SlotMaterials;
-	for (const FString& Name : Build.Meshes->MaterialNames)
+	const bool bNear = Build.Detail == int32(EWorldTileDetail::Near);
+	const int32 Step = Job.NextStep++;
+	const int32 ChunkSteps = Meshes.GroundChunks.Num();
+	const int32 PlantSteps = Meshes.Plants.Num();
+	bool bDone = false;
+	if (Step == 0)
 	{
-		SlotMaterials.Add(FindMaterial(Name));
+		for (const FString& Name : Meshes.MaterialNames)
+		{
+			Job.Materials.Add(FindMaterial(Name));
+		}
+		FActorSpawnParameters Parameters;
+		Parameters.ObjectFlags |= RF_Transient;
+		const FVector Origin(Tile.Data->Origin.X * 100.0, Tile.Data->Origin.Y * 100.0, 0.0);
+		Job.Actor = GetWorld()->SpawnActor<AWorldTileActor>(Origin, FRotator::ZeroRotator, Parameters);
 	}
-	FActorSpawnParameters Parameters;
-	Parameters.ObjectFlags |= RF_Transient;
-	const FVector Origin(Tile.Data->Origin.X * 100.0, Tile.Data->Origin.Y * 100.0, 0.0);
-	AWorldTileActor* Actor = GetWorld()->SpawnActor<AWorldTileActor>(Origin, FRotator::ZeroRotator, Parameters);
-	const bool bCollision = Build.Detail == int32(EWorldTileDetail::Near);
-	Actor->Populate(*Build.Meshes, SlotMaterials, LoadedPlantModels, bCollision, bCookNow);
-	if (AWorldTileActor* Previous = Tile.Actor.Get())
+	else if (Step <= ChunkSteps)
 	{
-		Previous->Destroy();
+		const int32 Chunk = Step - 1;
+		const FVector2D ChunkSize(Meshes.ChunkSizeCm);
+		const FVector2D ChunkMin = Tile.Bounds.Min + FVector2D(Chunk % Meshes.ChunksPerSide, Chunk / Meshes.ChunksPerSide) * ChunkSize;
+		Actor->AddGroundChunk(MoveTemp(Meshes.GroundChunks[Chunk]), FBox2D(ChunkMin, ChunkMin + ChunkSize), Job.Materials);
 	}
-	Tile.Actor = Actor;
-	Tile.ShownDetail = Build.Detail;
-	UE_LOG(LogWorldStreamer, Log, TEXT("Tile %s detail %d: built in %.0f ms, spawned in %.1f ms"),
-		*FPaths::GetBaseFilename(Tile.Path), Build.Detail, Build.BuildSeconds * 1000.0, (FPlatformTime::Seconds() - StartTime) * 1000.0);
+	else if (Step == ChunkSteps + 1)
+	{
+		Actor->AddMarkings(MoveTemp(Meshes.MarkingsMesh), Job.Materials);
+	}
+	else if (Step == ChunkSteps + 2)
+	{
+		Actor->AddBuildings(MoveTemp(Meshes.BuildingsMesh), Job.Materials, bNear, bCookNow);
+	}
+	else if (Step <= ChunkSteps + 2 + PlantSteps)
+	{
+		const FWorldPlantInstances& Group = Meshes.Plants[Step - ChunkSteps - 3];
+		const TObjectPtr<UStaticMesh>* Model = LoadedPlantModels.Find(Group.Model);
+		Actor->AddPlants(Model ? Model->Get() : nullptr, Group.Transforms, Group.Model == TEXT("shrub") ? ShrubCullDistanceCm : 0);
+	}
+	else
+	{
+		if (bNear)
+		{
+			Actor->AddTrunkColliders(Meshes.TrunkBases, Meshes.TrunkDiameters);
+		}
+		if (AWorldTileActor* Previous = Tile.Actor.Get())
+		{
+			Previous->Destroy();
+		}
+		Tile.Actor = Actor;
+		Tile.ShownDetail = Build.Detail;
+		Tile.PendingDetail = INDEX_NONE;
+		bDone = true;
+	}
+	const double StepSeconds = FPlatformTime::Seconds() - StartTime;
+	if (StepSeconds > 0.008)
+	{
+		UE_LOG(LogWorldStreamer, Log, TEXT("Tile %s detail %d: step %d of %d took %.1f ms"), *FPaths::GetBaseFilename(Tile.Path), Build.Detail,
+			Step, ChunkSteps + PlantSteps + 4, StepSeconds * 1000.0);
+	}
+	Job.SpawnSeconds += StepSeconds;
+	Job.LongestStepSeconds = FMath::Max(Job.LongestStepSeconds, StepSeconds);
+	if (bDone)
+	{
+		UE_LOG(LogWorldStreamer, Log, TEXT("Tile %s detail %d: built in %.0f ms, spawned in %.1f ms over %d steps, longest step %.1f ms"),
+			*FPaths::GetBaseFilename(Tile.Path), Build.Detail, Build.BuildSeconds * 1000.0, Job.SpawnSeconds * 1000.0, Job.NextStep,
+			Job.LongestStepSeconds * 1000.0);
+	}
+	return bDone;
+}
+
+void AWorldStreamer::RunSpawnJobs(double BudgetSeconds, bool bCookNow)
+{
+	const double StartTime = FPlatformTime::Seconds();
+	do
+	{
+		if (SpawnJobs.IsEmpty())
+		{
+			return;
+		}
+		if (RunSpawnStep(*SpawnJobs[0], bCookNow))
+		{
+			SpawnJobs.RemoveAt(0);
+		}
+	}
+	while (FPlatformTime::Seconds() - StartTime < BudgetSeconds);
+}
+
+void AWorldStreamer::EnableCollisionNear(const FVector& Location, int32 MaxChunks, bool bCookNow)
+{
+	const FVector2D Viewer(Location);
+	for (int32 Enabled = 0; Enabled < MaxChunks; ++Enabled)
+	{
+		AWorldTileActor* BestActor = nullptr;
+		int32 BestChunk = INDEX_NONE;
+		double BestDistance = CollisionDistance;
+		for (const FTileState& Tile : Tiles)
+		{
+			AWorldTileActor* Actor = Tile.Actor.Get();
+			if (!Actor || Tile.ShownDetail != int32(EWorldTileDetail::Near))
+			{
+				continue;
+			}
+			double Distance = 0.0;
+			const int32 Chunk = Actor->FindChunkNeedingCollision(Viewer, BestDistance, Distance);
+			if (Chunk != INDEX_NONE)
+			{
+				BestActor = Actor;
+				BestChunk = Chunk;
+				BestDistance = Distance;
+			}
+		}
+		if (!BestActor)
+		{
+			return;
+		}
+		BestActor->EnableChunkCollision(BestChunk, bCookNow);
+	}
 }
 
 bool AWorldStreamer::GetViewerLocation(FVector& OutLocation) const
@@ -355,8 +503,10 @@ void AWorldStreamer::LoadAroundBlocking(const FVector& Location)
 	});
 	for (const TSharedPtr<FWorldTileBuild>& Build : Builds)
 	{
-		ApplyBuild(*Build, /*bCookNow=*/true);
+		AcceptBuild(Build);
 	}
+	RunSpawnJobs(/*BudgetSeconds=*/MAX_dbl, /*bCookNow=*/true);
+	EnableCollisionNear(Location, MAX_int32, /*bCookNow=*/true);
 	UE_LOG(LogWorldStreamer, Log, TEXT("Loaded %d tiles around %s in %.2f s"), Builds.Num(), *Location.ToString(),
 		FPlatformTime::Seconds() - StartTime);
 }
@@ -395,26 +545,28 @@ void AWorldStreamer::Tick(float DeltaSeconds)
 		return;
 	}
 	TSharedPtr<FWorldTileBuild> Finished;
+	bool bNewJobs = false;
 	while (Shared->Finished.Dequeue(Finished))
 	{
 		--BuildsInFlight;
-		ReadyBuilds.Add(Finished);
+		bNewJobs |= AcceptBuild(Finished);
 	}
 	FVector Location;
 	const bool bHasViewer = GetViewerLocation(Location);
-	if (bHasViewer && !ReadyBuilds.IsEmpty())
+	if (bHasViewer && bNewJobs)
 	{
+		// Nearest tiles first; a job that has started keeps its place so its actor isn't left half built.
 		const FVector2D Viewer(Location);
-		ReadyBuilds.Sort([&](const TSharedPtr<FWorldTileBuild>& A, const TSharedPtr<FWorldTileBuild>& B)
+		const int32 First = SpawnJobs.Num() > 0 && SpawnJobs[0]->NextStep > 0 ? 1 : 0;
+		Algo::Sort(MakeArrayView(SpawnJobs).Slice(First, SpawnJobs.Num() - First), [&](const TSharedPtr<FTileSpawnJob>& A, const TSharedPtr<FTileSpawnJob>& B)
 		{
-			return DistanceToBox(Tiles[A->TileIndex].Bounds, Viewer) < DistanceToBox(Tiles[B->TileIndex].Bounds, Viewer);
+			return DistanceToBox(Tiles[A->Build->TileIndex].Bounds, Viewer) < DistanceToBox(Tiles[B->Build->TileIndex].Bounds, Viewer);
 		});
 	}
-	for (int32 Spawned = 0; Spawned < MaxSpawnsPerFrame && !ReadyBuilds.IsEmpty(); ++Spawned)
+	RunSpawnJobs(SpawnBudgetMs / 1000.0, /*bCookNow=*/false);
+	if (bHasViewer)
 	{
-		const TSharedPtr<FWorldTileBuild> Build = ReadyBuilds[0];
-		ReadyBuilds.RemoveAt(0);
-		ApplyBuild(*Build, /*bCookNow=*/false);
+		EnableCollisionNear(Location, 1, /*bCookNow=*/false);
 	}
 	SecondsSinceUpdate += DeltaSeconds;
 	if (bHasViewer && SecondsSinceUpdate >= UpdateIntervalSeconds)

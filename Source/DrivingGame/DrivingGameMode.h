@@ -19,7 +19,8 @@ public:
 
 	/**
 	 * True when the free-fly camera pawn (ASeatedVRPawn) is used instead of the car:
-	 * -FreeCam, or the screenshot mode (-Shots=...). Add -SpawnCar to also park a car at the player start.
+	 * -FreeCam, the screenshot mode (-Shots=...) or the streaming test (-StreamTest=...). Add -SpawnCar to also
+	 * park a car at the player start.
 	 */
 	static bool UseFreeCamera();
 

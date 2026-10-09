@@ -33,17 +33,19 @@ struct FDetailSettings
 	float SurfaceLift;
 	/** How far the terrain skirts reach down along tile edges, hiding cracks to coarser neighbours. */
 	float SkirtDepth;
+	/** Ground chunks along each tile edge. */
+	int32 ChunksPerSide;
 };
 
 FDetailSettings SettingsFor(EWorldTileDetail Detail)
 {
 	switch (Detail)
 	{
-	case EWorldTileDetail::Near: return {1, 2.f, 2.f, 0.f, 0.5f};
-	case EWorldTileDetail::Middle: return {4, 8.f, 8.f, 0.15f, 2.f};
-	case EWorldTileDetail::Far: return {8, 0.f, 16.f, 0.3f, 4.f};
+	case EWorldTileDetail::Near: return {1, 2.f, 2.f, 0.f, 0.5f, 4};
+	case EWorldTileDetail::Middle: return {4, 8.f, 8.f, 0.15f, 2.f, 2};
+	case EWorldTileDetail::Far: return {8, 0.f, 16.f, 0.3f, 4.f, 1};
 	}
-	return {1, 2.f, 2.f, 0.f, 0.5f};
+	return {1, 2.f, 2.f, 0.f, 0.5f, 4};
 }
 
 FVector3f ToCm(float LocalX, float LocalY, float Z)
@@ -607,7 +609,16 @@ FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDeta
 		BuildBuilding(Tile, Building, Meshes);
 	}
 	BuildPlants(Tile, Detail, Context, Meshes);
-	Meshes.GroundMesh = Meshes.Ground.ToDynamicMesh();
+	const int32 PerSide = Settings.ChunksPerSide;
+	const FVector2f ChunkSize = Tile.Size * MetresToCm / float(PerSide);
+	Meshes.ChunksPerSide = PerSide;
+	Meshes.ChunkSizeCm = ChunkSize;
+	Meshes.GroundChunks = Meshes.Ground.ToDynamicMeshes(PerSide * PerSide, [&](const FVector3f& Centroid)
+	{
+		const int32 Column = FMath::Clamp(FMath::FloorToInt(Centroid.X / ChunkSize.X), 0, PerSide - 1);
+		const int32 Row = FMath::Clamp(FMath::FloorToInt(Centroid.Y / ChunkSize.Y), 0, PerSide - 1);
+		return Row * PerSide + Column;
+	});
 	Meshes.MarkingsMesh = Meshes.Markings.ToDynamicMesh();
 	Meshes.BuildingsMesh = Meshes.Buildings.ToDynamicMesh();
 	return Meshes;

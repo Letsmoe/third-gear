@@ -7,6 +7,7 @@
 #include "Misc/Parse.h"
 #include "CarPawn.h"
 #include "DriveTest.h"
+#include "StreamTest.h"
 #include "GameFramework/PlayerStart.h"
 #include "SeatedVRPawn.h"
 #include "HAL/FileManager.h"
@@ -23,8 +24,9 @@ ADrivingGameMode::ADrivingGameMode()
 
 bool ADrivingGameMode::UseFreeCamera()
 {
-	FString Shots;
-	return FParse::Param(FCommandLine::Get(), TEXT("FreeCam")) || FParse::Value(FCommandLine::Get(), TEXT("Shots="), Shots);
+	FString Value;
+	return FParse::Param(FCommandLine::Get(), TEXT("FreeCam")) || FParse::Value(FCommandLine::Get(), TEXT("Shots="), Value)
+		|| FParse::Value(FCommandLine::Get(), TEXT("StreamTest="), Value);
 }
 
 UClass* ADrivingGameMode::GetDefaultPawnClassForController_Implementation(AController* InController)
@@ -126,6 +128,13 @@ void ADrivingGameMode::BeginPlay()
 	if (FParse::Param(FCommandLine::Get(), TEXT("DriveTest")) && !UseFreeCamera())
 	{
 		GetWorld()->SpawnActor<ADriveTestRunner>();
+	}
+
+	// Automated run through the generated world (see Scripts/stream_test.sh).
+	FString StreamRoute;
+	if (FParse::Value(FCommandLine::Get(), TEXT("StreamTest="), StreamRoute))
+	{
+		GetWorld()->SpawnActor<AStreamTestRunner>();
 	}
 
 	// Free camera with a parked car to look at (e.g. screenshots of the car model).
