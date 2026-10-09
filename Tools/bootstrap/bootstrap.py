@@ -186,6 +186,17 @@ def grass_run():
     run_editor_script("create_grass_materials.py")
 
 
+def leaves_done():
+    """The leaf card meshes and material exist."""
+    return os.path.exists(os.path.join(REPO, "Content", "Leaves", "M_LeafCard.uasset"))
+
+
+def leaves_run():
+    """Builds the leaf atlas from ambientCG leaf sets, then the leaf card meshes and material."""
+    run([data_root.venv_python("osmimport"), "-I", "Tools/leafatlas/build_leaf_atlas.py"])
+    run_editor_script("create_leaf_assets.py")
+
+
 def world_done():
     """The world data and horizon of every default region have been compiled."""
     return all(os.path.exists(os.path.join(data_root.world_dir(region), "world.json"))
@@ -214,6 +225,7 @@ STEPS = {
     "materials": (materials_done, materials_run),
     "trees": (trees_done, trees_run),
     "grass": (grass_done, grass_run),
+    "leaves": (leaves_done, leaves_run),
     "world": (world_done, world_run),
 }
 
