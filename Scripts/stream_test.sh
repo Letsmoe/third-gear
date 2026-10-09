@@ -3,6 +3,9 @@
 # ("STREAMTEST") and the per-tile build and spawn times. Renders offscreen, so frame times include the GPU.
 # Usage: Scripts/stream_test.sh [region, default bergedorf_core] ["x0,y0,x1,y1" route in metres] [km/h, default 100]
 set -euo pipefail
+# One Unreal run at a time across worktrees (see lock.sh).
+source "$(dirname "$0")/lock.sh"
+hold_lock gpu "$0" "$@"
 
 UE=/mnt/storage/UnrealEngine/5.8.1
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

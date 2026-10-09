@@ -5,6 +5,9 @@
 # Optional env CMDS="cvar 1,cvar2 0" adds console commands.
 # Images land in Saved/Screenshots/shot_NN.png (overwritten each run).
 set -euo pipefail
+# One Unreal run at a time across worktrees (see lock.sh).
+source "$(dirname "$0")/lock.sh"
+hold_lock gpu "$0" "$@"
 
 UE=/mnt/storage/UnrealEngine/5.8.1
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

@@ -3,6 +3,9 @@
 # Usage: Scripts/measure_vram.sh <label> <resx> <resy> [comma-separated console commands] [extra args...]
 # Default resolution matches the Quest 3 / Steam Link stereo target seen in the log (5056x2704, both eyes).
 set -euo pipefail
+# One Unreal run at a time across worktrees (see lock.sh).
+source "$(dirname "$0")/lock.sh"
+hold_lock gpu "$0" "$@"
 
 UE=/mnt/storage/UnrealEngine/5.8.1
 PROJECT="$(cd "$(dirname "$0")/.." && pwd)/DrivingGame.uproject"
