@@ -18,7 +18,7 @@ POM_FUNCTION = "/Engine/Functions/Engine_MaterialFunctions01/Texturing/ParallaxO
 # 0.18, concrete slabs 0.25 to 0.35, red brick paving about 0.25, dark red-brown clinker 0.13 to 0.19.
 # section -> (texture folder/set, tile size m, overrides)
 SECTIONS = {
-    "Road_Asphalt": ("Asphalt/Asphalt015", 2.5, {"tint": (0.85, 0.85), "roughness_scale": 1.4}),
+    "Road_Asphalt": ("Asphalt/Asphalt015", 2.5, {"tint": (0.85, 0.85), "roughness_scale": 1.4, "cracks": 0.5}),
     "Road_Cobble": ("Cobble/cobblestone_floor_08", 2.0, {"parallax": 0.03}),
     "Road_Pavers": ("Pavers/PavingStones092", 2.0, {"tint": (0.9, 0.9), "parallax": 0.015}),
     "Pavement": ("Pavers/concrete_pavement_02", 2.5, {"tint": (1.35, 1.35), "parallax": 0.012}),
@@ -68,6 +68,30 @@ float curtain = step(r2, 0.5) * (1.0 - 0.6 * saturate((abs(pane.x - 0.5) - 0.08)
 float3 warm = lerp(float3(1.0, 0.6, 0.32), float3(1.0, 0.8, 0.6), frac(r2 * 7.13));
 return lit * warm * interior * lerp(1.0, 0.75, curtain) * lerp(0.8, 3.0, frac(r * 3.7 + r2));
 """
+
+# Snow and fallen leaves from the season (/Game/World/MPC_Weather SnowCover, FallenLeaves), on level surfaces only.
+# SnowKeep and LeafKeep (instance parameters) say how much a surface holds: traffic clears roads, facades hold none.
+# Snow thins out in patches at its edges; leaves lie in drifts. x = snow, y = leaves.
+SEASON_MASK_HLSL = """
+float up = saturate((NormalZ - 0.6) / 0.3);
+float2 p = WorldPos.xy / 100.0;
+float n = DgValueNoise(p / 2.3) * 0.6 + DgValueNoise(p / 0.6 + 4.2) * 0.4;
+float snow = saturate((Snow * SnowKeep * 1.25 - 0.25 * n) / 0.08) * up;
+float drift = DgValueNoise(p / 1.1 + 9.7) * 0.7 + DgValueNoise(p / 0.25 + 1.3) * 0.3;
+// Drifts, not a carpet: even at the peak of leaf fall about a third of a pavement or lawn is covered.
+float leaves = saturate((Leaves * LeafKeep * 0.7 - drift + 0.05) / 0.08) * up * (1.0 - snow);
+return float2(snow, leaves);
+"""
+# Untrodden snow by default (lawns, roofs); footways get trodden snow and roads gritted asphalt (SEASON_SNOW_SETS).
+SNOW_SET = "Snow/snow_02"
+SEASON_SNOW_SETS = {"Road_": "Snow/asphalt_snow", "Bridge_": "Snow/asphalt_snow", "Pavement": "Snow/snow_01",
+                    "Path_": "Snow/snow_01"}
+# Section prefix -> (snow kept, leaves kept). Traffic clears roads of both; footways and paths hold everything.
+SEASON_KEEP = {
+    "Road_": (0.55, 0.35), "Bridge_": (0.7, 0.3), "Pavement": (0.9, 1.0), "Path_": (1.0, 1.0), "Kerb": (0.85, 0.8),
+    "Roof_": (1.0, 0.35), "Facade_": (1.0, 0.0),
+}
+LEAF_SET = "Ground/forest_leaves_04"
 
 # Wet surfaces from the weather (/Game/World/MPC_Weather). Ground gets fully wet, walls only damp. Standing water
 # collects in a low-frequency noise mask on level ground once the wetness is high. x = wetness, y = puddle.
@@ -122,6 +146,25 @@ Roughness = rough;
 return col * macro;
 """
 TERRAIN_INCLUDE = "/Plugin/MapRuntime/Private/TerrainNoise.ush"  # DgValueNoise, DG_LAYER
+
+# Road defects (issue 71): cracks, sealed cracks and patches from the generated atlas, scattered by cell hash so they
+# never repeat (Plugins/MapRuntime/Shaders/Private/RoadCracks.ush). Wear sets how many cells hold a defect.
+ROAD_CRACKS_INCLUDE = "/Plugin/MapRuntime/Private/RoadCracks.ush"
+ROAD_CRACKS_SET = "Generated/road_cracks"
+ROAD_CRACKS_HLSL = """
+FDgRoadDefects D = DgRoadDefects(CrackMask, CrackMaskSampler, CrackNormal, CrackNormalSampler, UV, Wear);
+float crack = D.Masks.x;
+float seal = D.Masks.y;
+float patch = D.Masks.z;
+// Cracks hold dirt and shadow; the sealant is black bitumen with a dull sheen.
+// Patches weather to a lighter grey than the road (tone 0) or stay fresh and black (tone 1).
+float3 c = Color * lerp(1.0, lerp(1.45, 0.7, D.Masks.w), patch) * (1.0 - crack * 0.8);
+c = lerp(c, float3(0.03, 0.029, 0.028), seal * 0.85);
+Roughness = lerp(lerp(Rough * lerp(1.0, 0.92, patch), 0.5, seal), 1.0, crack);
+// A patch's fresher surface shows less of its aggregate.
+NormalOut = normalize(float3(Nrm.xy * (1.0 - seal * 0.7) * (1.0 - patch * 0.35) + D.NormalXY, Nrm.z));
+return c;
+"""
 
 mel = unreal.MaterialEditingLibrary
 asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
@@ -192,6 +235,77 @@ def parallax_uv(material, uv, default_height):
     return switch
 
 
+def world_uv(m, tile_cm, x, y):
+    """Texture coordinates from world x and y, one repeat per tile_cm."""
+    world = expr(m, unreal.MaterialExpressionWorldPosition, x - 300, y)
+    xy = expr(m, unreal.MaterialExpressionComponentMask, x - 150, y, r=True, g=True, b=False, a=False)
+    link(world, "", xy, "")
+    uv = expr(m, unreal.MaterialExpressionDivide, x, y, const_b=tile_cm)
+    link(xy, "", uv, "A")
+    return uv
+
+
+def season_samples(m, set_path, tile_cm, x, y, parameter_prefix=None):
+    """Colour, normal and roughness samples of a texture set at world UVs; with a prefix they are texture
+    parameters (<prefix>BaseColor ...) that instances can swap."""
+    uv = world_uv(m, tile_cm, x - 200, y)
+    samples = []
+    for kind, sampler, offset in (("BaseColor", unreal.MaterialSamplerType.SAMPLERTYPE_COLOR, 0),
+                                  ("Normal", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL, 150),
+                                  ("Roughness", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE, 300)):
+        if parameter_prefix:
+            node = tex_param(m, parameter_prefix + kind, tex(set_path, kind), sampler, uv, x, y + offset)
+        else:
+            node = expr(m, unreal.MaterialExpressionTextureSample, x, y + offset, texture=tex(set_path, kind),
+                        sampler_type=sampler)
+            link(uv, "", node, "UVs")
+        samples.append(node)
+    return samples
+
+
+def add_season(m, color, rough, normal, snow_keep, leaf_keep):
+    """Lays snow and fallen leaves over the surface by the season; colour, roughness and normal are (node, pin)
+    pairs, and so are the results. Without the weather collection the inputs pass through unchanged."""
+    collection = unreal.load_asset(WEATHER_COLLECTION) if eal.does_asset_exist(WEATHER_COLLECTION) else None
+    if collection is None or tex(SNOW_SET, "BaseColor") is None:
+        unreal.log_warning("create_materials: no weather collection or snow textures, no seasons")
+        return color, rough, normal
+    mask = expr(m, unreal.MaterialExpressionCustom, 400, 1300, code=SEASON_MASK_HLSL,
+                output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT2, description="SeasonMask",
+                inputs=[custom_input(n) for n in ("Snow", "Leaves", "SnowKeep", "LeafKeep", "WorldPos", "NormalZ")])
+    mask.set_editor_property("include_file_paths", [TERRAIN_INCLUDE])
+    link(expr(m, unreal.MaterialExpressionCollectionParameter, 100, 1300, collection=collection,
+              parameter_name="SnowCover"), "", mask, "Snow")
+    link(expr(m, unreal.MaterialExpressionCollectionParameter, 100, 1400, collection=collection,
+              parameter_name="FallenLeaves"), "", mask, "Leaves")
+    link(scalar(m, "SnowKeep", snow_keep, 100, 1500), "", mask, "SnowKeep")
+    link(scalar(m, "LeafKeep", leaf_keep, 100, 1600), "", mask, "LeafKeep")
+    link(expr(m, unreal.MaterialExpressionWorldPosition, 100, 1700), "", mask, "WorldPos")
+    vertex_normal = expr(m, unreal.MaterialExpressionVertexNormalWS, 0, 1800)
+    normal_z = expr(m, unreal.MaterialExpressionComponentMask, 150, 1800, r=False, g=False, b=True, a=False)
+    link(vertex_normal, "", normal_z, "")
+    link(normal_z, "", mask, "NormalZ")
+    snow_mask = expr(m, unreal.MaterialExpressionComponentMask, 600, 1300, r=True, g=False, b=False, a=False)
+    leaf_mask = expr(m, unreal.MaterialExpressionComponentMask, 600, 1400, r=False, g=True, b=False, a=False)
+    link(mask, "", snow_mask, "")
+    link(mask, "", leaf_mask, "")
+    snow = season_samples(m, SNOW_SET, 250.0, 400, 1900, parameter_prefix="Snow")
+    leaves = season_samples(m, LEAF_SET, 150.0, 400, 2400)
+    pins = ("RGB", "RGB", "R")
+    results = []
+    for index, (source, pin) in enumerate((color, normal, rough)):
+        with_leaves = expr(m, unreal.MaterialExpressionLinearInterpolate, 800, 1300 + index * 200)
+        link(source, pin, with_leaves, "A")
+        link(leaves[index], pins[index], with_leaves, "B")
+        link(leaf_mask, "", with_leaves, "Alpha")
+        with_snow = expr(m, unreal.MaterialExpressionLinearInterpolate, 950, 1300 + index * 200)
+        link(with_leaves, "", with_snow, "A")
+        link(snow[index], pins[index], with_snow, "B")
+        link(snow_mask, "", with_snow, "Alpha")
+        results.append((with_snow, ""))
+    return results[0], results[2], results[1]
+
+
 def add_wetness(m, color, rough, normal):
     """Darkens and glosses the surface with the weather's wetness and adds puddles; returns new colour, roughness,
     normal. Without the weather collection (not created yet) the inputs pass through unchanged."""
@@ -256,6 +370,44 @@ def add_lit_windows(m, texcoord, vertex_color, glass_mask):
     mel.connect_material_property(switch, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
 
+def add_road_cracks(m, texcoord, color, rough, normal):
+    """Behind the Cracks static switch (road instances only): lays the generated crack atlas over the surface.
+    Returns colour, roughness and normal nodes; without the atlas imported they pass through unchanged."""
+    path = f"{TEX}/{ROAD_CRACKS_SET}/T_RoadCracks_"
+    if not eal.does_asset_exist(path + "Mask"):
+        unreal.log_warning("create_materials: road crack atlas not imported (Scripts/import_road_cracks.py)")
+        return color, rough, normal
+    custom = expr(m, unreal.MaterialExpressionCustom, -1000, -800, description="RoadCracks",
+                  output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3, code=ROAD_CRACKS_HLSL,
+                  include_file_paths=[TERRAIN_INCLUDE, ROAD_CRACKS_INCLUDE],
+                  inputs=[custom_input(n) for n in ("UV", "Wear", "Color", "Rough", "Nrm", "CrackMask", "CrackNormal")])
+    outputs = []
+    for name, kind in (("Roughness", unreal.CustomMaterialOutputType.CMOT_FLOAT1),
+                       ("NormalOut", unreal.CustomMaterialOutputType.CMOT_FLOAT3)):
+        output = unreal.CustomOutput()
+        output.set_editor_property("output_name", name)
+        output.set_editor_property("output_type", kind)
+        outputs.append(output)
+    custom.set_editor_property("additional_outputs", outputs)
+    link(texcoord, "", custom, "UV")
+    link(scalar(m, "Wear", 0.5, -1300, -700), "", custom, "Wear")
+    link(color, "", custom, "Color")
+    link(rough, "", custom, "Rough")
+    link(normal, "RGB", custom, "Nrm")
+    for name, sampler, y in (("Mask", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR, -650),
+                             ("Normal", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL, -600)):
+        texture = expr(m, unreal.MaterialExpressionTextureObjectParameter, -1300, y, parameter_name=f"Crack{name}",
+                       texture=unreal.load_asset(path + name), sampler_type=sampler)
+        link(texture, "", custom, f"Crack{name}")
+    results = []
+    for pin, source, source_pin, y in (("", color, "", -900), ("Roughness", rough, "", -850), ("NormalOut", normal, "RGB", -800)):
+        switch = expr(m, unreal.MaterialExpressionStaticSwitchParameter, -800, y, parameter_name="Cracks", default_value=False)
+        link(custom, pin, switch, "True")
+        link(source, source_pin, switch, "False")
+        results.append(switch)
+    return results[0], results[1], results[2]
+
+
 def build_master():
     if eal.does_asset_exist(MASTER):
         m = unreal.load_asset(MASTER)
@@ -290,6 +442,7 @@ def build_master():
     rough_scaled = expr(m, unreal.MaterialExpressionMultiply, -800, 200)
     link(rough, "R", rough_scaled, "A")
     link(scalar(m, "RoughnessScale", 1.0, -1000, 300), "", rough_scaled, "B")
+    tinted, rough_scaled, normal = add_road_cracks(m, texcoord, tinted, rough_scaled, normal)
 
     # Procedural windows (static switch so non-facade instances pay nothing).
     custom = expr(m, unreal.MaterialExpressionCustom, -1000, 1300, code=WINDOW_HLSL,
@@ -328,7 +481,7 @@ def build_master():
     link(glass_mask, "", any_window, "A")
     link(frame_mask, "", any_window, "B")
     normal_windows = expr(m, unreal.MaterialExpressionLinearInterpolate, -500, -100)
-    link(normal, "RGB", normal_windows, "A")
+    link(normal, "", normal_windows, "A")
     link(flat, "", normal_windows, "B")
     link(any_window, "", normal_windows, "Alpha")
 
@@ -341,6 +494,8 @@ def build_master():
     out_color = switch(with_glass, tinted, -150, -400)
     out_rough = switch(rough_glass, rough_scaled, -150, 200)
     out_normal = switch(normal_windows, normal, -150, -100)
+    (out_color, _), (out_rough, _), (out_normal, _) = add_season(m, (out_color, ""), (out_rough, ""),
+                                                                 (out_normal, ""), snow_keep=1.0, leaf_keep=0.0)
     out_color, out_rough, out_normal = add_wetness(m, out_color, out_rough, out_normal)
     add_lit_windows(m, texcoord, vcol, glass_mask)
     mel.connect_material_property(out_color, "", unreal.MaterialProperty.MP_BASE_COLOR)
@@ -376,11 +531,24 @@ def build_instance(master, section, set_path, tile_size, opts):
         lo, hi = opts["tint"]
         mel.set_material_instance_scalar_parameter_value(mi, "TintMin", lo)
         mel.set_material_instance_scalar_parameter_value(mi, "TintMax", hi)
+    for prefix, snow_set in SEASON_SNOW_SETS.items():
+        if section.startswith(prefix):
+            for kind in ("BaseColor", "Normal", "Roughness"):
+                mel.set_material_instance_texture_parameter_value(mi, "Snow" + kind, tex(snow_set, kind))
+    for prefix, (snow_keep, leaf_keep) in SEASON_KEEP.items():
+        if section.startswith(prefix):
+            mel.set_material_instance_scalar_parameter_value(mi, "SnowKeep", snow_keep)
+            mel.set_material_instance_scalar_parameter_value(mi, "LeafKeep", leaf_keep)
     if "parallax" in opts:
         mel.set_material_instance_static_switch_parameter_value(mi, "Parallax", True)
         mel.set_material_instance_scalar_parameter_value(mi, "HeightRatio", opts["parallax"])
     else:
         mel.set_material_instance_static_switch_parameter_value(mi, "Parallax", False)
+    if "cracks" in opts:
+        mel.set_material_instance_static_switch_parameter_value(mi, "Cracks", True)
+        mel.set_material_instance_scalar_parameter_value(mi, "Wear", opts["cracks"])
+    else:
+        mel.set_material_instance_static_switch_parameter_value(mi, "Cracks", False)
     if opts.get("windows"):
         mel.set_material_instance_static_switch_parameter_value(mi, "Windows", True)
     mel.update_material_instance(mi)
@@ -434,9 +602,11 @@ def build_terrain_master():
     link(expr(m, unreal.MaterialExpressionVertexColor, -900, -200), "", custom, "VC")
     for src, pin in sources:
         link(src, "", custom, pin)
-    mel.connect_material_property(custom, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    mel.connect_material_property(custom, "Normal", unreal.MaterialProperty.MP_NORMAL)
-    mel.connect_material_property(custom, "Roughness", unreal.MaterialProperty.MP_ROUGHNESS)
+    color, rough, normal = add_season(m, (custom, ""), (custom, "Roughness"), (custom, "Normal"),
+                                      snow_keep=1.0, leaf_keep=1.0)
+    mel.connect_material_property(color[0], color[1], unreal.MaterialProperty.MP_BASE_COLOR)
+    mel.connect_material_property(normal[0], normal[1], unreal.MaterialProperty.MP_NORMAL)
+    mel.connect_material_property(rough[0], rough[1], unreal.MaterialProperty.MP_ROUGHNESS)
     mel.recompile_material(m)
     eal.save_loaded_asset(m)
 

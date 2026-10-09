@@ -1,5 +1,6 @@
 #include "CarPawn.h"
 
+#include "AITrafficSubsystem.h"
 #include "Animation/AnimInstance.h"
 #include "Camera/CameraComponent.h"
 #include "CarAudioComponent.h"
@@ -138,6 +139,10 @@ void ACarPawn::BeginPlay()
 {
 	Super::BeginPlay();
 	RuleChecker->OnViolation.AddDynamic(this, &ACarPawn::OnRuleViolation);
+	if (UAITrafficSubsystem* AITraffic = GetWorld()->GetSubsystem<UAITrafficSubsystem>())
+	{
+		AITraffic->RegisterExternalVehicle(this);
+	}
 
 	if (IsHMDActive())
 	{

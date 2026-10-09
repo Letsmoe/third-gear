@@ -48,6 +48,9 @@ public:
 
 	const FTrafficNetwork& GetNetwork() const { return Network; }
 
+	/** The world data folder LoadRegion read, so other systems can load their own files from it; empty before. */
+	const FString& GetRegionDirectory() const { return RegionDirectory; }
+
 	/** Seconds of traffic time: what the signal cycles run on. */
 	double GetTrafficTime() const;
 
@@ -89,6 +92,7 @@ private:
 	bool GetViewerLocation(FVector& OutLocation) const;
 
 	FTrafficNetwork Network;
+	FString RegionDirectory;
 	double TimeOffsetSeconds = 0.0;
 	float NightFactor = 0.f;
 	float SecondsSinceSlowUpdate = 1.f;

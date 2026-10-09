@@ -20,6 +20,7 @@
 #include "Tasks/Task.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "TrafficSubsystem.h"
+#include "GrassField.h"
 #include "WorldFurniture.h"
 #include "WorldTileActor.h"
 #include "WorldTileData.h"
@@ -32,6 +33,8 @@ namespace
 constexpr float EyeHeightCm = 120.f;
 constexpr float UpdateIntervalSeconds = 0.25f;
 constexpr int32 ShrubCullDistanceCm = 40000;
+/** Plants stop swaying beyond this camera distance; the wind materials fade their sway out towards it. */
+constexpr int32 PlantWindDistanceCm = 9000;
 /** Height the car is dropped from with -StartPose; the ground trace in the game mode reaches 80 m. */
 constexpr float StartPoseHeightCm = 4000.f;
 }
@@ -210,11 +213,32 @@ void AWorldStreamer::PrepareAssets()
 		const FBox Box = Mesh->GetBoundingBox();
 		const FVector Size = Box.GetSize() / 100.0;
 		LoadedPlantModels.Add(Model.Key, Mesh);
+		LoadPlantWindMaterials(Model.Key, *Mesh);
 		Context->PlantModelSizes.Add(Model.Key, FVector2f(float(FMath::Max(Size.X, Size.Y)), float(Size.Z)));
 	}
 	MeshingContext = Context;
 	PreloadMaterials();
 	PrepareFurniture();
+}
+
+void AWorldStreamer::LoadPlantWindMaterials(const FString& ModelKey, const UStaticMesh& PlantMesh)
+{
+	if (FParse::Param(FCommandLine::Get(), TEXT("NoPlantWind")))
+	{
+		return; // for comparing frame times with and without sway
+	}
+	TArray<TObjectPtr<UMaterialInterface>> SlotMaterials;
+	for (int32 Slot = 0; Slot < PlantMesh.GetStaticMaterials().Num(); ++Slot)
+	{
+		const FString Path = FString::Printf(TEXT("/Game/Vegetation/Wind/MI_%s_%d.MI_%s_%d"), *PlantMesh.GetName(), Slot, *PlantMesh.GetName(), Slot);
+		UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *Path, nullptr, LOAD_Quiet | LOAD_NoWarn);
+		if (!Material)
+		{
+			return; // all or nothing: a half-swapped tree would sway its bark away from its leaves
+		}
+		SlotMaterials.Add(Material);
+	}
+	LoadedPlantWindMaterials.Add(ModelKey, MoveTemp(SlotMaterials));
 }
 
 void AWorldStreamer::PrepareFurniture()
@@ -323,6 +347,19 @@ bool AWorldStreamer::GetStartTransform(FTransform& OutTransform)
 		Start->GetNumberField(TEXT("z")) * 100.0 + EyeHeightCm);
 	OutTransform = FTransform(FRotator(0.0, Start->GetNumberField(TEXT("yaw")), 0.0), Location);
 	return true;
+}
+
+bool AWorldStreamer::IsNearTileShownAt(const FVector& Location) const
+{
+	const FVector2D Point(Location.X, Location.Y);
+	for (const FTileState& Tile : Tiles)
+	{
+		if (!Tile.bHorizon && Tile.ShownDetail == int32(EWorldTileDetail::Near) && Tile.Bounds.IsInside(Point))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 int32 AWorldStreamer::WantedDetail(const FTileState& Tile, const FVector2D& Location) const
@@ -453,7 +490,13 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 	{
 		const FWorldPlantInstances& Group = Meshes.Plants[Step - ChunkSteps - 3];
 		const TObjectPtr<UStaticMesh>* Model = LoadedPlantModels.Find(Group.Model);
-		Actor->AddPlants(Model ? Model->Get() : nullptr, Group.Transforms, Group.Model == TEXT("shrub") ? ShrubCullDistanceCm : 0);
+		TArray<UMaterialInterface*> WindMaterials;
+		if (const TArray<TObjectPtr<UMaterialInterface>>* Found = LoadedPlantWindMaterials.Find(Group.Model))
+		{
+			WindMaterials.Append(*Found);
+		}
+		Actor->AddPlants(Model ? Model->Get() : nullptr, Group.Transforms, Group.Model == TEXT("shrub") ? ShrubCullDistanceCm : 0,
+			WindMaterials, PlantWindDistanceCm);
 	}
 	else if (Step == ChunkSteps + 3 + PlantSteps)
 	{
@@ -690,8 +733,43 @@ void AWorldStreamer::BeginPlay()
 	UpdateWanted(Location);
 }
 
+void AWorldStreamer::UpdateGrass(const FVector& Location)
+{
+	if (bGrassFailed || FParse::Param(FCommandLine::Get(), TEXT("NoGrass")))
+	{
+		return;
+	}
+	if (!Grass)
+	{
+		Grass = MakeShared<FGrassField>(this);
+		bGrassFailed = !Grass->LoadAssets();
+		if (bGrassFailed)
+		{
+			Grass.Reset();
+			return;
+		}
+	}
+	Grass->Update(Location, [this](const FBox2D& RectangleCm, TArray<FGrassTileSource>& OutTiles)
+	{
+		for (const FTileState& Tile : Tiles)
+		{
+			if (Tile.bHorizon || !Tile.Data.IsValid() || !Tile.Bounds.Intersect(RectangleCm))
+			{
+				continue;
+			}
+			FGrassTileSource& Source = OutTiles.AddDefaulted_GetRef();
+			Source.BoundsCm = Tile.Bounds;
+			Source.Data = Tile.Data;
+		}
+	});
+}
+
 void AWorldStreamer::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (Grass)
+	{
+		Grass->Clear();
+	}
 	if (Shared)
 	{
 		Shared->bCancelled = true;
@@ -730,6 +808,10 @@ void AWorldStreamer::Tick(float DeltaSeconds)
 	{
 		EnableCollisionNear(Location, 1, /*bCookNow=*/false);
 		EnableFurnitureCollisionNear(Location, 1);
+	}
+	if (bHasViewer)
+	{
+		UpdateGrass(Location);
 	}
 	SecondsSinceUpdate += DeltaSeconds;
 	if (bHasViewer && SecondsSinceUpdate >= UpdateIntervalSeconds)

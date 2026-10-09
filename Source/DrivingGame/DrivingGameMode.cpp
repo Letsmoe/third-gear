@@ -11,6 +11,7 @@
 #include "GameFlow.h"
 #include "RuleTest.h"
 #include "StreamTest.h"
+#include "TrafficTest.h"
 #include "GameFramework/PlayerStart.h"
 #include "SeatedVRPawn.h"
 #include "HAL/FileManager.h"
@@ -19,6 +20,10 @@
 #include "UnrealClient.h"
 #include "EngineUtils.h"
 #include "WorldStreamer.h"
+#include "ContentStreaming.h"
+#if WITH_EDITOR
+#include "ShaderCompiler.h"
+#endif
 
 ADrivingGameMode::ADrivingGameMode()
 {
@@ -29,7 +34,8 @@ bool ADrivingGameMode::UseFreeCamera()
 {
 	FString Value;
 	return FParse::Param(FCommandLine::Get(), TEXT("FreeCam")) || FParse::Value(FCommandLine::Get(), TEXT("Shots="), Value)
-		|| FParse::Value(FCommandLine::Get(), TEXT("StreamTest="), Value) || FParse::Param(FCommandLine::Get(), TEXT("RuleTest"));
+		|| FParse::Value(FCommandLine::Get(), TEXT("StreamTest="), Value) || FParse::Param(FCommandLine::Get(), TEXT("RuleTest"))
+		|| FParse::Value(FCommandLine::Get(), TEXT("TrafficTest="), Value);
 }
 
 bool ADrivingGameMode::UsesFreeCameraPawn() const
@@ -117,18 +123,20 @@ void ADrivingGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 
+	FParse::Value(FCommandLine::Get(), TEXT("ShotSettle="), ShotSettleSeconds);
+
 	// Driver's view from the car seat (desktop render): -SeatShot [-ShotDelay=s] [-ShotName=x] -> Screenshots/<x>_seat.png
+	// The delay lets the car settle on its springs; shaders and textures are then waited for as for -Shots.
 	if (FParse::Param(FCommandLine::Get(), TEXT("SeatShot")) && !UseFreeCamera())
 	{
-		float Delay = 12.f;
+		float Delay = 4.f;
 		FParse::Value(FCommandLine::Get(), TEXT("ShotDelay="), Delay);
 		FTimerHandle Handle;
 		GetWorldTimerManager().SetTimer(Handle, [this]()
 		{
-			FScreenshotRequest::RequestScreenshot(FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() /
-				FString::Printf(TEXT("Screenshots/%s_seat.png"), *ShotName)), /*bShowUI=*/!GameFlow::GetDebugMenuPage().IsEmpty(), /*bAddFilenameSuffix=*/false);
-			FTimerHandle QuitHandle;
-			GetWorldTimerManager().SetTimer(QuitHandle, [this]() { GEngine->Exec(GetWorld(), TEXT("quit")); }, 2.f, false);
+			WaitForShadersAndTextures();
+			FTimerHandle CaptureHandle;
+			GetWorldTimerManager().SetTimer(CaptureHandle, this, &ADrivingGameMode::CaptureSeatShot, ShotSettleSeconds, false);
 		}, Delay, false);
 	}
 
@@ -148,6 +156,13 @@ void ADrivingGameMode::BeginPlay()
 	if (FParse::Param(FCommandLine::Get(), TEXT("RuleTest")))
 	{
 		GetWorld()->SpawnActor<ARuleTestRunner>();
+	}
+
+	// AI traffic test: the free camera rides the lane graph while cars spawn around it (see Scripts/traffic_test.sh).
+	FString TrafficTestMinutes;
+	if (FParse::Value(FCommandLine::Get(), TEXT("TrafficTest="), TrafficTestMinutes))
+	{
+		GetWorld()->SpawnActor<ATrafficTestRunner>();
 	}
 
 	// Automated run through the generated world (see Scripts/stream_test.sh).
@@ -188,16 +203,47 @@ void ADrivingGameMode::BeginPlay()
 	}
 
 	// Headless screenshots (see Scripts/screenshot.sh):
-	//   -Shots="x,y,z,pitch,yaw;..." (metres / degrees, world coords; z omitted = keep) -ShotDelay=<seconds>
+	//   -Shots="x,y,z,pitch,yaw[,command|command...];..." (metres / degrees, world coords). The optional commands run
+	//   before that shot, so one run can shoot several weathers or times of day (Weather.Override, Weather.SetTime).
+	//   -ShotDelay=<seconds> before the first shot (the world itself is waited for, see SettleAndCapture).
 	FString ShotSpec;
 	FParse::Value(FCommandLine::Get(), TEXT("ShotName="), ShotName); // file name prefix, default "shot"
 	if (FParse::Value(FCommandLine::Get(), TEXT("Shots="), ShotSpec, /*bShouldStopOnSeparator=*/false))
 	{
 		ShotSpec.ParseIntoArray(PendingShots, TEXT(";"));
-		float Delay = 15.f;
+		float Delay = 2.f;
 		FParse::Value(FCommandLine::Get(), TEXT("ShotDelay="), Delay);
 		FTimerHandle Handle;
 		GetWorldTimerManager().SetTimer(Handle, this, &ADrivingGameMode::TakeNextShot, Delay, false);
+	}
+}
+
+namespace DrivingGameModeShots
+{
+	/** Splits one -Shots entry into its five numbers and the console commands after them. */
+	bool ParseShot(const FString& Entry, FVector& OutLocation, FRotator& OutRotation, TArray<FString>& OutCommands)
+	{
+		TArray<FString> Parts;
+		Entry.ParseIntoArray(Parts, TEXT(","));
+		if (Parts.Num() < 5)
+		{
+			return false;
+		}
+		OutLocation = FVector(FCString::Atof(*Parts[0]), FCString::Atof(*Parts[1]), FCString::Atof(*Parts[2])) * 100.0;
+		OutRotation = FRotator(FCString::Atof(*Parts[3]), FCString::Atof(*Parts[4]), 0.0);
+		// Commands may contain commas themselves (Weather.Override A=1,B=2), so everything after the fifth comma is theirs.
+		FString Rest = Entry;
+		for (int32 Field = 0; Field < 5; ++Field)
+		{
+			FString Head;
+			if (!Rest.Split(TEXT(","), &Head, &Rest))
+			{
+				Rest.Reset();
+				break;
+			}
+		}
+		Rest.ParseIntoArray(OutCommands, TEXT("|"));
+		return true;
 	}
 }
 
@@ -208,14 +254,18 @@ void ADrivingGameMode::TakeNextShot()
 		GEngine->Exec(GetWorld(), TEXT("quit"));
 		return;
 	}
-	TArray<FString> Parts;
-	PendingShots[0].ParseIntoArray(Parts, TEXT(","));
+	FVector Location;
+	FRotator Rotation;
+	TArray<FString> Commands;
+	const bool bParsed = DrivingGameModeShots::ParseShot(PendingShots[0], Location, Rotation, Commands);
 	PendingShots.RemoveAt(0);
-	APlayerController* PC = GetWorld()->GetFirstPlayerController();
-	if (PC && PC->GetPawn() && Parts.Num() >= 5)
+	for (const FString& Command : Commands)
 	{
-		const FVector Location(FCString::Atof(*Parts[0]) * 100.0, FCString::Atof(*Parts[1]) * 100.0, FCString::Atof(*Parts[2]) * 100.0);
-		const FRotator Rotation(FCString::Atof(*Parts[3]), FCString::Atof(*Parts[4]), 0.0);
+		GEngine->Exec(GetWorld(), *Command.TrimStartAndEnd());
+	}
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	if (bParsed && PC && PC->GetPawn())
+	{
 		PC->GetPawn()->SetActorLocation(Location, false, nullptr, ETeleportType::TeleportPhysics);
 		PC->SetControlRotation(Rotation);
 		if (AWorldStreamer* Streamer = FindWorldStreamer())
@@ -223,14 +273,46 @@ void ADrivingGameMode::TakeNextShot()
 			Streamer->LoadAroundBlocking(Location);
 		}
 	}
-	// Give streaming/Lumen a moment to settle at the new viewpoint, then capture.
-	FTimerHandle CaptureHandle;
-	GetWorldTimerManager().SetTimer(CaptureHandle, [this]()
+	// A few frames at the new view first, so the renderer requests the shaders and textures it is missing.
+	FTimerHandle SettleHandle;
+	GetWorldTimerManager().SetTimer(SettleHandle, this, &ADrivingGameMode::SettleAndCapture, 0.3f, false);
+}
+
+void ADrivingGameMode::WaitForShadersAndTextures() const
+{
+	const double StartTime = FPlatformTime::Seconds();
+#if WITH_EDITOR
+	if (GShaderCompilingManager)
 	{
-		const FString File = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() /
-			FString::Printf(TEXT("Screenshots/%s_%02d.png"), *ShotName, ShotIndex++));
-		FScreenshotRequest::RequestScreenshot(File, /*bShowUI=*/!GameFlow::GetDebugMenuPage().IsEmpty(), /*bAddFilenameSuffix=*/false);
-		FTimerHandle NextHandle;
-		GetWorldTimerManager().SetTimer(NextHandle, this, &ADrivingGameMode::TakeNextShot, 2.f, false);
-	}, 4.f, false);
+		GShaderCompilingManager->FinishAllCompilation();
+	}
+#endif
+	IStreamingManager::Get().StreamAllResources(10.f);
+	UE_LOG(LogTemp, Log, TEXT("Shot %d: shaders and textures ready after %.1f s"), ShotIndex, FPlatformTime::Seconds() - StartTime);
+}
+
+void ADrivingGameMode::SettleAndCapture()
+{
+	WaitForShadersAndTextures();
+	// Lumen's surface cache and TSR's history still need a moment of real frames.
+	FTimerHandle CaptureHandle;
+	GetWorldTimerManager().SetTimer(CaptureHandle, this, &ADrivingGameMode::CaptureShot, ShotSettleSeconds, false);
+}
+
+void ADrivingGameMode::CaptureShot()
+{
+	const FString File = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() /
+		FString::Printf(TEXT("Screenshots/%s_%02d.png"), *ShotName, ShotIndex++));
+	FScreenshotRequest::RequestScreenshot(File, /*bShowUI=*/!GameFlow::GetDebugMenuPage().IsEmpty(), /*bAddFilenameSuffix=*/false);
+	// The screenshot is written at the end of the next frame.
+	FTimerHandle NextHandle;
+	GetWorldTimerManager().SetTimer(NextHandle, this, &ADrivingGameMode::TakeNextShot, 0.5f, false);
+}
+
+void ADrivingGameMode::CaptureSeatShot()
+{
+	FScreenshotRequest::RequestScreenshot(FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() /
+		FString::Printf(TEXT("Screenshots/%s_seat.png"), *ShotName)), /*bShowUI=*/!GameFlow::GetDebugMenuPage().IsEmpty(), /*bAddFilenameSuffix=*/false);
+	FTimerHandle QuitHandle;
+	GetWorldTimerManager().SetTimer(QuitHandle, [this]() { GEngine->Exec(GetWorld(), TEXT("quit")); }, 1.f, false);
 }

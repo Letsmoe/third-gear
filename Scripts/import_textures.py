@@ -22,6 +22,10 @@ DEST_ROOT = "/Game/Textures"
 # (category, source, set name). Kept as a pure literal list: Tools/asset_fetch/contact_sheet.py parses it.
 SETS = [
     # Asphalt
+    ("Snow", "polyhaven", "snow_01"),
+    ("Snow", "polyhaven", "snow_02"),
+    ("Snow", "polyhaven", "asphalt_snow"),
+    ("Snow", "polyhaven", "snow_floor"),
     ("Asphalt", "polyhaven", "asphalt_01"),
     ("Asphalt", "polyhaven", "asphalt_02"),
     ("Asphalt", "polyhaven", "asphalt_04"),
