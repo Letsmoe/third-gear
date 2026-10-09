@@ -5,7 +5,9 @@ namespace CarSoundDetail
 constexpr float Pi = 3.14159265358979f;
 constexpr float TwoPi = 6.28318530717959f;
 constexpr int32 BlockFrames = 64;
-constexpr int32 MaxPartials = 64;          // half orders of the crank speed: partial m is order m/2
+constexpr int32 LowPartials = 64;          // half orders of the crank speed, partials m = 1..64 (order m/2)
+constexpr int32 HighPartials = 104;        // firing orders only, partials m = 68, 72 ... 480: they carry the idle's top end
+constexpr int32 MaxPartials = LowPartials + HighPartials;
 constexpr float MaxPartialHz = 5000.f;
 constexpr int32 MaxVoices = 24;
 constexpr int32 SurfaceCount = static_cast<int32>(ECarRoadSurface::Count);
@@ -118,6 +120,12 @@ struct FPendingEvent
 	float Strength;
 };
 
+/** Half-order number m of the partial at an index: 1..64, then 68, 72 ... in steps of four. */
+int32 PartialNumber(int32 Index)
+{
+	return Index < LowPartials ? Index + 1 : LowPartials + 4 * (Index - LowPartials + 1);
+}
+
 /** Partial phase offsets, fixed per partial: firing orders are phase aligned (a pulse), the rest are scattered. */
 float PartialPhaseOffset(int32 Partial)
 {
@@ -138,8 +146,8 @@ struct FCarSoundDsp::FImpl
 	{
 		for (int32 Partial = 0; Partial < MaxPartials; ++Partial)
 		{
-			PhaseCos[Partial] = FMath::Cos(PartialPhaseOffset(Partial + 1));
-			PhaseSin[Partial] = FMath::Sin(PartialPhaseOffset(Partial + 1));
+			PhaseCos[Partial] = FMath::Cos(PartialPhaseOffset(PartialNumber(Partial)));
+			PhaseSin[Partial] = FMath::Sin(PartialPhaseOffset(PartialNumber(Partial)));
 		}
 		NoiseLowpass.SetLowpass(SampleRate, 250.f, 0.7f);
 		NoiseHighpass.SetHighpass(SampleRate, 2500.f, 0.7f);
@@ -349,7 +357,7 @@ struct FCarSoundDsp::FImpl
 		float MotoringTarget[MaxPartials];
 		for (int32 Index = 0; Index < MaxPartials; ++Index)
 		{
-			const int32 Partial = Index + 1;
+			const int32 Partial = PartialNumber(Index);
 			const float Frequency = Partial * 0.5f * CrankHz;
 			if (Frequency > MaxPartialHz || Frequency > SampleRate * 0.45f)
 			{
@@ -369,7 +377,7 @@ struct FCarSoundDsp::FImpl
 		const float MotoringScale = 1.41421356f / FMath::Sqrt(FMath::Max(MotoringNorm, 1e-6f));
 		for (int32 Index = 0; Index < MaxPartials; ++Index)
 		{
-			const float Frequency = (Index + 1) * 0.5f * CrankHz;
+			const float Frequency = PartialNumber(Index) * 0.5f * CrankHz;
 			const float Cabin = DbToLinear(CabinTransferDb(Frequency, LoadFraction));
 			const float Fired = CombustionTarget[Index] * CombustionScale * Level * Combustion;
 			const float Turned = MotoringTarget[Index] * MotoringScale * MotoringLevel * (1.f - Combustion);
@@ -385,13 +393,21 @@ struct FCarSoundDsp::FImpl
 		float Sum = 0.f;
 		float PowerCos = Cos;
 		float PowerSin = Sin;
+		float FourthCos = 0.f, FourthSin = 0.f; // the rotation of one firing order, picked up on the way
 		for (int32 Index = 0; Index < MaxPartials; ++Index)
 		{
 			PartialAmplitude[Index] += RampStep[Index];
 			// sin(m * alpha + offset) = sin(m alpha) cos(offset) + cos(m alpha) sin(offset)
 			Sum += PartialAmplitude[Index] * (PowerSin * PhaseCos[Index] + PowerCos * PhaseSin[Index]);
-			const float NextCos = PowerCos * Cos - PowerSin * Sin;
-			PowerSin = PowerSin * Cos + PowerCos * Sin;
+			if (Index == 3)
+			{
+				FourthCos = PowerCos;
+				FourthSin = PowerSin;
+			}
+			const float StepCos = Index < LowPartials - 1 ? Cos : FourthCos;
+			const float StepSin = Index < LowPartials - 1 ? Sin : FourthSin;
+			const float NextCos = PowerCos * StepCos - PowerSin * StepSin;
+			PowerSin = PowerSin * StepCos + PowerCos * StepSin;
 			PowerCos = NextCos;
 		}
 		return Sum;

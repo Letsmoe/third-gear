@@ -117,6 +117,10 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UCarSynthComponent> CarSynth;
 
+	/** Thunder sounds by asset name, loaded up front so the first strike does not hitch. */
+	UPROPERTY(Transient)
+	TMap<FString, TObjectPtr<USoundBase>> ThunderSounds;
+
 	TArray<FAmbienceLayer> Layers;
 	TArray<FPendingThunder> PendingThunder;
 	FCarSoundMapper Mapper;

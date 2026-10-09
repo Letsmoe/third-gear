@@ -222,6 +222,15 @@ void UCarAudioComponent::CreateAmbienceLayers()
 	AddLayer(TEXT("rain_glass_heavy"), 0.50f, 7000.f);
 	AddLayer(TEXT("rain_road_light"), 0.20f, 2200.f);
 	AddLayer(TEXT("rain_road_heavy"), 0.45f, 2200.f);
+
+	for (const TCHAR* Name : {TEXT("thunder_close_a"), TEXT("thunder_close_b"), TEXT("thunder_mid_b"), TEXT("thunder_mid_c"), TEXT("thunder_mid_d"),
+		TEXT("thunder_far_a"), TEXT("thunder_far_b")})
+	{
+		if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, *PathFor(OneShotFolder, Name), nullptr, LOAD_NoWarn))
+		{
+			ThunderSounds.Add(Name, Sound);
+		}
+	}
 }
 
 void UCarAudioComponent::BindLightning()
@@ -491,6 +500,8 @@ void UCarAudioComponent::TriggerThunder(float DistanceMeters)
 	Thunder.Volume = FMath::Clamp(1.1f - 0.9f * FMath::Sqrt(DistanceMeters / 12000.f), 0.15f, 1.f);
 	Thunder.LowPassHz = FMath::Lerp(9000.f, 1500.f, FMath::Clamp(DistanceMeters / 10000.f, 0.f, 1.f));
 	Thunder.Pitch = Random.FRandRange(0.94f, 1.06f);
+	UE_LOG(LogCarAudio, Display, TEXT("Thunder %s from %.0f m away, arrives in %.1f s, volume %.2f, low pass %.0f Hz"), *Thunder.AssetName, DistanceMeters,
+		Thunder.SecondsLeft, Thunder.Volume, Thunder.LowPassHz);
 	PendingThunder.Add(Thunder);
 }
 
@@ -536,7 +547,8 @@ void UCarAudioComponent::PlayThunder(const FPendingThunder& Thunder)
 	{
 		return;
 	}
-	USoundBase* Sound = LoadObject<USoundBase>(nullptr, *PathFor(OneShotFolder, Thunder.AssetName), nullptr, LOAD_NoWarn);
+	const TObjectPtr<USoundBase>* Found = ThunderSounds.Find(Thunder.AssetName);
+	USoundBase* Sound = Found ? Found->Get() : nullptr;
 	if (!Sound)
 	{
 		UE_LOG(LogCarAudio, Warning, TEXT("Thunder %s missing; run Scripts/import_audio.py"), *Thunder.AssetName);

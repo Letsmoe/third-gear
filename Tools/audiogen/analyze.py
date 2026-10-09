@@ -8,6 +8,7 @@ Usage:
   analyze.py orders <in.wav> <telemetry.csv> <out.png>         engine order tracks over the recorded rpm
   analyze.py scenes <capture_dir>                              level per scene and stem, from an Unreal -AudioCapture run
   analyze.py scenegram <capture_dir> <out.png> <stem> <label> [label ...]   spectrogram of scenes of one stem
+  analyze.py export <capture_dir> <out_dir>                    cut the mix into one WAV and spectrogram per scene
   analyze.py clicks <in.wav> [more.wav ...]                    count sudden sample-to-sample jumps far above the local level
   analyze.py ordercheck <capture_dir> <label>                  do the firing order and its harmonics follow the rpm
 """
@@ -164,6 +165,21 @@ def click_check(path, ratio=14.0):
     print(f"{os.path.basename(path)}: {len(flagged)} jumps above {ratio:.0f}x the local step" + (f" at {times}" if len(flagged) else ""))
 
 
+def export_scenes(capture_dir, out_dir):
+    """Writes <out_dir>/<scene>.wav and <scene>.png for every scene of a capture, from the full mix."""
+    from audio_io import write_wav
+    os.makedirs(out_dir, exist_ok=True)
+    telemetry = load_capture(capture_dir)
+    data, rate = read_wav(os.path.join(capture_dir, "car.wav"))
+    for label in dict.fromkeys(telemetry["label"]):
+        rows = np.nonzero(telemetry["label"] == label)[0]
+        start, stop = int(telemetry["time"][rows[0]] * rate), int(telemetry["time"][rows[-1]] * rate)
+        if stop - start < rate // 2 or rms_db(data[start:stop]) < -80:
+            continue
+        write_wav(os.path.join(out_dir, f"{label}.wav"), data[start:stop])
+        spectrogram(os.path.join(out_dir, f"{label}.png"), [os.path.join(out_dir, f"{label}.wav")])
+
+
 def main():
     command = sys.argv[1]
     if command == "spectrogram":
@@ -174,6 +190,8 @@ def main():
     elif command == "clip":
         for path in sys.argv[2:]:
             clip_check(path)
+    elif command == "export":
+        export_scenes(sys.argv[2], sys.argv[3])
     elif command == "clicks":
         for path in sys.argv[2:]:
             click_check(path)
