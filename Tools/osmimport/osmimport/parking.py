@@ -19,8 +19,12 @@ from shapely.strtree import STRtree
 
 from . import roads
 
-PARKING_MIN_WIDTH = 5.0
-PARKING_BOTH_WIDTH = 7.0
+# Untagged streets only get parked cars where two moving cars still fit beside them (two cars of 1.8 m plus 0.2 m, and
+# the 1.95 m strip of each parked row), so AI traffic keeps its lanes there.
+PARKING_MIN_WIDTH = 5.75
+PARKING_BOTH_WIDTH = 7.7
+# Tagged streets keep their cars even when only a single file passes; two rows need this much width to fit at all.
+TAGGED_BOTH_MIN_WIDTH = 6.4
 DEFAULT_PARKING_CLASSES = {"residential", "living_street"}
 NO_PARKING_CLASSES = {"motorway", "motorway_link", "trunk", "trunk_link"}
 # Width of the strip a parked car takes from the kerb, including the gap to the kerb and the mirror.
@@ -94,21 +98,11 @@ def parking_sides(tags, way_id, width):
             sides[-chosen] = "lane"
     else:
         return {}
-    if len(sides) == 2 and width < PARKING_BOTH_WIDTH:
+    minimum_both = TAGGED_BOTH_MIN_WIDTH if _has_parking_tags(tags) else PARKING_BOTH_WIDTH
+    if len(sides) == 2 and width < minimum_both:
         keep = +1 if _stable_random(way_id, 7).random() < 0.5 else -1
         sides = {keep: sides[keep]}
     return sides
-
-
-def traffic_fits(tags, way_id, width):
-    """Whether moving cars (in both directions on a two-way street) can still pass the cars parked along the way.
-    AI cars do not give way to oncoming traffic, so lanes are only built where two cars fit beside the parked ones."""
-    sides = parking_sides(tags, way_id, width)
-    if not sides:
-        return True
-    free_width = width - PARKING_STRIP * len(sides)
-    needed = LANE_CLEARANCE * 2.0 if roads.is_oneway(tags) else 2.0 * LANE_CLEARANCE * 2.0 + 0.2
-    return free_width >= needed
 
 
 def lane_offset_with_parking(base_offset, width, travel, sides):

@@ -263,9 +263,17 @@ bool AWorldTileActor::AddFurnitureStep(const FWorldFurnitureInstances& Furniture
 namespace
 {
 /** Parked cars are drawn out to these distances; beyond them the street's cars are too small to tell from the buildings' shade. */
-constexpr int32 ParkedBodyCullCm = 16000;
-constexpr int32 ParkedGlassCullCm = 8000;
-constexpr int32 ParkedWheelCullCm = 6000;
+constexpr int32 ParkedBodyCullCm = 12000;
+/** Glass, wheels and the shadow of the body only exist this close: they are small, and each is a draw per car and per shadow view. */
+constexpr int32 ParkedDetailCullCm = 4000;
+
+/** tg.ParkedCars.Parts is a bit mask of what parked cars draw (1 body, 2 glass, 4 wheels, 8 body shadow), for measuring what each costs. */
+static TAutoConsoleVariable<int32> CVarParkedParts(TEXT("tg.ParkedCars.Parts"), 15, TEXT("Bit mask of the parked car parts that are built: 1 body, 2 glass, 4 wheels, 8 body shadow."));
+
+bool ParkedPartEnabled(int32 Bit)
+{
+	return (CVarParkedParts.GetValueOnGameThread() & Bit) != 0;
+}
 }
 
 void AWorldTileActor::AddParkedCarColliders(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes)
@@ -287,21 +295,24 @@ void AWorldTileActor::AddParkedCarColliders(const FWorldFurnitureInstances& Furn
 void AWorldTileActor::AddParkedCarBodies(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes, int32 ModelIndex)
 {
 	const FTrafficVehicleModel* Model = Meshes.ParkedModels[ModelIndex];
-	if (!Model || !Model->Body)
+	if (!Model || !Model->Body || !ParkedPartEnabled(1))
 	{
 		return;
 	}
 	TMap<int32, TArray<FTransform>> ByPaint;
+	TArray<FTransform> AllPoses;
 	for (const FParkedCarPlacement& Car : Furniture.ParkedCars)
 	{
 		if (Car.ModelIndex == ModelIndex)
 		{
-			ByPaint.FindOrAdd(Car.PaintIndex).Add(ParkedCars::MeshTransform(*Model, Car.Pose));
+			const FTransform Pose = ParkedCars::MeshTransform(*Model, Car.Pose);
+			ByPaint.FindOrAdd(Car.PaintIndex).Add(Pose);
+			AllPoses.Add(Pose);
 		}
 	}
 	for (const TPair<int32, TArray<FTransform>>& Paint : ByPaint)
 	{
-		UInstancedStaticMeshComponent* Component = AddFurnitureInstances(Model->Body, Paint.Value, true, false, ParkedBodyCullCm);
+		UInstancedStaticMeshComponent* Component = AddFurnitureInstances(Model->Body, Paint.Value, false, false, ParkedBodyCullCm);
 		if (!Component || Model->PaintSlot == INDEX_NONE)
 		{
 			continue;
@@ -314,6 +325,15 @@ void AWorldTileActor::AddParkedCarBodies(const FWorldFurnitureInstances& Furnitu
 		{
 			Instance->SetVectorParameterValue(TEXT("BaseColor"), UAITrafficSubsystem::GetPaintPaletteColor(Paint.Key));
 		}
+	}
+	if (!ParkedPartEnabled(8))
+	{
+		return;
+	}
+	// The body's shadow comes from a second set that draws only into shadow views and only close by.
+	if (UInstancedStaticMeshComponent* ShadowOnly = AddFurnitureInstances(Model->Body, AllPoses, true, false, ParkedDetailCullCm))
+	{
+		ShadowOnly->SetRenderInMainPass(false);
 	}
 }
 
@@ -332,10 +352,17 @@ void AWorldTileActor::AddParkedCarGlassAndWheels(const FWorldFurnitureInstances&
 			Poses.Add(ParkedCars::MeshTransform(*Model, Car.Pose));
 		}
 	}
-	AddFurnitureInstances(Model->Glass, Poses, false, false, ParkedGlassCullCm);
+	if (ParkedPartEnabled(2))
+	{
+		AddFurnitureInstances(Model->Glass, Poses, false, false, ParkedDetailCullCm);
+	}
+	if (!ParkedPartEnabled(4))
+	{
+		return;
+	}
 	for (UStaticMesh* Wheel : Model->Wheels)
 	{
-		AddFurnitureInstances(Wheel, Poses, false, false, ParkedWheelCullCm);
+		AddFurnitureInstances(Wheel, Poses, false, false, ParkedDetailCullCm);
 	}
 }
 
