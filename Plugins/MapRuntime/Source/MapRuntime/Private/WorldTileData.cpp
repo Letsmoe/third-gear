@@ -286,6 +286,24 @@ void ReadPois(FByteReader& Reader, TArray<FWorldPoi>& Pois)
 	}
 }
 
+/** The flag of the section with this tag; sections this reader doesn't know have none. */
+EWorldTileSections SectionFlag(uint32 Tag)
+{
+	switch (Tag)
+	{
+	case MakeTag("NAME"): return EWorldTileSections::Names;
+	case MakeTag("GRID"): return EWorldTileSections::Grid;
+	case MakeTag("SURF"): return EWorldTileSections::Surfaces;
+	case MakeTag("MARK"): return EWorldTileSections::Markings;
+	case MakeTag("BLDG"): return EWorldTileSections::Buildings;
+	case MakeTag("BTYP"): return EWorldTileSections::BuildingTypes;
+	case MakeTag("ROOF"): return EWorldTileSections::Roofs;
+	case MakeTag("VEGE"): return EWorldTileSections::Plants;
+	case MakeTag("POIS"): return EWorldTileSections::Pois;
+	default: return EWorldTileSections::None;
+	}
+}
+
 /** Decompresses one section and hands it to the reader for its tag. Unknown tags are skipped. */
 bool ReadSection(uint32 Tag, TConstArrayView<uint8> Raw, FWorldTileData& Out)
 {
@@ -381,7 +399,7 @@ float FWorldTileData::SurfaceHeightAt(const FWorldSurface& Surface, float LocalX
 	return 0.f;
 }
 
-bool FWorldTileData::Load(const FString& Path, FWorldTileData& Out, FString& Error)
+bool FWorldTileData::Load(const FString& Path, FWorldTileData& Out, FString& Error, EWorldTileSections Sections)
 {
 	TArray<uint8> Bytes;
 	if (!FFileHelper::LoadFileToArray(Bytes, *Path, FILEREAD_Silent))
@@ -413,6 +431,11 @@ bool FWorldTileData::Load(const FString& Path, FWorldTileData& Out, FString& Err
 		const uint32 Tag = Reader.Get<uint32>();
 		const uint32 RawSize = Reader.Get<uint32>();
 		const uint32 PackedSize = Reader.Get<uint32>();
+		if (!EnumHasAnyFlags(Sections, SectionFlag(Tag)))
+		{
+			Reader.Skip(PackedSize);
+			continue;
+		}
 		TArray<uint8> Packed;
 		Reader.GetArray(Packed, PackedSize);
 		TArray<uint8> Raw;
@@ -428,7 +451,8 @@ bool FWorldTileData::Load(const FString& Path, FWorldTileData& Out, FString& Err
 			return false;
 		}
 	}
-	if (Reader.HasFailed() || Out.Grid.NumX < 2 || Out.Grid.NumY < 2)
+	const bool bNeedsGrid = EnumHasAnyFlags(Sections, EWorldTileSections::Grid);
+	if (Reader.HasFailed() || (bNeedsGrid && (Out.Grid.NumX < 2 || Out.Grid.NumY < 2)))
 	{
 		Error = FString::Printf(TEXT("%s: truncated or without a height grid"), *Path);
 		return false;

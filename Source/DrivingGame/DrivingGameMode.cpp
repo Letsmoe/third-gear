@@ -310,7 +310,7 @@ void ADrivingGameMode::CaptureShot()
 {
 	const FString File = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() /
 		FString::Printf(TEXT("Screenshots/%s_%02d.png"), *ShotName, ShotIndex++));
-	FScreenshotRequest::RequestScreenshot(File, /*bShowUI=*/!GameFlow::GetDebugMenuPage().IsEmpty(), /*bAddFilenameSuffix=*/false);
+	FScreenshotRequest::RequestScreenshot(File, /*bShowUI=*/!GameFlow::GetDebugMenuPage().IsEmpty() || FParse::Param(FCommandLine::Get(), TEXT("ShowUI")), /*bAddFilenameSuffix=*/false);
 	// The screenshot is written at the end of the next frame.
 	FTimerHandle NextHandle;
 	GetWorldTimerManager().SetTimer(NextHandle, this, &ADrivingGameMode::TakeNextShot, 0.5f, false);
@@ -319,7 +319,7 @@ void ADrivingGameMode::CaptureShot()
 void ADrivingGameMode::CaptureSeatShot()
 {
 	FScreenshotRequest::RequestScreenshot(FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() /
-		FString::Printf(TEXT("Screenshots/%s_seat.png"), *ShotName)), /*bShowUI=*/!GameFlow::GetDebugMenuPage().IsEmpty(), /*bAddFilenameSuffix=*/false);
+		FString::Printf(TEXT("Screenshots/%s_seat.png"), *ShotName)), /*bShowUI=*/!GameFlow::GetDebugMenuPage().IsEmpty() || FParse::Param(FCommandLine::Get(), TEXT("ShowUI")), /*bAddFilenameSuffix=*/false);
 	FTimerHandle QuitHandle;
 	GetWorldTimerManager().SetTimer(QuitHandle, [this]() { GEngine->Exec(GetWorld(), TEXT("quit")); }, 1.f, false);
 }

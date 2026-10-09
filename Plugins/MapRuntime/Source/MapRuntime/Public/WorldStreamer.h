@@ -73,6 +73,9 @@ public:
 	/** Where the world data says the drive starts (on a road, facing along it), at eye height. False without data. */
 	bool GetStartTransform(FTransform& OutTransform);
 
+	/** The folder the region's tiles are read from; empty until the world index has loaded. */
+	const FString& GetWorldDir() const { return WorldDir; }
+
 	/** Whether the tile containing Location (cm) is on screen at near detail, so the ground there exists. */
 	bool IsNearTileShownAt(const FVector& Location) const;
 

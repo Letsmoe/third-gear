@@ -382,6 +382,8 @@ void FMenuPages::AddWheelButtonRows(FMenuPage& Page)
 	AddWheelButtonAssign(Page, TEXT("Indicator left"), TEXT("Starts and stops the left indicator. It cancels itself after the turn."), &UWheelInputSettings::IndicatorLeftButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Indicator right"), TEXT("Starts and stops the right indicator. It cancels itself after the turn."), &UWheelInputSettings::IndicatorRightButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Hazard lights"), TEXT("Switches the hazard warning lights on and off."), &UWheelInputSettings::HazardButtonIndex);
+	AddWheelButtonAssign(Page, TEXT("Minimap zoom in"), TEXT("Shows less of the minimap, in more detail. The + key does the same."), &UWheelInputSettings::MinimapZoomInButtonIndex);
+	AddWheelButtonAssign(Page, TEXT("Minimap zoom out"), TEXT("Shows more of the minimap. The - key does the same."), &UWheelInputSettings::MinimapZoomOutButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Open menu"), TEXT("Pauses the game and opens the menu. Holding the D-pad up for a second does the same."), &UWheelInputSettings::MenuButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Menu confirm"), TEXT("Chooses the selected entry in the menu. D-pad right does this without a button."), &UWheelInputSettings::MenuConfirmButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Menu back"), TEXT("Goes back one page. D-pad left on an entry does this without a button."), &UWheelInputSettings::MenuBackButtonIndex);

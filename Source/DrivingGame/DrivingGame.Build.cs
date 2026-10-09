@@ -29,6 +29,10 @@ public class DrivingGame : ModuleRules
 			"AudioMixer",
 			"GeometryCore",
 			"GeometryFramework",
+			"GeometryAlgorithms",
+			"RenderCore",
+			"RHI",
+			"Json",
 		});
 	}
 }
