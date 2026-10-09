@@ -177,6 +177,112 @@ bool SampleGround(const TArray<FTileView>& Tiles, const FVector2D& WorldCm, floa
 	return false;
 }
 
+
+/** Offset of a seam tuft from the pavement edge: the kerb stone's width plus half its seam strip, metres. */
+constexpr float SeamOffsetMetres = 0.15f;
+constexpr float SeamSpacingMetres = 0.1f;
+/** Share of the 3 m patches along a kerb where weeds grow; the rest of the seam stays clean. */
+constexpr float SeamPatchShare = 0.65f;
+
+/** Even-odd point in polygon test over all rings. */
+bool GrassPolygonContains(const FWorldPolygon& Polygon, const FVector2f& Point)
+{
+	bool bInside = false;
+	for (const TArray<FVector2f>& Ring : Polygon.Rings)
+	{
+		for (int32 Index = 0, Previous = Ring.Num() - 1; Index < Ring.Num(); Previous = Index++)
+		{
+			const FVector2f& A = Ring[Index];
+			const FVector2f& B = Ring[Previous];
+			if ((A.Y > Point.Y) != (B.Y > Point.Y) && Point.X < (B.X - A.X) * (Point.Y - A.Y) / (B.Y - A.Y) + A.X)
+			{
+				bInside = !bInside;
+			}
+		}
+	}
+	return bInside;
+}
+
+
+/** Tufts along one pavement edge A-B (tile-local metres) that fall inside the cell. */
+void PlaceSeamTuftsOnEdge(const FTileView& Tile, const FWorldSurface& Surface, const FVector2f& A, const FVector2f& B, const FBox2D& CellBounds,
+	const FVector2f& ScaleXY, const FVector2f& ScaleZ, TArray<TArray<FTransform>>& ByMesh)
+{
+	const FWorldTileData& Data = *Tile.Data;
+	const float Length = FVector2f::Distance(A, B);
+	const FVector2f Direction = (B - A) / Length;
+	const FVector2f Side(-Direction.Y, Direction.X);
+	const FVector2f Middle = (A + B) * 0.5f;
+	// The pavement side of the edge is the one inside the polygon.
+	const bool bSideInside = GrassPolygonContains(Surface.Polygon, Middle + Side * 0.05f);
+	const FVector2f Inward = bSideInside ? Side : -Side;
+	const FVector2D TileOriginCm = Tile.BoundsCm.Min;
+	const int32 Steps = FMath::FloorToInt(Length / SeamSpacingMetres);
+	for (int32 Step = 0; Step < Steps; ++Step)
+	{
+		const FVector2f Along = A + Direction * ((Step + 0.5f) * SeamSpacingMetres);
+		const FVector2D WorldCm = TileOriginCm + FVector2D(Along.X, Along.Y) * 100.0;
+		// Patches of weeds, about 3 m long, decided by the world cell they fall in.
+		const uint32 PatchHash = HashCell(FMath::FloorToInt(WorldCm.X / 300.0), FMath::FloorToInt(WorldCm.Y / 300.0), 51u);
+		if (Random01(PatchHash, 0) > SeamPatchShare)
+		{
+			continue;
+		}
+		const uint32 Hash = HashCell(FMath::RoundToInt(WorldCm.X), FMath::RoundToInt(WorldCm.Y), 52u);
+		if (Random01(Hash, 0) > 0.8f)
+		{
+			continue;
+		}
+		const FVector2f Position = Along + Inward * (SeamOffsetMetres + 0.012f * (Random01(Hash, 1) - 0.5f));
+		const FVector2D PositionCm = TileOriginCm + FVector2D(Position.X, Position.Y) * 100.0;
+		if (!CellBounds.IsInside(PositionCm))
+		{
+			continue;
+		}
+		const float HeightCm = (Data.Grid.RoadAt(Position.X, Position.Y) + Surface.Params[0]) * 100.f;
+		const float ScaleAcross = FMath::Lerp(ScaleXY.X, ScaleXY.Y, Random01(Hash, 3));
+		const float ScaleUp = FMath::Lerp(ScaleZ.X, ScaleZ.Y, Random01(Hash, 4));
+		const FQuat Yaw(FVector::UpVector, Random01(Hash, 5) * UE_TWO_PI);
+		const int32 MeshIndex = FMath::Min(int32(Random01(Hash, 6) * ByMesh.Num()), ByMesh.Num() - 1);
+		ByMesh[MeshIndex].Emplace(Yaw, FVector(PositionCm.X, PositionCm.Y, HeightCm - RootSinkCm), FVector(ScaleAcross, ScaleAcross, ScaleUp));
+	}
+}
+
+/** Seam tufts for every pavement edge near a cell. */
+void PlaceSeamTufts(const TArray<FTileView>& Tiles, const FIntPoint& CellKey, const FVector2f& ScaleXY, const FVector2f& ScaleZ,
+	TArray<TArray<FTransform>>& ByMesh)
+{
+	const FBox2D CellBounds(FVector2D(CellKey.X * CellCm, CellKey.Y * CellCm), FVector2D((CellKey.X + 1) * CellCm, (CellKey.Y + 1) * CellCm));
+	for (const FTileView& Tile : Tiles)
+	{
+		const FWorldTileData& Data = *Tile.Data;
+		for (const FWorldSurface& Surface : Data.Surfaces)
+		{
+			const bool bPavement = Data.Names.IsValidIndex(Surface.Material) && Data.Names[Surface.Material] == TEXT("Pavement");
+			if (!bPavement)
+			{
+				continue;
+			}
+			for (const TArray<FVector2f>& Ring : Surface.Polygon.Rings)
+			{
+				for (int32 Index = 0; Index < Ring.Num(); ++Index)
+				{
+					const FVector2f& A = Ring[Index];
+					const FVector2f& B = Ring[(Index + 1) % Ring.Num()];
+					const FVector2D MinCm = Tile.BoundsCm.Min + FVector2D(FMath::Min(A.X, B.X), FMath::Min(A.Y, B.Y)) * 100.0;
+					const FVector2D MaxCm = Tile.BoundsCm.Min + FVector2D(FMath::Max(A.X, B.X), FMath::Max(A.Y, B.Y)) * 100.0;
+					const bool bTouchesCell = MaxCm.X >= CellBounds.Min.X - 30.0 && MinCm.X <= CellBounds.Max.X + 30.0
+						&& MaxCm.Y >= CellBounds.Min.Y - 30.0 && MinCm.Y <= CellBounds.Max.Y + 30.0;
+					if (bTouchesCell && FVector2f::Distance(A, B) > 0.05f)
+					{
+						PlaceSeamTuftsOnEdge(Tile, Surface, A, B, CellBounds, ScaleXY, ScaleZ, ByMesh);
+					}
+				}
+			}
+		}
+	}
+}
+
 /** Distance from a point to a cell's rectangle, cm. */
 float DistanceToCell(const FIntPoint& Key, const FVector& Point)
 {
@@ -230,7 +336,14 @@ bool FGrassField::LoadAssets()
 	}
 	Meadow.Meshes.Add(Cast<UStaticMesh>(Load(TuftPath(TEXT("grass_medium_02"), TEXT("grass_medium_02_b")))));
 
-	for (FKind* Kind : {&Lawn, &Meadow})
+	// Weeds in the seam between kerb and pavement: the lawn's tufts and material, small, only placed along pavement edges.
+	FKind Seam = Lawn;
+	Seam.Name = TEXT("Seam");
+	Seam.RadiusCm = 3500.f;
+	Seam.ScaleXY = FVector2f(0.35f, 0.7f);
+	Seam.ScaleZ = FVector2f(0.4f, 0.8f);
+
+	for (FKind* Kind : {&Lawn, &Meadow, &Seam})
 	{
 		bool bComplete = Kind->Material != nullptr;
 		for (const TObjectPtr<UStaticMesh>& Mesh : Kind->Meshes)
@@ -298,13 +411,14 @@ void FGrassField::StartCell(const FIntPoint& Key, uint32 KindBits, const FTileFi
 		FVector2f ScaleZ;
 		int32 MeshCount;
 		bool bMeadow;
+		bool bSeam;
 		bool bIncluded;
 	};
 	TArray<FKindParameters> Parameters;
 	for (int32 KindIndex = 0; KindIndex < Kinds.Num(); ++KindIndex)
 	{
 		const FKind& Kind = Kinds[KindIndex];
-		Parameters.Add({Kind.SpacingCm, Kind.ScaleXY, Kind.ScaleZ, Kind.Meshes.Num(), Kind.Name == TEXT("Meadow"), (KindBits & (1u << KindIndex)) != 0});
+		Parameters.Add({Kind.SpacingCm, Kind.ScaleXY, Kind.ScaleZ, Kind.Meshes.Num(), Kind.Name == TEXT("Meadow"), Kind.Name == TEXT("Seam"), (KindBits & (1u << KindIndex)) != 0});
 	}
 
 	FCell& Cell = Cells.FindOrAdd(Key);
@@ -322,6 +436,11 @@ void FGrassField::StartCell(const FIntPoint& Key, uint32 KindBits, const FTileFi
 			ByMesh.SetNum(Kind.MeshCount);
 			if (!Kind.bIncluded)
 			{
+				continue;
+			}
+			if (Kind.bSeam)
+			{
+				PlaceSeamTufts(Views, Key, Kind.ScaleXY, Kind.ScaleZ, ByMesh);
 				continue;
 			}
 			const int32 FirstX = FMath::FloorToInt(float(Key.X * CellCm) / Kind.SpacingCm);

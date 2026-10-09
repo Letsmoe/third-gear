@@ -14,6 +14,16 @@ namespace
 {
 constexpr float MetresToCm = 100.f;
 constexpr float KerbDepthBelowRoad = 0.1f;
+/** Kerb stone top width, chamfer, mortar joint width and recess, seam strip against the pavement, all metres. */
+constexpr float KerbWidth = 0.15f;
+constexpr float KerbChamfer = 0.02f;
+constexpr float KerbJointWidth = 0.012f;
+constexpr float KerbJointRecess = 0.012f;
+constexpr float KerbSeamWidth = 0.025f;
+/** Stone tops sit this far above the pavement slabs so the two surfaces never z-fight. */
+constexpr float KerbTopLift = 0.002f;
+constexpr float KerbGutterWidth = 0.30f;
+constexpr float GutterLift = 0.008f;
 constexpr float MarkingLift = 0.01f;
 constexpr float MarkingSampleStep = 2.f;
 constexpr float BuildingFoundationDepth = 0.6f;
@@ -298,38 +308,215 @@ FVector3f OutwardNormal(const FWorldPolygon& Polygon, const FVector2f& A, const 
 	return FVector3f(Outward.X, Outward.Y, 0.f);
 }
 
-/** Granite kerb faces along the pavement edge, from just below the road up to the pavement surface. */
+/** Hash of two integers and a salt to a number in [0, 1), for per-stone variation. */
+float StoneRandom(int32 A, int32 B, uint32 Salt)
+{
+	uint32 Value = uint32(A) * 73856093u ^ uint32(B) * 19349663u ^ Salt * 83492791u;
+	Value = Value * 747796405u + 2891336453u;
+	Value = ((Value >> ((Value >> 28u) + 4u)) ^ Value) * 277803737u;
+	Value = (Value >> 22u) ^ Value;
+	return float(Value & 0xFFFFFF) / float(0x1000000);
+}
+
+/** Vertex colour carrying a stone's tone in R; the kerb material maps R from dark joint (0) to light stone (1). */
+FColor StoneColor(float Tone)
+{
+	return FColor(uint8(FMath::Clamp(Tone, 0.f, 1.f) * 255.f), 0, 0, 255);
+}
+
+/**
+ * Cross-section of the kerb at one end of a piece, as positions along the edge normal: distance D from the road side
+ * face towards the pavement, height Z above the road surface.
+ */
+struct FKerbProfile
+{
+	FVector2f Point;
+	FVector2f Direction;
+	/** Points from the pavement towards the road. */
+	FVector2f Outward;
+	float RoadZ;
+	float KerbHeight;
+};
+
+FVector3f KerbPosition(const FKerbProfile& Profile, float Depth, float Height)
+{
+	// The face sits one chamfer width out from the pavement edge, so the chamfer ends exactly on it.
+	const FVector2f Position = Profile.Point - Profile.Outward * (Depth - KerbChamfer);
+	return ToCm(Position.X, Position.Y, Profile.RoadZ + Height);
+}
+
+/** One quad between two profile lines: from (DepthA, HeightA) to (DepthB, HeightB) at both ends of the piece. */
+void AddKerbQuad(FWorldMeshBuilder& Builder, int32 Material, const FKerbProfile& Start, const FKerbProfile& End, FVector2f From,
+	FVector2f To, float StartU, float EndU, float VStart, float VEnd, const FVector3f& Facing, const FColor& Color)
+{
+	const int32 V0 = Builder.AddVertex(KerbPosition(Start, From.X, From.Y), FVector2f(StartU, VStart), Color);
+	const int32 V1 = Builder.AddVertex(KerbPosition(End, From.X, From.Y), FVector2f(EndU, VStart), Color);
+	const int32 V2 = Builder.AddVertex(KerbPosition(End, To.X, To.Y), FVector2f(EndU, VEnd), Color);
+	const int32 V3 = Builder.AddVertex(KerbPosition(Start, To.X, To.Y), FVector2f(StartU, VEnd), Color);
+	Builder.AddQuad(V0, V1, V2, V3, Material, Facing);
+}
+
+/**
+ * One piece of a kerb stone between two points of the pavement edge: the face towards the road, the chamfer, the top,
+ * and a dark seam strip where the stone meets the pavement slabs (the grass tufts grow there).
+ */
+void AddKerbStonePiece(FWorldMeshBuilder& Builder, int32 Material, const FKerbProfile& Start, const FKerbProfile& End, float StartU,
+	float EndU, float Tone, float TopLift)
+{
+	const float KerbTop = Start.KerbHeight + TopLift;
+	const FVector3f OutwardFacing(Start.Outward.X, Start.Outward.Y, 0.f);
+	const FVector3f ChamferFacing(Start.Outward.X, Start.Outward.Y, 1.f);
+	const FColor Stone = StoneColor(Tone);
+	const float FaceBottom = -KerbDepthBelowRoad;
+	const float FaceTop = KerbTop - KerbChamfer;
+	// Face and chamfer lead down into the road; the top runs back to the pavement.
+	AddKerbQuad(Builder, Material, Start, End, FVector2f(0.f, FaceBottom), FVector2f(0.f, FaceTop), StartU, EndU, -FaceBottom, -FaceTop, OutwardFacing, Stone);
+	AddKerbQuad(Builder, Material, Start, End, FVector2f(0.f, FaceTop), FVector2f(KerbChamfer, KerbTop), StartU, EndU, -FaceTop, -KerbTop, ChamferFacing, Stone);
+	AddKerbQuad(Builder, Material, Start, End, FVector2f(KerbChamfer, KerbTop), FVector2f(KerbWidth, KerbTop), StartU, EndU, 4.f + KerbChamfer, 4.f + KerbWidth, Up, Stone);
+	AddKerbQuad(Builder, Material, Start, End, FVector2f(KerbWidth, KerbTop), FVector2f(KerbWidth + KerbSeamWidth, KerbTop), StartU, EndU, 4.f, 4.f + KerbSeamWidth, Up, StoneColor(0.08f));
+}
+
+/** The mortar joint between two stones: face and top recessed a little, dark. */
+void AddKerbJoint(FWorldMeshBuilder& Builder, int32 Material, const FKerbProfile& Start, const FKerbProfile& End, float StartU, float EndU)
+{
+	const float KerbTop = Start.KerbHeight - KerbJointRecess;
+	const FColor Joint = StoneColor(0.f);
+	AddKerbQuad(Builder, Material, Start, End, FVector2f(KerbJointRecess, -KerbDepthBelowRoad), FVector2f(KerbJointRecess, KerbTop), StartU, EndU,
+		KerbDepthBelowRoad, -KerbTop, FVector3f(Start.Outward.X, Start.Outward.Y, 0.f), Joint);
+	AddKerbQuad(Builder, Material, Start, End, FVector2f(KerbJointRecess, KerbTop), FVector2f(KerbWidth, KerbTop), StartU, EndU, 4.f, 4.f + KerbWidth, Up, Joint);
+}
+
+FKerbProfile ProfileAt(const FWorldTileData& Tile, const FVector2f& Start, const FVector2f& End, float Along, const FVector2f& Outward, float KerbHeight)
+{
+	FKerbProfile Profile;
+	Profile.Point = FMath::Lerp(Start, End, Along);
+	Profile.Direction = (End - Start).GetSafeNormal();
+	Profile.Outward = Outward;
+	Profile.RoadZ = Tile.Grid.RoadAt(Profile.Point.X, Profile.Point.Y);
+	Profile.KerbHeight = KerbHeight;
+	return Profile;
+}
+
+/** True when a road surface lies a little way out from the middle of the edge, so the kerb has a gutter in front of it. */
+bool IsRoadBesideEdge(const FWorldTileData& Tile, const FVector2f& Middle, const FVector2f& Outward)
+{
+	const FVector2f Probe = Middle + Outward * (KerbGutterWidth + 0.1f);
+	for (const FWorldSurface& Surface : Tile.Surfaces)
+	{
+		const FString& Name = Tile.Names.IsValidIndex(Surface.Material) ? Tile.Names[Surface.Material] : FString();
+		if (Name.StartsWith(TEXT("Road_")) && IsInside(Surface.Polygon, Probe))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/** Strip of setts lying on the road in front of the kerb face, cut every metre so it follows the road height. */
+void AddGutter(const FWorldTileData& Tile, const FVector2f& A, const FVector2f& B, const FVector2f& Outward, float StartDistance,
+	FWorldTileMeshes& Meshes)
+{
+	const int32 Material = MaterialSlot(Meshes, TEXT("KerbGutter"));
+	FWorldMeshBuilder& Builder = Meshes.Ground;
+	const float Length = FVector2f::Distance(A, B);
+	const int32 Pieces = FMath::Max(1, FMath::CeilToInt(Length));
+	int32 PreviousInner = INDEX_NONE;
+	int32 PreviousOuter = INDEX_NONE;
+	for (int32 Piece = 0; Piece <= Pieces; ++Piece)
+	{
+		const FVector2f Point = FMath::Lerp(A, B, float(Piece) / Pieces);
+		const FVector2f Outer = Point + Outward * KerbGutterWidth;
+		const float Distance = StartDistance + Length * Piece / Pieces;
+		const int32 InnerVertex = Builder.AddVertex(ToCm(Point.X, Point.Y, Tile.Grid.RoadAt(Point.X, Point.Y) + GutterLift), FVector2f(Distance, 0.f));
+		const int32 OuterVertex = Builder.AddVertex(ToCm(Outer.X, Outer.Y, Tile.Grid.RoadAt(Outer.X, Outer.Y) + GutterLift), FVector2f(Distance, KerbGutterWidth));
+		if (PreviousInner != INDEX_NONE)
+		{
+			Builder.AddQuad(PreviousInner, InnerVertex, OuterVertex, PreviousOuter, Material, Up);
+		}
+		PreviousInner = InnerVertex;
+		PreviousOuter = OuterVertex;
+	}
+}
+
+/** Length of stone number Index along a ring, 0.85 to 1.2 m. */
+float StoneLength(int32 RingSeed, int32 Index)
+{
+	return 0.85f + 0.35f * StoneRandom(RingSeed, Index, 11u);
+}
+
+/**
+ * Granite kerb along one ring of the pavement polygon: laid as individual stones about a metre long with dark joints,
+ * each with its own tone, a chamfered edge towards the road and a seam strip against the pavement. Stones run on across
+ * the corners of the outline, so the short edges of a curve don't each get a joint.
+ */
+void BuildKerbRing(const FWorldTileData& Tile, const FWorldPolygon& Polygon, const TArray<FVector2f>& Ring, float KerbHeight, int32 RingSeed,
+	FWorldTileMeshes& Meshes)
+{
+	const int32 Material = MaterialSlot(Meshes, TEXT("KerbStone"));
+	FWorldMeshBuilder& Builder = Meshes.Ground;
+	float Distance = 0.f;
+	int32 StoneIndex = 0;
+	float NextJoint = StoneLength(RingSeed, 0);
+	for (int32 Index = 0; Index < Ring.Num(); ++Index)
+	{
+		const FVector2f& A = Ring[Index];
+		const FVector2f& B = Ring[(Index + 1) % Ring.Num()];
+		const float Length = FVector2f::Distance(A, B);
+		const float EdgeStart = Distance;
+		Distance += Length;
+		const bool bSkip = Length < 0.01f || IsOnTileBorder(Tile, A, B);
+		FVector2f Outward = FVector2f::ZeroVector;
+		if (!bSkip)
+		{
+			const FVector3f Normal = OutwardNormal(Polygon, A, B);
+			Outward = FVector2f(Normal.X, Normal.Y);
+			if (IsRoadBesideEdge(Tile, (A + B) * 0.5f, Outward))
+			{
+				AddGutter(Tile, A, B, Outward, EdgeStart, Meshes);
+			}
+		}
+		float Cursor = 0.f;
+		const auto EmitPiece = [&](float PieceStart, float PieceEnd)
+		{
+			if (bSkip || PieceEnd - PieceStart < 0.002f)
+			{
+				return;
+			}
+			const float Tone = 0.55f + 0.4f * StoneRandom(RingSeed, StoneIndex, 5u);
+			const float TopLift = KerbTopLift + 0.004f * StoneRandom(RingSeed, StoneIndex, 9u);
+			const float StoneU = 10.f * StoneRandom(RingSeed, StoneIndex, 3u);
+			const FKerbProfile Start = ProfileAt(Tile, A, B, PieceStart / Length, Outward, KerbHeight);
+			const FKerbProfile End = ProfileAt(Tile, A, B, PieceEnd / Length, Outward, KerbHeight);
+			AddKerbStonePiece(Builder, Material, Start, End, StoneU + EdgeStart + PieceStart, StoneU + EdgeStart + PieceEnd, Tone, TopLift);
+		};
+		while (EdgeStart + Length > NextJoint)
+		{
+			const float JointCentre = NextJoint - EdgeStart;
+			const float JointStart = FMath::Max(Cursor, JointCentre - 0.5f * KerbJointWidth);
+			const float JointEnd = FMath::Min(Length, JointCentre + 0.5f * KerbJointWidth);
+			EmitPiece(Cursor, JointStart);
+			if (!bSkip && JointEnd > JointStart)
+			{
+				AddKerbJoint(Builder, Material, ProfileAt(Tile, A, B, JointStart / Length, Outward, KerbHeight),
+					ProfileAt(Tile, A, B, JointEnd / Length, Outward, KerbHeight), 0.f, JointEnd - JointStart);
+			}
+			Cursor = JointEnd;
+			++StoneIndex;
+			NextJoint += StoneLength(RingSeed, StoneIndex);
+		}
+		EmitPiece(Cursor, Length);
+	}
+}
+
+/** Kerb stones and gutter along every edge of the pavement polygon. */
 void BuildKerbs(const FWorldTileData& Tile, const FWorldSurface& Pavement, FWorldTileMeshes& Meshes)
 {
-	const int32 Material = MaterialSlot(Meshes, TEXT("Kerb"));
 	const float KerbHeight = Pavement.Params[0];
-	FWorldMeshBuilder& Builder = Meshes.Ground;
+	const int32 TileSeed = FMath::RoundToInt(float(Tile.Origin.X)) * 31 + FMath::RoundToInt(float(Tile.Origin.Y));
+	int32 RingIndex = 0;
 	for (const TArray<FVector2f>& Ring : Pavement.Polygon.Rings)
 	{
-		float Distance = 0.f;
-		for (int32 Index = 0; Index < Ring.Num(); ++Index)
-		{
-			const FVector2f& A = Ring[Index];
-			const FVector2f& B = Ring[(Index + 1) % Ring.Num()];
-			const float Length = FVector2f::Distance(A, B);
-			if (Length < 0.01f || IsOnTileBorder(Tile, A, B))
-			{
-				Distance += Length;
-				continue;
-			}
-			const float RoadA = Tile.Grid.RoadAt(A.X, A.Y);
-			const float RoadB = Tile.Grid.RoadAt(B.X, B.Y);
-			const float TopA = RoadA + KerbHeight;
-			const float TopB = RoadB + KerbHeight;
-			const float BottomA = RoadA - KerbDepthBelowRoad;
-			const float BottomB = RoadB - KerbDepthBelowRoad;
-			const int32 V0 = Builder.AddVertex(ToCm(A.X, A.Y, BottomA), FVector2f(Distance, -BottomA));
-			const int32 V1 = Builder.AddVertex(ToCm(B.X, B.Y, BottomB), FVector2f(Distance + Length, -BottomB));
-			const int32 V2 = Builder.AddVertex(ToCm(B.X, B.Y, TopB), FVector2f(Distance + Length, -TopB));
-			const int32 V3 = Builder.AddVertex(ToCm(A.X, A.Y, TopA), FVector2f(Distance, -TopA));
-			Builder.AddQuad(V0, V1, V2, V3, Material, OutwardNormal(Pavement.Polygon, A, B));
-			Distance += Length;
-		}
+		BuildKerbRing(Tile, Pavement.Polygon, Ring, KerbHeight, TileSeed * 7 + RingIndex++, Meshes);
 	}
 }
 
