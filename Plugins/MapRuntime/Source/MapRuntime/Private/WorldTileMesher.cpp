@@ -2,6 +2,9 @@
 
 #include "ConstrainedDelaunay2.h"
 #include "Polygon2.h"
+#include "HAL/IConsoleManager.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "WorldFurniture.h"
 #include "WorldTileData.h"
 
@@ -601,6 +604,9 @@ void BuildPlants(const FWorldTileData& Tile, EWorldTileDetail Detail, const FWor
 }
 }
 
+/** tg.Furniture 0 leaves lamps, signal poles and signs out, to measure what they cost. */
+static TAutoConsoleVariable<int32> CVarFurniture(TEXT("tg.Furniture"), 1, TEXT("1 builds street furniture (lamps, signals, signs), 0 leaves it out."));
+
 FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDetail Detail, const FWorldMeshingContext& Context)
 {
 	FWorldTileMeshes Meshes;
@@ -620,7 +626,7 @@ FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDeta
 		BuildBuilding(Tile, Building, Meshes);
 	}
 	BuildPlants(Tile, Detail, Context, Meshes);
-	if (Detail == EWorldTileDetail::Near && !Tile.Pois.IsEmpty())
+	if (Detail == EWorldTileDetail::Near && !Tile.Pois.IsEmpty() && CVarFurniture.GetValueOnAnyThread() != 0 && !FParse::Param(FCommandLine::Get(), TEXT("NoFurniture")))
 	{
 		Meshes.Furniture = MakeShared<FWorldFurnitureInstances>();
 		BuildWorldFurniture(Tile, *Meshes.Furniture);

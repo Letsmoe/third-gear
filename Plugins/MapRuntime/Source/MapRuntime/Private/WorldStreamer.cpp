@@ -32,6 +32,8 @@ namespace
 constexpr float EyeHeightCm = 120.f;
 constexpr float UpdateIntervalSeconds = 0.25f;
 constexpr int32 ShrubCullDistanceCm = 40000;
+/** Height the car is dropped from with -StartPose; the ground trace in the game mode reaches 80 m. */
+constexpr float StartPoseHeightCm = 4000.f;
 }
 
 /** One tile meshed at one detail level by a worker. */
@@ -287,6 +289,15 @@ bool AWorldStreamer::GetStartTransform(FTransform& OutTransform)
 	if (!EnsureIndex() || !Start.IsValid())
 	{
 		return false;
+	}
+	// -StartPose=x,y,yaw (metres, degrees) starts somewhere else, e.g. at a signal junction; the car is dropped onto the ground.
+	FString Pose;
+	TArray<FString> Parts;
+	if (FParse::Value(FCommandLine::Get(), TEXT("StartPose="), Pose, /*bShouldStopOnSeparator=*/false) && Pose.ParseIntoArray(Parts, TEXT(",")) == 3)
+	{
+		OutTransform = FTransform(FRotator(0.0, FCString::Atod(*Parts[2]), 0.0),
+			FVector(FCString::Atod(*Parts[0]) * 100.0, FCString::Atod(*Parts[1]) * 100.0, StartPoseHeightCm));
+		return true;
 	}
 	const FVector Location(Start->GetNumberField(TEXT("x")) * 100.0, Start->GetNumberField(TEXT("y")) * 100.0,
 		Start->GetNumberField(TEXT("z")) * 100.0 + EyeHeightCm);

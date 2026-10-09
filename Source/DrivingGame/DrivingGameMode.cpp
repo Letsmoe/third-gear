@@ -39,7 +39,7 @@ FVector ADrivingGameMode::FindGroundBelow(const FVector& Location) const
 	// First static surface below the player start (ignoring the player start's own capsule, pawns etc.).
 	TArray<FHitResult> Hits;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(CarSpawnTrace), /*bTraceComplex=*/true);
-	GetWorld()->LineTraceMultiByObjectType(Hits, Location, Location - FVector(0, 0, 1000), FCollisionObjectQueryParams(ECC_WorldStatic), Params);
+	GetWorld()->LineTraceMultiByObjectType(Hits, Location, Location - FVector(0, 0, 8000), FCollisionObjectQueryParams(ECC_WorldStatic), Params);
 	for (const FHitResult& Hit : Hits)
 	{
 		if (Hit.bBlockingHit && !Cast<APlayerStart>(Hit.GetActor()) && !Cast<APawn>(Hit.GetActor()))
@@ -48,7 +48,7 @@ FVector ADrivingGameMode::FindGroundBelow(const FVector& Location) const
 		}
 	}
 	FHitResult Hit;
-	if (GetWorld()->LineTraceSingleByObjectType(Hit, Location, Location - FVector(0, 0, 1000), FCollisionObjectQueryParams(ECC_WorldStatic), Params))
+	if (GetWorld()->LineTraceSingleByObjectType(Hit, Location, Location - FVector(0, 0, 8000), FCollisionObjectQueryParams(ECC_WorldStatic), Params))
 	{
 		return Hit.ImpactPoint;
 	}
