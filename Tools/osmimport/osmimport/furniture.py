@@ -236,6 +236,21 @@ class FurnitureBuilder:
                 return None
         return x + direction_right[0] * moved, y + direction_right[1] * moved
 
+    def off_road_spot(self, x, y):
+        """(x, y) itself when it is clear of the road and the cycleways, else the nearest free spot beside the
+        nearest road, away from its centre line; None when there is none within reach."""
+        if not self.blocked.contains(shapely.Point(x, y)):
+            return x, y
+        found = self.nearest_way(x, y)
+        if found is None:
+            return None
+        way, s, offset = found
+        _, direction = self.graph.point_and_direction(way, s, +1)
+        outward = _right(direction)
+        if offset < 0:
+            outward = (-outward[0], -outward[1])
+        return self.push_off_road(x, y, outward, limit=self.graph.widths[way.id] / 2 + POLE_PUSH_LIMIT)
+
     def inside_building(self, x, y):
         return self._buildings is not None and self._buildings.contains(shapely.Point(x, y))
 
@@ -540,7 +555,12 @@ class FurnitureBuilder:
     # ------------------------------------------------------------ signs
 
     def add_sign(self, x, y, yaw, names, height_m=None):
-        """A sign pole at (x, y) facing against yaw (the travel direction); names are graphics stacked top to bottom."""
+        """A sign pole at (x, y) facing against yaw (the travel direction); names are graphics stacked top to bottom.
+        Signs never stand on the road or a cycleway: one placed there moves beside the road, or is left out."""
+        spot = self.off_road_spot(x, y)
+        if spot is None:
+            return
+        x, y = spot
         if self.inside_building(x, y):
             return
         self.signs.append({"x": float(x), "y": float(y), "yaw": float(yaw), "names": list(names)})

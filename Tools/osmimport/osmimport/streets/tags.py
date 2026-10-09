@@ -140,6 +140,15 @@ def is_bus_road(tags) -> bool:
     return buses_allowed and others_banned
 
 
+def is_zone30(tags) -> bool:
+    """True inside a Tempo 30 zone (Zeichen 274.1), however the zone is tagged."""
+    for key in ("maxspeed:type", "source:maxspeed", "zone:maxspeed", "zone:traffic"):
+        value = str(tags.get(key, "")).lower()
+        if "zone30" in value or value.endswith(":30") or "zone:30" in value:
+            return True
+    return False
+
+
 def lane_markings(tags):
     """True or False when lane_markings says whether lanes are painted, None when it is not tagged."""
     value = tags.get("lane_markings")

@@ -26,6 +26,8 @@ from scipy.sparse.csgraph import connected_components
 
 from . import furniture, parking, roads
 from .streets.cross_section import Travel
+from .streets.polyline import (bezier, cut_polyline, offset_polyline, project_on_polyline, resample,
+                               right_of, unit)
 
 LANE_SPACING = 1.5
 CONNECTION_SPACING = 0.75
@@ -106,55 +108,6 @@ class Segment:
     bridge: bool = False
 
 
-def right_of(direction):
-    """The unit vector to the right of a direction in the x east, y south frame."""
-    return np.array([-direction[1], direction[0]])
-
-
-def unit(vector):
-    """The vector scaled to length one; (1, 0) for a zero vector."""
-    norm = float(np.hypot(*vector))
-    return vector / norm if norm > 1e-9 else np.array([1.0, 0.0])
-
-
-def offset_polyline(xy, distance):
-    """Moves a polyline sideways by distance to the right of its direction, with mitred corners.
-    distance is one number, or one number per point."""
-    if np.ndim(distance) == 0 and abs(distance) < 1e-6:
-        return xy.copy()
-    steps = np.diff(xy, axis=0)
-    lengths = np.hypot(steps[:, 0], steps[:, 1])
-    keep = lengths > 1e-9
-    steps, lengths = steps[keep], lengths[keep]
-    directions = steps / lengths[:, None]
-    normals = np.stack([-directions[:, 1], directions[:, 0]], axis=1)
-    count = len(xy)
-    vertex_normals = np.zeros((count, 2))
-    vertex_normals[0] = normals[0]
-    vertex_normals[-1] = normals[-1]
-    scale = np.ones(count)
-    for i in range(1, count - 1):
-        before = normals[min(i - 1, len(normals) - 1)]
-        after = normals[min(i, len(normals) - 1)]
-        mean = unit(before + after)
-        vertex_normals[i] = mean
-        scale[i] = 1.0 / max(float(np.dot(mean, before)), 0.5)
-    return xy + vertex_normals * (distance * scale)[:, None]
-
-
-
-def resample(xy, spacing):
-    """Equally spaced points along a polyline, keeping its end points."""
-    steps = np.hypot(*np.diff(xy, axis=0).T)
-    along = np.concatenate([[0.0], np.cumsum(steps)])
-    total = along[-1]
-    if total < 1e-6:
-        return xy[:1].copy()
-    count = max(int(round(total / spacing)), 1) + 1
-    targets = np.linspace(0.0, total, count)
-    return np.stack([np.interp(targets, along, xy[:, 0]), np.interp(targets, along, xy[:, 1])], axis=1)
-
-
 def smooth(xy, passes=3):
     """Rounds corners: repeated 1-2-1 averaging with the end points pinned."""
     out = xy.copy()
@@ -163,37 +116,6 @@ def smooth(xy, passes=3):
     for _ in range(passes):
         out[1:-1] = 0.25 * out[:-2] + 0.5 * out[1:-1] + 0.25 * out[2:]
     return out
-
-
-def cut_polyline(xy, start_s, end_s):
-    """The part of a polyline between two arc lengths."""
-    steps = np.hypot(*np.diff(xy, axis=0).T)
-    along = np.concatenate([[0.0], np.cumsum(steps)])
-    total = along[-1]
-    start_s = min(max(start_s, 0.0), total)
-    end_s = min(max(end_s, start_s), total)
-    inside = (along > start_s + 1e-6) & (along < end_s - 1e-6)
-    points = [np.array([np.interp(start_s, along, xy[:, 0]), np.interp(start_s, along, xy[:, 1])])]
-    points.extend(xy[inside])
-    points.append(np.array([np.interp(end_s, along, xy[:, 0]), np.interp(end_s, along, xy[:, 1])]))
-    return np.array(points)
-
-
-def project_on_polyline(xy, point):
-    """(arc length, distance) of the closest point of a polyline to a point."""
-    best = (0.0, 1e18)
-    travelled = 0.0
-    for a, b in zip(xy[:-1], xy[1:]):
-        edge = b - a
-        length = float(np.hypot(*edge))
-        if length < 1e-9:
-            continue
-        t = min(max(float(np.dot(point - a, edge)) / (length * length), 0.0), 1.0)
-        distance = float(np.hypot(*(a + edge * t - point)))
-        if distance < best[1]:
-            best = (travelled + t * length, distance)
-        travelled += length
-    return best
 
 
 def curvature_speeds(xy, limit_kmh, cap_kmh=None):
@@ -221,14 +143,6 @@ def curvature_speeds(xy, limit_kmh, cap_kmh=None):
     if cap_kmh is not None:
         speeds = np.minimum(speeds, cap_kmh)
     return speeds
-
-
-def bezier(p0, p1, p2, p3, spacing):
-    """Cubic Bezier curve sampled about every spacing metres."""
-    coarse = np.linspace(0.0, 1.0, 40)[:, None]
-    points = ((1 - coarse) ** 3 * p0 + 3 * (1 - coarse) ** 2 * coarse * p1 + 3 * (1 - coarse) * coarse ** 2 * p2
-              + coarse ** 3 * p3)
-    return resample(points, spacing)
 
 
 class LaneBuilder:

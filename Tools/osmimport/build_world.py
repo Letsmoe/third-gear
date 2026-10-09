@@ -29,7 +29,7 @@ from osmimport import building_types, buildings, canopy, roofs, dem, furniture, 
 from osmimport import worldtile  # noqa: E402
 
 GRID_CELL = 1.0
-MARKING_STYLES = {"dash_urban": 0, "dash_rural": 1, "solid": 2, "edge": 3}
+MARKING_STYLES = {"dash_urban": 0, "dash_rural": 1, "solid": 2, "edge": 3, "guide": 4, "edge_guide": 5}
 PATH_LIFT = 0.04
 ATTRIBUTION = [
     "© OpenStreetMap contributors (ODbL)",

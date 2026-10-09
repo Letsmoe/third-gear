@@ -61,6 +61,11 @@ SERVICE_WIDTH = {
     "alley": (2.7, 2.7),
 }
 
+# Importance of the road classes, lowest first: the higher class wins the junction surface and goes straight through.
+ROAD_CLASS_RANK = {road_class: rank for rank, road_class in enumerate([
+    "service", "living_street", "road", "residential", "unclassified", "tertiary_link", "tertiary", "secondary_link",
+    "secondary", "primary_link", "primary", "trunk_link", "trunk", "motorway_link", "motorway"])}
+
 # Classes whose lanes are painted when OSM does not say (no lanes= and no lane_markings=). Below tertiary, roads
 # are unmarked; tertiary roads mapped without lanes= in Hamburg are mostly unmarked too.
 MARKED_BY_DEFAULT = {"motorway", "trunk", "primary", "secondary"}
@@ -88,3 +93,46 @@ WIDTH_TAG_RANGE = (2.0, 30.0)
 WIDTH_TAG_LANE_ONLY_GAP = 1.0
 # No travel lane gets narrower than this when the strips are fitted to a width= tag.
 MIN_TRAVEL_LANE_WIDTH = 2.0
+
+# ---- Lines (sources: <data root>/downloads/road_rules/NOTES.md) ----
+
+# Classes whose lane, centre and edge lines are painted at all.
+PAINTED_CLASSES = {"motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link", "secondary",
+                   "secondary_link", "tertiary", "tertiary_link"}
+# Edge lines on these classes, and on rural roads from RURAL_EDGE_LINE_MIN_WIDTH.
+EDGE_LINE_CLASSES = {"motorway", "trunk", "primary", "motorway_link", "trunk_link"}
+RURAL_EDGE_LINE_MIN_WIDTH = 5.5
+# No centre line on carriageways narrower than this, nor in Tempo 30 zones (VwV-StVO zu Zeichen 340, StVO §45 1c).
+CENTRE_LINE_MIN_WIDTH = 5.5
+# Lanes narrower than this are not marked (RASt 06 corrections p. 126).
+MIN_MARKED_LANE_WIDTH = 2.75
+
+# Where a road widens, narrows or gains or loses a lane, its lines move sideways over a taper ("Verziehung") of
+# speed x shift / 3 metres (RASt 06 6.1.4.3: lz = V * i / 3); inside towns 10 to 20 m usually suffice and the taper
+# is at most 30 m. Lines of a lane that only one road has start or end where the taper does.
+TAPER_SPEED_FACTOR = 1.0 / 3.0
+TAPER_MIN_LENGTH = 10.0
+URBAN_TAPER_MAX_LENGTH = 30.0
+# A taper takes at most this share of its road segment, so the two ends of a short segment don't overlap.
+TAPER_MAX_SEGMENT_SHARE = 0.45
+
+# Speed for the tapers where maxspeed is not tagged: the German defaults inside and outside towns.
+DEFAULT_SPEED_URBAN = 50.0
+DEFAULT_SPEED_RURAL = 100.0
+
+# Kerb radius at junction corners: lines stop where the corner's curve begins.
+CORNER_RADIUS = 4.0
+# Through a junction, the lines of the road that goes straight on continue as guide lines with dash and gap 1:1
+# (RMS Teil 1 3.2.2.3); the dash length is not in the free sources.
+GUIDE_LINE_DASH = (1.5, 1.5)
+# The edge line of the through road continues across the mouth of a side road as a broken broad line.
+EDGE_GUIDE_DASH = (1.5, 1.5)
+# Two arms are one road going straight through a junction when their directions differ by at most this much.
+THROUGH_MAX_DEFLECTION_DEGREES = 35.0
+# Side arms of these classes (driveways, parking aisles) don't interrupt the lines of the road they join.
+MINOR_ARM_CLASSES = {"service", "track"}
+# Left turns get guide lines around the corner at signalised junctions (a signal within this distance) when the
+# approach has its own left-turn lanes (turn:lanes).
+SIGNAL_JUNCTION_RADIUS = 40.0
+# Spacing of the points of generated lines.
+LINE_POINT_SPACING = 1.0

@@ -10,23 +10,20 @@ from scipy import ndimage
 
 from .dem import HeightGrid
 from .osm import OsmData, Way
-from .streets.cross_section import CrossSection, RoadContext, StripKind, cross_section
-from .streets.tags import is_oneway, number
+from .streets.cross_section import CrossSection, RoadContext, cross_section
+from .streets import assumptions, road_lines
+from .streets.tags import is_oneway, number  # noqa: F401 (is_oneway: used as roads.is_oneway)
 
 # Higher rank wins where surfaces overlap (junction area belongs to the major road).
-CLASS_RANK = {k: i for i, k in enumerate([
-    "service", "living_street", "road", "residential", "unclassified", "tertiary_link", "tertiary", "secondary_link",
-    "secondary", "primary_link", "primary", "trunk_link", "trunk", "motorway_link", "motorway"])}
+CLASS_RANK = assumptions.ROAD_CLASS_RANK
 PAVEMENT_CLASSES = {"primary", "secondary", "tertiary", "residential", "unclassified", "living_street", "primary_link",
                     "secondary_link", "tertiary_link"}
-MARKED_CLASSES = {"motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link", "secondary",
-                  "secondary_link", "tertiary", "tertiary_link"}
 COBBLE_SURFACES = {"sett", "cobblestone", "unhewn_cobblestone", "cobblestone:flattened"}
 PAVER_SURFACES = {"paving_stones", "paving_stones:30", "concrete:plates", "grass_paver"}
 
 KERB_HEIGHT = 0.12
 PAVEMENT_WIDTH = 2.5
-FILLET_RADIUS = 4.0
+FILLET_RADIUS = assumptions.CORNER_RADIUS
 MARKING_LIFT = 0.008
 
 
@@ -98,16 +95,16 @@ def node_degrees(ways) -> Counter:
 
 def build(osm: OsmData, dem: HeightGrid, buildings_union=None) -> RoadNetwork:
     ways = [w for w in osm.roads if not _is_tunnel(w) and len(w.xy) >= 2]
-    sections = {w.id: cross_section(w.tags, road_context(w, buildings_union)) for w in ways}
+    contexts = {w.id: road_context(w, buildings_union) for w in ways}
+    sections = {w.id: cross_section(w.tags, contexts[w.id]) for w in ways}
     widths = {way_id: section.width() for way_id, section in sections.items()}
     ground_ways = [w for w in ways if _is_ground(w)]
     bridge_ways = [w for w in ways if not _is_ground(w)]
+    lines = road_lines.build(ground_ways, sections, {way_id: context.urban for way_id, context in contexts.items()},
+                             _signal_points(osm))
 
     # --- surface polygons per kind, major road classes win overlaps ---
-    strips = {}
-    for w in ground_ways:
-        strips[w.id] = shapely.buffer(shapely.LineString(w.xy), widths[w.id] / 2, cap_style="round", join_style="round",
-                                      quad_segs=4)
+    strips = _way_surfaces(lines)
     ground = shapely.union_all(list(strips.values()))
     junction_zones = _junction_zones(ground_ways, widths)
     # Fillet concave corners (kerb radii at junctions) without growing the outline elsewhere. Only inside junctions:
@@ -143,10 +140,37 @@ def build(osm: OsmData, dem: HeightGrid, buildings_union=None) -> RoadNetwork:
     # --- pavements along urban roads ---
     pavement = _pavements(ground_ways, widths, ground, buildings_union, osm)
 
-    net = RoadNetwork(ways=ways, sections=sections, widths=widths, surfaces=surfaces, ground=ground, bridges=bridges, pavement=pavement,
-                      height=height, junction_zones=junction_zones)
-    net.markings = build_markings(ground_ways, sections, junction_zones, ground)
+    net = RoadNetwork(ways=ways, sections=sections, widths=widths, surfaces=surfaces, ground=ground, bridges=bridges,
+                      pavement=pavement, height=height, junction_zones=junction_zones)
+    net.markings = build_markings(lines, ground)
     return net
+
+
+def _signal_points(osm: OsmData) -> list:
+    """(x, y) of the traffic signal nodes."""
+    return [(point.x, point.y) for point in osm.points if point.tags.get("highway") == "traffic_signals"]
+
+
+def _way_surfaces(lines) -> dict:
+    """way id -> carriageway polygon: the union of its segments' surfaces."""
+    pieces = defaultdict(list)
+    for layout in lines.layouts:
+        pieces[layout.segment.way.id].append(_segment_surface(lines, layout))
+    return {way_id: shapely.union_all(parts) for way_id, parts in pieces.items()}
+
+
+def _segment_surface(lines, layout):
+    """A segment's carriageway: a round-capped band of its width, or where it tapers, the polygon between its
+    tapered kerbs closed with a disc of the width at each end (which fills the outer side of bends at the node)."""
+    segment = layout.segment
+    centre = shapely.LineString(segment.xy)
+    if layout.start.taper <= 0 and layout.end.taper <= 0:
+        return shapely.buffer(centre, segment.section.width() / 2, cap_style="round", join_style="round", quad_segs=4)
+    left, right = lines.kerbs(layout)
+    band = shapely.make_valid(shapely.Polygon(np.concatenate([left, right[::-1]])))
+    caps = [shapely.Point(segment.xy[0]).buffer(layout.width_at_end(True) / 2, quad_segs=4),
+            shapely.Point(segment.xy[-1]).buffer(layout.width_at_end(False) / 2, quad_segs=4)]
+    return shapely.union_all([band] + caps)
 
 
 def _road_height_field(dem: HeightGrid, ground) -> HeightGrid:
@@ -226,50 +250,16 @@ def _junction_zones(ground_ways, widths):
     return shapely.union_all(zones) if zones else shapely.Polygon()
 
 
-def build_markings(ground_ways, sections, junction_zones, ground):
-    """Returns a list of (kind, LineString) in world xy. kind: 'dash_urban', 'dash_rural', 'solid', 'edge'.
-
-    The lines sit on the boundaries of the cross-section's strips (positive offsets are to the physical right, which
-    shapely's offset_curve gives for positive distances in the mirrored world frame)."""
+def build_markings(lines, ground):
+    """(kind, LineString) of every painted line (road_lines: lane, centre and edge lines with their tapers and junction
+    cuts, and the guide lines through junctions), kept on the road surface."""
     markings = []
-    keep_out = junction_zones
-    for w in ground_ways:
-        t = w.tags
-        hw = t.get("highway")
-        if hw not in MARKED_CLASSES or t.get("lane_markings") == "no" or t.get("area") == "yes":
+    inside = ground.buffer(-0.1)
+    for kind, xy in lines.painted():
+        if len(xy) < 2:
             continue
-        section = sections[w.id]
-        width = section.width()
-        lanes = section.lane_count()
-        line = shapely.LineString(w.xy)
-        if line.length < 8:
-            continue
-        speed = number(t.get("maxspeed"), 50)
-        rural = speed >= 70
-        dash = "dash_rural" if rural else "dash_urban"
-        lines = []
-        if lanes >= 2 and (is_oneway(t) or width >= 5.0):
-            lines += [(dash, _offset_line(line, offset)) for offset in section.lane_dividers()]
-        if hw in {"motorway", "trunk", "primary", "motorway_link", "trunk_link"} or (rural and width >= 5.5):
-            lines += [("edge", _offset_line(line, offset)) for offset in _travel_lane_edges(section)]
-        for kind, geom in lines:
-            clipped = geom.difference(keep_out).intersection(ground.buffer(-0.1))
-            for part in getattr(clipped, "geoms", [clipped]):
-                if isinstance(part, shapely.LineString) and part.length > 2.0:
-                    markings.append((kind, part))
+        clipped = shapely.LineString(xy).intersection(inside)
+        for part in getattr(clipped, "geoms", [clipped]):
+            if isinstance(part, shapely.LineString) and part.length > 2.0:
+                markings.append((kind, part))
     return markings
-
-
-def _offset_line(line, offset: float):
-    """The line moved sideways (positive to the physical right); the line itself for offsets of about zero, which
-    GEOS cannot offset (the centre line comes out of the strip sums as something like 1e-16)."""
-    if abs(offset) < 0.01:
-        return line
-    return shapely.offset_curve(line, offset)
-
-
-def _travel_lane_edges(section: CrossSection) -> list:
-    """Offsets of the outer edges of the travel lanes, where the edge lines run."""
-    lane_edges = [(left, right) for strip, left, right in section.strip_edges()
-                  if strip.kind == StripKind.TRAVEL_LANE]
-    return [lane_edges[0][0], lane_edges[-1][1]]
