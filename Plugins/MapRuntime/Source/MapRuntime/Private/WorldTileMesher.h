@@ -5,6 +5,7 @@
 
 struct FWorldTileData;
 struct FWorldFurnitureInstances;
+struct FWorldSnowMeshes;
 
 /** How much of a tile is built, by its distance from the viewer. */
 enum class EWorldTileDetail : uint8
@@ -66,6 +67,8 @@ struct FWorldTileMeshes
 	TArray<float> TrunkDiameters;
 	/** Lamps, signal poles and signs (near detail only), or null. */
 	TSharedPtr<FWorldFurnitureInstances> Furniture;
+	/** The snow layer over the ground and roofs (near detail only), or null. */
+	TSharedPtr<FWorldSnowMeshes> Snow;
 };
 
 /**

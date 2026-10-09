@@ -8,6 +8,9 @@
 #include "TrafficSubsystem.h"
 #include "WorldFurniture.h"
 #include "WorldTileMesher.h"
+#include "Kismet/KismetMaterialLibrary.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Materials/MaterialParameterCollectionInstance.h"
 
 namespace
 {
@@ -17,7 +20,9 @@ constexpr float TrunkColliderHeightCm = 400.f;
 
 AWorldTileActor::AWorldTileActor()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
+	PrimaryActorTick.TickInterval = 0.25f;
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	RootComponent->SetMobility(EComponentMobility::Static);
 }
@@ -289,4 +294,62 @@ void AWorldTileActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		}
 	}
 	Super::EndPlay(EndPlayReason);
+}
+
+namespace
+{
+/** Snow cover (0 to 1) published by the weather in /Game/World/MPC_Weather; 0 when it isn't there. */
+float ReadSnowCover(UWorld* World)
+{
+	static TWeakObjectPtr<UMaterialParameterCollection> Collection;
+	if (!Collection.IsValid())
+	{
+		Collection = LoadObject<UMaterialParameterCollection>(nullptr, TEXT("/Game/World/MPC_Weather.MPC_Weather"), nullptr, LOAD_NoWarn);
+	}
+	UMaterialParameterCollectionInstance* Instance = Collection.IsValid() && World ? World->GetParameterCollectionInstance(Collection.Get()) : nullptr;
+	float Cover = 0.f;
+	if (Instance)
+	{
+		Instance->GetScalarParameterValue(FName(TEXT("SnowCover")), Cover);
+	}
+	return Cover;
+}
+
+/** Cover above which the snow layer is drawn. */
+constexpr float SnowShownAbove = 0.004f;
+/** The snow layer is drawn out to this distance, cm; beyond it the ground material's snow texture shows. */
+constexpr float SnowDrawDistanceCm = 18000.f;
+}
+
+void AWorldTileActor::AddSnowChunk(UE::Geometry::FDynamicMesh3&& Mesh, const FBox2D& WorldBoundsCm, UMaterialInterface* Material)
+{
+	if (!Material)
+	{
+		return;
+	}
+	UDynamicMeshComponent* Component = AddMeshComponent(MoveTemp(Mesh), {Material}, /*bCastShadow=*/false);
+	if (!Component)
+	{
+		return;
+	}
+	bSnowShown = ReadSnowCover(GetWorld()) > SnowShownAbove;
+	Component->SetCullDistance(SnowDrawDistanceCm);
+	Component->SetVisibility(bSnowShown);
+	SnowChunks.Add(Component);
+	SetActorTickEnabled(true);
+}
+
+void AWorldTileActor::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	const bool bShown = ReadSnowCover(GetWorld()) > SnowShownAbove;
+	if (bShown == bSnowShown)
+	{
+		return;
+	}
+	bSnowShown = bShown;
+	for (UDynamicMeshComponent* Component : SnowChunks)
+	{
+		Component->SetVisibility(bShown);
+	}
 }

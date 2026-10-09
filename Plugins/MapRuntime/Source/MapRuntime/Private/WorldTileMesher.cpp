@@ -6,6 +6,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "WorldFurniture.h"
+#include "WorldSnow.h"
 #include "WorldTileData.h"
 
 using namespace UE::Geometry;
@@ -630,6 +631,11 @@ FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDeta
 	{
 		Meshes.Furniture = MakeShared<FWorldFurnitureInstances>();
 		BuildWorldFurniture(Tile, *Meshes.Furniture);
+	}
+	if (Detail == EWorldTileDetail::Near && !FParse::Param(FCommandLine::Get(), TEXT("NoSnowMesh")))
+	{
+		Meshes.Snow = MakeShared<FWorldSnowMeshes>();
+		BuildWorldSnow(Tile, Meshes, *Meshes.Snow);
 	}
 	const int32 PerSide = Settings.ChunksPerSide;
 	const FVector2f ChunkSize = Tile.Size * MetresToCm / float(PerSide);

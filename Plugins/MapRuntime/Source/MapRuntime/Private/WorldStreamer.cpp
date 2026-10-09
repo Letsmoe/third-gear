@@ -21,6 +21,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "TrafficSubsystem.h"
 #include "WorldFurniture.h"
+#include "WorldSnow.h"
 #include "WorldTileActor.h"
 #include "WorldTileData.h"
 #include "WorldTileMesher.h"
@@ -422,6 +423,7 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 	const int32 Step = Job.NextStep++;
 	const int32 ChunkSteps = Meshes.GroundChunks.Num();
 	const int32 PlantSteps = Meshes.Plants.Num();
+	const int32 SnowSteps = Meshes.Snow ? Meshes.Snow->Chunks.Num() : 0;
 	bool bDone = false;
 	if (Step == 0)
 	{
@@ -480,6 +482,13 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 			}
 		}
 	}
+	else if (Step <= ChunkSteps + 3 + PlantSteps + SnowSteps)
+	{
+		const int32 SnowChunk = Step - ChunkSteps - 4 - PlantSteps;
+		const FVector2D ChunkSize(Meshes.Snow->ChunkSizeCm);
+		const FVector2D ChunkMin = Tile.Bounds.Min + FVector2D(SnowChunk % Meshes.Snow->ChunksPerSide, SnowChunk / Meshes.Snow->ChunksPerSide) * ChunkSize;
+		Actor->AddSnowChunk(MoveTemp(Meshes.Snow->Chunks[SnowChunk]), FBox2D(ChunkMin, ChunkMin + ChunkSize), FindMaterial(TEXT("Snow_Layer")));
+	}
 	else
 	{
 		if (bNear)
@@ -499,7 +508,7 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 	if (StepSeconds > 0.008)
 	{
 		UE_LOG(LogWorldStreamer, Log, TEXT("Tile %s detail %d: step %d of %d took %.1f ms (furniture part %d)"), *FPaths::GetBaseFilename(Tile.Path), Build.Detail,
-			Step, ChunkSteps + PlantSteps + 5, StepSeconds * 1000.0, Job.FurnitureStep - 1);
+			Step, ChunkSteps + PlantSteps + SnowSteps + 5, StepSeconds * 1000.0, Job.FurnitureStep - 1);
 	}
 	Job.SpawnSeconds += StepSeconds;
 	Job.LongestStepSeconds = FMath::Max(Job.LongestStepSeconds, StepSeconds);

@@ -43,6 +43,14 @@ public:
 	/** Adds one ground chunk; WorldBoundsCm is its rectangle, used to decide when it needs collision. */
 	void AddGroundChunk(UE::Geometry::FDynamicMesh3&& Mesh, const FBox2D& WorldBoundsCm, const TArray<UMaterialInterface*>& Materials);
 
+	/**
+	 * Adds one chunk of the snow layer (see WorldSnow.h). The snow components are shown only while the weather's
+	 * SnowCover is above zero; the actor ticks four times a second to follow it, and only once it has snow.
+	 */
+	void AddSnowChunk(UE::Geometry::FDynamicMesh3&& Mesh, const FBox2D& WorldBoundsCm, UMaterialInterface* Material);
+
+	virtual void Tick(float DeltaSeconds) override;
+
 	/** Adds the road markings (never collide). */
 	void AddMarkings(UE::Geometry::FDynamicMesh3&& Mesh, const TArray<UMaterialInterface*>& Materials);
 
@@ -106,6 +114,11 @@ private:
 	TObjectPtr<UInstancedStaticMeshComponent> SignalHeadComponent;
 	TArray<int32> HeadApproachIds;
 	TArray<uint8> HeadShownAspects;
+
+	/** Snow chunks, hidden while there is no snow. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UDynamicMeshComponent>> SnowChunks;
+	bool bSnowShown = true;
 
 	TArray<FBox2D> GroundChunkBounds;
 	TArray<bool> GroundChunkHasCollision;
