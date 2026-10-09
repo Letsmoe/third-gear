@@ -27,8 +27,9 @@ import build_world  # noqa: E402
 import data_root  # noqa: E402
 import game_streets  # noqa: E402
 from osmimport import dem, furniture, geo, hh_survey, roads, street_layers, street_scene  # noqa: E402
-from osmimport.streets import (assumptions, corrections, cross_section, dual_carriageways, gores, junctions, layout, lines, network, polyline,  # noqa: E402
-                               road_lines, splits, tags as street_tags)
+from osmimport.streets import (assumptions, corrections, cross_section, dual_carriageways, gores,  # noqa: E402
+                               junctions, layout, lines, network, polyline, road_lines, splits,
+                               tags as street_tags)
 from street_index import WHOLE_EXTRACT, ViewportIndex, load_whole_extract  # noqa: E402
 
 PAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "street_viewer.html")
