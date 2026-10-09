@@ -439,8 +439,8 @@ struct FCarSoundDsp::FImpl
 		case ECarSoundEvent::SuspensionThump:
 		{
 			const float Y = 0.9f * FMath::Sin(TwoPi * (52.f - 100.f * FMath::Min(T, 0.1f)) * T) * FMath::Exp(-T / 0.11f)
-				+ 0.5f * Noise.Low * FMath::Exp(-T / 0.05f) + 0.12f * Noise.Band * FMath::Exp(-T / 0.012f);
-			return 0.40f * S * Y;
+				+ 0.5f * Noise.Low * FMath::Exp(-T / 0.05f) + 0.05f * Noise.Band * FMath::Exp(-T / 0.012f);
+			return 0.30f * S * Y;
 		}
 		case ECarSoundEvent::HandbrakePull:
 		{
