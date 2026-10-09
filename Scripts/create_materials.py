@@ -157,10 +157,11 @@ float crack = D.Masks.x;
 float seal = D.Masks.y;
 float patch = D.Masks.z;
 // Patches are fresher, darker asphalt; cracks hold dirt and shadow; the sealant is black bitumen with a dull sheen.
-float3 c = Color * lerp(1.0, 0.72, patch) * (1.0 - crack * 0.8);
-c = lerp(c, float3(0.022, 0.021, 0.02), seal);
-Roughness = lerp(lerp(Rough, 0.45, seal), 1.0, crack);
-NormalOut = normalize(float3(Nrm.xy * (1.0 - seal * 0.7) + D.NormalXY, Nrm.z));
+float3 c = Color * lerp(1.0, 0.86, patch) * (1.0 - crack * 0.8);
+c = lerp(c, float3(0.03, 0.029, 0.028), seal * 0.85);
+Roughness = lerp(lerp(Rough * lerp(1.0, 0.92, patch), 0.5, seal), 1.0, crack);
+// A patch's fresher surface shows less of its aggregate.
+NormalOut = normalize(float3(Nrm.xy * (1.0 - seal * 0.7) * (1.0 - patch * 0.35) + D.NormalXY, Nrm.z));
 return c;
 """
 

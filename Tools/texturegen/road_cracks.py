@@ -156,7 +156,7 @@ def alligator(canvas, rng, radius_x, radius_y, cell):
             continue
         bend = (a + b) / 2 + rng.normal(0, cell * 0.08, 2)
         points = [tuple(a + centre), tuple(bend + centre), tuple(b + centre)]
-        canvas.draw_line(canvas.crack, points, rng.uniform(0.002, 0.005) * (1.2 - inside))
+        canvas.draw_line(canvas.crack, points, rng.uniform(0.003, 0.007) * (1.2 - inside))
     return centre
 
 
@@ -175,9 +175,35 @@ def patch_repair(canvas, rng, width=None, height=None, centre=None):
     for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
         x, y = sx * width / 2, sy * height / 2
         corners.append((cx + x * math.cos(angle) - y * math.sin(angle), cy + x * math.sin(angle) + y * math.cos(angle)))
-    ImageDraw.Draw(canvas.patch).polygon(canvas.pixels(corners), fill=patch_shade(rng))
-    canvas.draw_line(canvas.sealant, corners + [corners[0]], rng.uniform(0.012, 0.025))
+    ImageDraw.Draw(canvas.patch).polygon(canvas.pixels(ragged_outline(rng, corners)), fill=patch_shade(rng))
+    sealed_joints(canvas, rng, corners)
     return corners
+
+
+def ragged_outline(rng, corners, step=0.03, roughness=0.004):
+    """A cut edge is never quite straight: the polygon's sides subdivided and jittered by a few millimetres."""
+    outline = []
+    for index, start in enumerate(corners):
+        end = corners[(index + 1) % len(corners)]
+        length = math.dist(start, end)
+        for i in range(max(1, int(length / step))):
+            t = i * step / length
+            outline.append((start[0] + (end[0] - start[0]) * t + rng.normal(0, roughness),
+                            start[1] + (end[1] - start[1]) * t + rng.normal(0, roughness)))
+    return outline
+
+
+def sealed_joints(canvas, rng, corners):
+    """Bitumen along some stretches of a patch's joints; the rest of the seal has worn away."""
+    for index, start in enumerate(corners):
+        if rng.random() < 0.35:
+            continue
+        end = corners[(index + 1) % len(corners)]
+        first, last = sorted(rng.uniform(0, 1, 2))
+        last = max(last, first + 0.3)
+        a = (start[0] + (end[0] - start[0]) * first, start[1] + (end[1] - start[1]) * first)
+        b = (start[0] + (end[0] - start[0]) * min(last, 1), start[1] + (end[1] - start[1]) * min(last, 1))
+        canvas.draw_line(canvas.sealant, [a, b], rng.uniform(0.006, 0.014))
 
 
 def trench_strip(canvas, rng):
@@ -231,7 +257,7 @@ def transverse(canvas, rng):
     """A crack across the lane, fairly straight, with short spurs."""
     start = (MARGIN * TILE_METRES + 0.02, rng.uniform(0.4, 0.6) * TILE_METRES)
     path = meander(rng, start, rng.normal(0, 0.1), TILE_METRES, wiggle=0.15)
-    tapered_crack(canvas, rng, path, 0.006)
+    tapered_crack(canvas, rng, path, 0.010)
     for _ in range(3):
         origin = path[rng.integers(0, len(path))]
         tapered_crack(canvas, rng, meander(rng, origin, rng.uniform(0, 2 * math.pi), rng.uniform(0.05, 0.2)), 0.003)
@@ -241,7 +267,7 @@ def make_tile(index, rng):
     """Draws tile number `index` of the atlas."""
     canvas = TileCanvas()
     if index < 5:
-        branched_crack(canvas, rng, rng.uniform(0.8, 1.6), rng.uniform(0.004, 0.008), int(rng.integers(1, 4)))
+        branched_crack(canvas, rng, rng.uniform(0.8, 1.6), rng.uniform(0.007, 0.013), int(rng.integers(1, 4)))
     elif index < 7:
         sealed_crack(canvas, rng, rng.uniform(1.0, 1.6))
     elif index == 7:
@@ -296,6 +322,8 @@ def build_atlas(seed=7):
         crack, sealant, patch = downsample(canvas.crack), downsample(canvas.sealant), downsample(canvas.patch)
         crack *= 1.0 - sealant * 0.85  # the tar covers most of a sealed crack
         crack *= 1.0 - np.clip(patch * 4.0, 0.0, 1.0)  # a patch covers the cracking it was laid over
+        # Dirt and water staining darken the asphalt a couple of centimetres either side of a crack.
+        crack = np.maximum(crack, np.clip(ndimage.gaussian_filter(crack, 6.0) * 1.2, 0, 0.3))
         height = height_of(crack, sealant, patch)
         row, column = divmod(index, TILES_PER_SIDE)
         area = (slice(row * TILE_PIXELS, (row + 1) * TILE_PIXELS), slice(column * TILE_PIXELS, (column + 1) * TILE_PIXELS))
