@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bootstrap"))
 import data_root  # noqa: E402
 from build_area import MARKING_STYLE, SURFACE_SECTIONS, find_start  # noqa: E402
-from osmimport import buildings, canopy, dem, furniture, geo, landcover, osm, paths, roads, terrain, vegetation  # noqa: E402
+from osmimport import building_types, buildings, canopy, dem, furniture, geo, landcover, osm, paths, roads, terrain, vegetation  # noqa: E402
 from osmimport import worldtile  # noqa: E402
 
 GRID_CELL = 1.0
@@ -328,11 +328,14 @@ def main():
     write_stop_lines(writers, traffic["junctions"])
     write_zebras(writers, builder.zebras, carriageway)
     write_furniture(writers, area, builder, net, ground)
-    for osm_id, tags, footprint in building_footprints(data):
+    footprints = list(building_footprints(data))
+    typer = building_types.BuildingTyper(footprints, data.roads, data.footways, data.areas)
+    for index, (osm_id, tags, footprint) in enumerate(footprints):
         point = footprint.representative_point()
         writer = writers.get(tile_key(area, point.x, point.y))
         if writer is not None:
             write_building(writer, osm_id, tags, footprint, ground)
+            writer.add_building_type(osm_id, typer.classify(index))
     rng = np.random.default_rng(11)
     for plant, z in zip(plants, plant_z):
         writer = writers.get(tile_key(area, plant.x, plant.y))
