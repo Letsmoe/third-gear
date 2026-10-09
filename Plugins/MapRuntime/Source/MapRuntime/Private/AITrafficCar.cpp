@@ -198,7 +198,11 @@ void AAITrafficCar::Initialize(const FTrafficVehicleModel& Model, const FLinearC
 		UMaterialInstanceDynamic* Paint = BodyComponent->CreateDynamicMaterialInstance(Model.PaintSlot);
 		if (Paint)
 		{
+			FLinearColor Before = FLinearColor::Black;
+			const bool bHasParameter = Paint->GetVectorParameterValue(FHashedMaterialParameterInfo(PaintParameter), Before);
 			Paint->SetVectorParameterValue(PaintParameter, PaintColor);
+			UE_LOG(LogAITrafficCar, Verbose, TEXT("AITRAFFIC paint %s slot %d (%s): parameter found %d, was %s, now %s"), *Model.Folder, Model.PaintSlot,
+				*Paint->GetName(), bHasParameter ? 1 : 0, *Before.ToString(), *PaintColor.ToString());
 		}
 	}
 	if (Model.LightSlot != INDEX_NONE)

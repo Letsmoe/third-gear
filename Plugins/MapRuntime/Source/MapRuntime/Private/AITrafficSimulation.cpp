@@ -10,7 +10,9 @@ constexpr float MaxBrakingMs2 = 9.f;
 constexpr float HorizonMinimumM = 70.f;
 constexpr float HorizonMaximumM = 140.f;
 constexpr float JunctionConsiderM = 40.f;
-constexpr float SlowApproachSpeedMs = 4.5f;
+/** Speed at the line of a give way sign, and of a junction where right before left applies. */
+constexpr float YieldApproachSpeedMs = 5.0f;
+constexpr float EqualApproachSpeedMs = 7.0f;
 constexpr float StopLineMarginM = 0.2f;
 constexpr float StopLineMinGapM = 1.0f;
 constexpr float CarMinGapM = 2.0f;
@@ -318,11 +320,12 @@ bool FAITrafficSimulation::IsOnMyLanes(const FSimCar& Car, const FSimCar& Other)
 		{
 			continue;
 		}
+		const float MyFront = Car.FrontOverhangM - Car.LaneStart[Slot];
 		for (const FOccupant& Occupant : *Occupants)
 		{
-			if (Occupant.Car == &Other)
+			if (Occupant.Car == &Other && Occupant.RearS >= MyFront - 0.01f)
 			{
-				return true;
+				return true;    // ahead on the lane: car following handles it (a car behind us on a closed loop is not)
 			}
 		}
 	}
@@ -518,6 +521,12 @@ void FAITrafficSimulation::ScanLaneSignals(FSimCar& Car, int32 Slot, const FTraf
 		if (bStop)
 		{
 			Obstacles.Add({Gap + StopLineMarginM, 0.f, StopLineMinGapM, 0.f, TEXT("signal")});
+		}
+		else if (Car.LoggedGoApproach != Stop.ApproachId && Signals->GetApproachState(Stop.ApproachId, TrafficTimeSeconds).Aspect != ESignalAspect::Green)
+		{
+			Car.LoggedGoApproach = Stop.ApproachId;
+			UE_LOG(LogAITrafficSim, Display, TEXT("AITRAFFIC goes on without green: approach %d aspect %d gap %.1f m speed %.1f m/s, %s"), Stop.ApproachId,
+				int32(Signals->GetApproachState(Stop.ApproachId, TrafficTimeSeconds).Aspect), Gap, Car.SpeedMs, *Describe(Car));
 		}
 	}
 }
@@ -729,8 +738,10 @@ void FAITrafficSimulation::ScanJunctionEntry(FSimCar& Car, int32 Slot, float Gap
 		}
 		break;
 	case ELaneControl::Yield:
+		Obstacles.Add({FMath::Max(GapToLineM, 0.05f), YieldApproachSpeedMs, 0.f, 0.f, TEXT("slow approach")});
+		break;
 	case ELaneControl::Equal:
-		Obstacles.Add({FMath::Max(GapToLineM, 0.05f), SlowApproachSpeedMs, 0.f, 0.f, TEXT("slow approach")});
+		Obstacles.Add({FMath::Max(GapToLineM, 0.05f), EqualApproachSpeedMs, 0.f, 0.f, TEXT("slow approach")});
 		break;
 	default:
 		break;

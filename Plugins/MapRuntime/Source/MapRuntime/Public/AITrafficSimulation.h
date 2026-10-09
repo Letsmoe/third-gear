@@ -61,6 +61,8 @@ struct FSimCar
 	int32 ClaimedConnection = INDEX_NONE;
 	/** Signal the car has decided to stop for; it keeps that decision until the light is green, even though speeding up changes the sums. */
 	int32 LatchedStopApproach = INDEX_NONE;
+	/** The signal a go-on-amber decision was last logged for. */
+	mutable int32 LoggedGoApproach = INDEX_NONE;
 	bool bBrakeLight = false;
 	/** -1 left, 0 none, +1 right. */
 	int32 TurnSignal = 0;
