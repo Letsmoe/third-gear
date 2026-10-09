@@ -44,6 +44,15 @@ public:
 	/** An actor the AI cars must keep clear of and yield to, with its body half sizes in metres. */
 	void RegisterExternalVehicle(AActor* Actor, float HalfLengthM = 2.2f, float HalfWidthM = 0.95f);
 
+	/** Number of colours in the paint palette that AI cars and parked cars share. */
+	static int32 GetPaintPaletteCount();
+
+	/** Colour with the given index in the palette (linear albedo). */
+	static FLinearColor GetPaintPaletteColor(int32 Index);
+
+	/** Palette index for a uniform random number in [0, 1), weighted like the colours of cars on German roads. */
+	static int32 PickPaintPaletteIndex(float UnitRandom);
+
 	/** Whether the lane graph is loaded and cars are being simulated. */
 	bool IsRunning() const { return bRunning; }
 

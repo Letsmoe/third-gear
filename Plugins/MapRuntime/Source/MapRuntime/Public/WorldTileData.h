@@ -84,6 +84,8 @@ enum class EWorldPoiKind : uint8
 	Lamp = 0,
 	SignalHead = 1,
 	Sign = 2,
+	/** A parked car: Variant is the model index (ParkedCars.cpp), Param0 the roll and Param1 the pitch in degrees. */
+	ParkedCar = 3,
 };
 
 /** One piece of street furniture (worldtile.py POIS): a street lamp, the pole of a signal head, or a sign pole. */
