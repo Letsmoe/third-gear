@@ -18,12 +18,8 @@ from .cross_section import Travel
 from .layout import arm_keys, arm_lines
 from .lines import LineKey, LineKind, Side, mirrored
 from .network import NodeKind, SegmentEnd, SegmentNetwork
+from .splits import find_split
 
-# How far out along an arm the clearance search looks, and its step.
-MOUTH_SEARCH_LIMIT = 60.0
-MOUTH_SEARCH_STEP = 0.5
-# Points across an arm's carriageway tested against the other arms.
-MOUTH_PROBE_POINTS = 9
 LEFT_TURN_ANGLES = (45.0, 135.0)
 # Lines the through road carries across a junction (edge lines, broken across side roads), and the lines whose
 # crossings with the other road's get a cross instead.
@@ -48,6 +44,8 @@ class JunctionLines:
         result = {}
         for node in self.junctions:
             ends = self.network.ends_at[node]
+            if find_split(self.network, node) is not None:
+                continue  # the carriageways continue the two-way road's lines (layout.py)
             for end in ends:
                 others = self._arms_that_interrupt(end, ends)
                 if not others:
@@ -95,22 +93,8 @@ class JunctionLines:
         return major
 
     def _clear_distance(self, end: SegmentEnd, others: list, gap: float = 0.0) -> float:
-        """How far from the node the arm's carriageway, across its whole width, is clear of the other arms' (and
-        at least gap away from them)."""
-        line = self.network.arm_line(end)
-        half_width = self._segment(end).section.width() / 2
-        other_lines = [(polyline.cut_polyline(self.network.arm_line(other), 0.0, MOUTH_SEARCH_LIMIT),
-                        self._segment(other).section.width() / 2 + gap) for other in others]
-        limit = min(MOUTH_SEARCH_LIMIT, polyline.length(line) * assumptions.TAPER_MAX_SEGMENT_SHARE)
-        across = np.linspace(-half_width, half_width, MOUTH_PROBE_POINTS)
-        for distance in np.arange(0.0, limit, MOUTH_SEARCH_STEP):
-            centre = polyline.point_at(line, distance)
-            right = polyline.right_of(polyline.direction_at(line, distance))
-            probes = centre[None, :] + across[:, None] * right[None, :]
-            if all(polyline.distances_to(other_line, probes).min() >= other_half
-                   for other_line, other_half in other_lines):
-                return float(distance)
-        return float(limit)
+        """How far from the node the arm's carriageway is clear of the other arms' (network.clear_distance)."""
+        return self.network.clear_distance(end, others, gap)
 
     # ------------------------------------------------------------ guide lines
 
@@ -119,6 +103,8 @@ class JunctionLines:
         result = []
         for node in self.junctions:
             ends = self.network.ends_at[node]
+            if find_split(self.network, node) is not None:
+                continue
             pairs = self._through_pairs(ends)
             for entering, leaving in pairs:
                 result += self._through_guides(layouts, entering, leaving, ends, mouths)

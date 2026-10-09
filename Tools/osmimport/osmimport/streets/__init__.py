@@ -21,6 +21,8 @@ Modules:
 * polyline.py: offsets, cuts and curves on numpy polylines.
 * network.py: ways cut at junctions into segments, and what lies at each segment end.
 * layout.py: each segment's lines along it, with the tapers between roads and where lines start and stop.
-* junctions.py: junction mouths and the guide lines through junctions.
+* corrections.py: fixes for OSM mistakes recognisable from the network (short mis-tagged narrowings).
+* splits.py: dual carriageway splits, where a two-way road divides into two one-way carriageways.
+* junctions.py: junction mouths, crosses and the guide lines inside junctions.
 * road_lines.py: builds all of the above for a set of ways.
 """

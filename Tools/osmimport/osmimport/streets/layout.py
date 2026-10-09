@@ -13,6 +13,7 @@ import numpy as np
 from . import assumptions, lines as line_rules, polyline, tags as osm_tags
 from .lines import LineKey, LineKind, Side
 from .network import NodeKind, SegmentEnd, SegmentNetwork
+from .splits import Split, find_split
 
 
 @dataclass
@@ -94,10 +95,46 @@ def build_layouts(network: SegmentNetwork, painted: dict, urban: dict, mouths: d
             first, second = network.ends_at[node]
             _shape_continuation(network, layouts, urban, first, second)
             done.add(node)
-        if kind == NodeKind.JUNCTION:
-            for end in network.ends_at[node]:
-                _cut_at_mouth(layouts[end.segment], end, mouths)
+        if kind != NodeKind.JUNCTION:
+            continue
+        split = find_split(network, node)
+        if split is not None:
+            _shape_split(layouts, split)
+            continue
+        for end in network.ends_at[node]:
+            _cut_at_mouth(layouts[end.segment], end, mouths)
     return layouts
+
+
+def _shape_split(layouts: list, split: Split):
+    """Each carriageway of a dual carriageway split starts on its half of the two-way road and moves out to its own
+    line over the gore: its lanes and outer edge from the two-way road's lanes and edge on its side, its inner edge
+    and kerb from the two-way road's centre line."""
+    two_way_lines = arm_lines(layouts[split.two_way.segment].lines, split.two_way)
+    # Facing out of the node toward the carriageways, traffic coming in keeps to the left, so the incoming
+    # carriageway's inner side is its right and the outgoing one's its left.
+    for one_way, inner_side in ((split.incoming, Side.RIGHT), (split.outgoing, Side.LEFT)):
+        layout = layouts[one_way.segment]
+        shape = _end_shape(layout, one_way.at_start)
+        shape.taper = min(split.gore_length, layout.segment.length() * assumptions.TAPER_MAX_SEGMENT_SHARE)
+        for key, offset in arm_lines(layout.lines, one_way).items():
+            meeting = _split_meeting_offset(key, inner_side, two_way_lines)
+            segment_key, _ = _to_segment_frame(key, 0.0, one_way)
+            if meeting is None:
+                shape.cuts[segment_key] = shape.taper
+                continue
+            shape.node_offsets[segment_key] = _to_segment_frame(key, meeting, one_way)[1]
+
+
+def _split_meeting_offset(key: LineKey, inner_side: Side, two_way_lines: dict):
+    """Where a carriageway's line (facing out of the node) starts on the two-way road at the node, or None when it
+    has no counterpart there: the inner edge and kerb on the centre line, the others on their mirrored line."""
+    if key.kind in (LineKind.EDGE, LineKind.KERB) and key.side == inner_side:
+        return -two_way_lines.get(LineKey(LineKind.CENTRE), 0.0)
+    counterpart = line_rules.mirrored(key)
+    if counterpart not in two_way_lines:
+        return None
+    return -two_way_lines[counterpart]
 
 
 def _end_shape(layout: SegmentLayout, at_start: bool) -> EndShape:

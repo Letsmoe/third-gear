@@ -156,6 +156,9 @@ EDGE_GUIDE_DASH = (1.5, 1.5)
 # that side stays broken until the joining carriageway is MERGE_GAP away from it.
 MERGE_MAX_ANGLE = 45.0
 MERGE_GAP = 2.0
+# A two-way road and two one-way carriageways meeting at a node, each within this angle of straight on, are a dual
+# carriageway split (splits.py).
+SPLIT_MAX_DEFLECTION = 45.0
 # Two arms are one road going straight through a junction when their directions differ by at most this much.
 THROUGH_MAX_DEFLECTION_DEGREES = 35.0
 # Side arms of these classes (driveways, parking aisles) don't interrupt the lines of the road they join.

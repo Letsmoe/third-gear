@@ -65,7 +65,7 @@ def straight_neighbour(network: SegmentNetwork, end: SegmentEnd):
         return None
     best = None
     for other in network.ends_at[node]:
-        if other == end or _is_minor(network, other):
+        if other == end or is_minor(network, other):
             continue
         turn = deflection(network, end, other)
         if turn <= assumptions.THROUGH_MAX_DEFLECTION_DEGREES and (best is None or turn < best[0]):
@@ -82,7 +82,7 @@ def _same_kind_of_road(tags, other_tags) -> bool:
             and osm_tags.is_link(tags) == osm_tags.is_link(other_tags))
 
 
-def _is_minor(network: SegmentNetwork, end: SegmentEnd) -> bool:
+def is_minor(network: SegmentNetwork, end: SegmentEnd) -> bool:
     return osm_tags.base_class(network.segments[end.segment].way.tags) in assumptions.MINOR_ARM_CLASSES
 
 

@@ -9,8 +9,15 @@ from enum import Enum
 
 import numpy as np
 
-from . import polyline
+from . import assumptions, polyline
 from .cross_section import CrossSection
+
+
+# How far out along an arm the clearance search looks, and its step.
+MOUTH_SEARCH_LIMIT = 60.0
+MOUTH_SEARCH_STEP = 0.5
+# Points across an arm's carriageway tested against the other arms.
+MOUTH_PROBE_POINTS = 9
 
 
 class NodeKind(Enum):
@@ -99,6 +106,24 @@ class SegmentNetwork:
         """The unit direction in which the segment leaves the node, measured over its first metres."""
         line = self.arm_line(end)
         return polyline.unit(polyline.point_at(line, min(reach, polyline.length(line))) - line[0])
+
+    def clear_distance(self, end: SegmentEnd, others: list, gap: float = 0.0) -> float:
+        """How far from the node the arm's carriageway, across its whole width, is clear of the other arms' (and
+        at least gap away from them)."""
+        line = self.arm_line(end)
+        half_width = self.segments[end.segment].section.width() / 2
+        other_lines = [(polyline.cut_polyline(self.arm_line(other), 0.0, MOUTH_SEARCH_LIMIT),
+                        self.segments[other.segment].section.width() / 2 + gap) for other in others]
+        limit = min(MOUTH_SEARCH_LIMIT, polyline.length(line) * assumptions.TAPER_MAX_SEGMENT_SHARE)
+        across = np.linspace(-half_width, half_width, MOUTH_PROBE_POINTS)
+        for distance in np.arange(0.0, limit, MOUTH_SEARCH_STEP):
+            centre = polyline.point_at(line, distance)
+            right = polyline.right_of(polyline.direction_at(line, distance))
+            probes = centre[None, :] + across[:, None] * right[None, :]
+            if all(polyline.distances_to(other_line, probes).min() >= other_half
+                   for other_line, other_half in other_lines):
+                return float(distance)
+        return float(limit)
 
 
 def _node_degrees(ways) -> dict:
