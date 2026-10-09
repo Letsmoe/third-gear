@@ -616,6 +616,11 @@ void UWeatherVisualsSubsystem::ApplyMaterialParameters()
 	if (Weather)
 	{
 		const FIsobarCalendar Calendar = IsobarCalendarAt(Weather->GetWeatherSeconds());
+		// Window interiors (WindowInterior.ush): which lamps are on depends on the hour, and the daylight in a room
+		// follows the illuminance outside.
+		const FIsobarSunPosition SunNow = IsobarSunAtTimeOfDay(WeatherVisualsDetail::MapLatitudeDegrees, Calendar.DayOfYear, Calendar.DayFraction);
+		Instance->SetScalarParameterValue(TEXT("TimeOfDay"), float(Calendar.DayFraction) * 24.f);
+		Instance->SetScalarParameterValue(TEXT("GroundIlluminance"), WeatherVisualsDetail::RelativeGroundIlluminance(float(SunNow.GetAltitudeDegrees()), SunTransmission(), Current.CloudCover));
 		WeatherVisualsDetail::FSeasonState Season = WeatherVisualsDetail::SeasonAt(float(Calendar.GetContinuousDayOfYear()), WindSpeed);
 		if (const float* Fallen = Overrides.Find(TEXT("FallenLeaves")))
 		{
