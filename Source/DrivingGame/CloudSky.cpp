@@ -1,27 +1,34 @@
 #include "CloudSky.h"
 
-#include "Components/PrimitiveComponent.h"
-#include "Components/VolumetricCloudComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/ExponentialHeightFogComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "Components/SceneCaptureComponent2D.h"
+#include "Components/VolumetricCloudComponent.h"
+#include "DynamicRHI.h"
 #include "Engine/ExponentialHeightFog.h"
+#include "Engine/GameViewportClient.h"
 #include "Engine/StaticMesh.h"
-#include "EngineUtils.h"
 #include "Engine/StaticMeshActor.h"
+#include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "DynamicRHI.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
-#include "Camera/PlayerCameraManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCloudSky, Log, All);
 
 static TAutoConsoleVariable<int32> CVarCloudSky(
-	TEXT("tg.CloudSky"), 1, TEXT("1 shows the dome with the clouds of the sky light's real-time capture, 0 hides it and shows the plain atmosphere."), ECVF_Default);
+	TEXT("tg.CloudSky"), 1, TEXT("1 shows the dome with the cached cloud sky, 0 hides it and shows the plain atmosphere."), ECVF_Default);
 static TAutoConsoleVariable<int32> CVarCloudSkyResolution(
-	TEXT("tg.CloudSkyResolution"), 1024, TEXT("Edge length of the sky capture cube faces in pixels."), ECVF_Default);
+	TEXT("tg.CloudSkyResolution"), 1024, TEXT("Edge length of the cloud sky's cube faces in pixels (read when the world starts)."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarCloudSkyRefreshSeconds(
+	TEXT("tg.CloudSkyRefreshSeconds"), 45.f, TEXT("The cloud sky is re-rendered at least this often, in seconds."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarCloudSkyBlendSeconds(
+	TEXT("tg.CloudSkyBlendSeconds"), 5.f, TEXT("Seconds a refreshed cloud sky takes to fade in."), ECVF_Default);
 
 namespace CloudSkyDetail
 {
@@ -93,11 +100,23 @@ namespace CloudSkyDetail
 		return Alpha * Alpha * (3.f - 2.f * Alpha);
 	}
 
-	/**
-	 * Lowest face resolution the capture has to be set to; the sky light's capture also sets the resolution of its
-	 * convolution, so the cost grows with the square of it.
-	 */
-	constexpr TCHAR CaptureResolutionVariable[] = TEXT("r.SkyLight.RealTimeReflectionCapture.ResolutionOverride");
+
+	constexpr float ViewSampleCountScale = 2.f;
+	constexpr float ShadowSampleCountScale = 2.f;
+
+	/** Face field of view: a little over 90 degrees so that bilinear filtering never reaches a face's edge. */
+	constexpr float FaceFieldOfViewDegrees = 92.f;
+
+	/** A refresh starts when the cover or rain changed by this much, the sun moved this far, or the viewer this far. */
+	constexpr float RefreshCoverDelta = 0.04f;
+	constexpr float RefreshRainDelta = 0.1f;
+	constexpr float RefreshSunDegrees = 1.5f;
+	constexpr double RefreshViewerDistanceCentimetres = 60000.0;
+
+	/** Face orientations: +X, -X, +Y, -Y, +Z, -Z (the order the dome material reads them in). */
+	const FRotator FaceRotations[6] = {
+		FRotator(0.0, 0.0, 0.0), FRotator(0.0, 180.0, 0.0), FRotator(0.0, 90.0, 0.0),
+		FRotator(0.0, -90.0, 0.0), FRotator(90.0, 0.0, 0.0), FRotator(-90.0, 0.0, 0.0)};
 }
 
 static FAutoConsoleCommand CloudSkyParamCommand(
@@ -127,6 +146,17 @@ static FAutoConsoleCommand CloudSkyDumpCommand(
 		}
 	}));
 
+
+static FAutoConsoleCommand CloudSkyRefreshCommand(
+	TEXT("CloudSky.Refresh"), TEXT("Renders a new cloud sky now and fades it in."),
+	FConsoleCommandDelegate::CreateLambda([]()
+	{
+		if (UCloudSkyRig* Rig = CloudSkyDetail::ActiveRig.Get())
+		{
+			Rig->RequestRefresh();
+		}
+	}));
+
 bool UCloudSkyRig::Initialise(UWorld* World)
 {
 	if (!World || FParse::Param(FCommandLine::Get(), TEXT("NoCloudSky")))
@@ -151,15 +181,13 @@ bool UCloudSkyRig::Initialise(UWorld* World)
 	CloudComponent->SetMaterial(CloudMaterial);
 	CloudComponent->SetLayerBottomAltitude(CloudSkyDetail::LayerBottomKilometres);
 	CloudComponent->SetLayerHeight(CloudSkyDetail::LayerHeightKilometres);
-	// Traced only into the sky light capture; the dome shows the result, so the main views never trace clouds.
-	CloudComponent->SetRenderInMainPass(false);
+	// The captures run rarely, so they can afford many more ray march samples than a view that traces every frame.
+	CloudComponent->SetViewSampleCountScale(CloudSkyDetail::ViewSampleCountScale);
+	CloudComponent->SetShadowViewSampleCountScale(CloudSkyDetail::ShadowSampleCountScale);
+	CloudComponent->StopTracingTransmittanceThreshold = 0.001f;
 	Clouds->FinishSpawning(FTransform::Identity);
 	CloudActor = Clouds;
 
-	if (FParse::Param(FCommandLine::Get(), TEXT("CloudSkyNoDome")))
-	{
-		return true;
-	}
 	AStaticMeshActor* DomeActor = World->SpawnActor<AStaticMeshActor>(SpawnParameters);
 	UStaticMeshComponent* DomeMesh = DomeActor->GetStaticMeshComponent();
 	DomeMesh->SetMobility(EComponentMobility::Movable);
@@ -172,8 +200,8 @@ bool UCloudSkyRig::Initialise(UWorld* World)
 	DomeMesh->bAffectDistanceFieldLighting = false;
 	DomeMesh->bVisibleInRayTracing = false;
 	DomeMesh->bVisibleInReflectionCaptures = false;
-	// With a sky mesh in the scene the engine draws only sky meshes into the capture, so the dome is in it too; its
-	// material draws the atmosphere there and the capture's own cubemap in the views (see create_cloud_sky.py).
+	// With a sky mesh in the scene the engine draws only sky meshes into the sky light's capture, so the dome is in it
+	// too; its material draws the atmosphere there and the cached cloud sky in the views (see create_cloud_sky.py).
 	DomeMesh->bVisibleInRealTimeSkyCaptures = true;
 	DomeMesh->SetWorldScale3D(FVector(CloudSkyDetail::DomeRadiusCentimetres / CloudSkyDetail::EngineSphereRadiusCentimetres));
 	Dome = DomeActor;
@@ -184,52 +212,75 @@ bool UCloudSkyRig::Initialise(UWorld* World)
 	{
 		FogIt->GetComponent()->SetFogCutoffDistance(CloudSkyDetail::DomeRadiusCentimetres * 0.8f);
 	}
+	CreateCaptureRig(World);
 	CloudSkyDetail::ActiveRig = this;
-	ConfigureCapture();
-	UE_LOG(LogCloudSky, Log, TEXT("Cloud sky on: capture %d px per face"), CVarCloudSkyResolution.GetValueOnGameThread());
+	UE_LOG(LogCloudSky, Log, TEXT("Cloud sky on: %d px per face, refresh every %.0f s"), CVarCloudSkyResolution.GetValueOnGameThread(), CVarCloudSkyRefreshSeconds.GetValueOnGameThread());
 	return true;
 }
 
-void UCloudSkyRig::ConfigureCapture()
+void UCloudSkyRig::CreateCaptureRig(UWorld* World)
 {
-	if (IConsoleVariable* Resolution = IConsoleManager::Get().FindConsoleVariable(CloudSkyDetail::CaptureResolutionVariable))
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.ObjectFlags |= RF_Transient;
+	AActor* RigActor = World->SpawnActor<AActor>(SpawnParameters);
+	USceneComponent* Root = NewObject<USceneComponent>(RigActor, TEXT("CloudSkyRoot"));
+	RigActor->SetRootComponent(Root);
+	Root->RegisterComponent();
+	CaptureActor = RigActor;
+
+	const int32 Resolution = FMath::Clamp(CVarCloudSkyResolution.GetValueOnGameThread(), 128, 4096);
+	for (int32 SetIndex = 0; SetIndex < 2; ++SetIndex)
 	{
-		Resolution->Set(CVarCloudSkyResolution.GetValueOnGameThread(), ECVF_SetByCode);
+		for (int32 FaceIndex = 0; FaceIndex < 6; ++FaceIndex)
+		{
+			UTextureRenderTarget2D* Target = NewObject<UTextureRenderTarget2D>(this);
+			Target->RenderTargetFormat = RTF_RGBA16f;
+			Target->bAutoGenerateMips = false;
+			Target->ClearColor = FLinearColor::Black;
+			Target->InitAutoFormat(Resolution, Resolution);
+			Target->UpdateResourceImmediate(true);
+			FaceTargets.Add(Target);
+			const TCHAR* SetName = SetIndex == 0 ? TEXT("A") : TEXT("B");
+			DomeMaterial->SetTextureParameterValue(*FString::Printf(TEXT("%s%d"), SetName, FaceIndex), Target);
+		}
 	}
-	// One cloud face per frame instead of two: the capture's cost per frame is halved at the price of a refresh
-	// that takes twice as many frames, which the slowly changing sky does not show.
-	if (IConsoleVariable* FacesPerFrame = IConsoleManager::Get().FindConsoleVariable(TEXT("r.SkyLight.RealTimeReflectionCapture.TimeSlice.SkyCloudCubeFacePerFrame")))
+	for (int32 FaceIndex = 0; FaceIndex < 6; ++FaceIndex)
 	{
-		FacesPerFrame->Set(1, ECVF_SetByCode);
-	}
-	// Without the volumetric render target the main views skip the cloud pass altogether when the cloud is not
-	// rendered in the main pass; with it they would still trace and only skip the composite.
-	IConsoleVariable* RenderTarget = IConsoleManager::Get().FindConsoleVariable(TEXT("r.VolumetricRenderTarget"));
-	if (RenderTarget && !FParse::Param(FCommandLine::Get(), TEXT("CloudSkyKeepVrt")))
-	{
-		RenderTarget->Set(0, ECVF_SetByCode);
+		USceneCaptureComponent2D* Capture = NewObject<USceneCaptureComponent2D>(RigActor, *FString::Printf(TEXT("CloudSkyFace%d"), FaceIndex));
+		Capture->SetupAttachment(Root);
+		Capture->SetRelativeRotation(CloudSkyDetail::FaceRotations[FaceIndex]);
+		Capture->FOVAngle = CloudSkyDetail::FaceFieldOfViewDegrees;
+		Capture->CaptureSource = SCS_SceneColorHDR;
+		Capture->bCaptureEveryFrame = false;
+		Capture->bCaptureOnMovement = false;
+		Capture->bUseRayTracingIfEnabled = false;
+		// Sky and clouds only: with an empty show-only list no mesh is drawn (the dome would feed the sky back into
+		// itself), and without the lighting and post effects what is left is the radiance of the sky.
+		Capture->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+		FEngineShowFlags& Flags = Capture->ShowFlags;
+		Flags.SetAntiAliasing(false);
+		Flags.SetAmbientOcclusion(false);
+		Flags.SetBloom(false);
+		Flags.SetMotionBlur(false);
+		Flags.SetEyeAdaptation(false);
+		Flags.SetVolumetricFog(false);
+		Flags.SetLumenGlobalIllumination(false);
+		Flags.SetLumenReflections(false);
+		Flags.SetScreenSpaceReflections(false);
+		Flags.SetLensFlares(false);
+		Flags.SetGrain(false);
+		Flags.SetVignette(false);
+		Flags.SetDecals(false);
+		Flags.SetParticles(false);
+		Flags.SetAtmosphere(true);
+		Flags.SetCloud(true);
+		Capture->RegisterComponent();
+		FaceCaptures.Add(Capture);
 	}
 }
 
-void UCloudSkyRig::Update(const FCloudSkyInputs& Inputs)
+void UCloudSkyRig::ApplyCloudParameters(const FCloudSkyInputs& Inputs)
 {
-	AStaticMeshActor* DomeActor = Dome.Get();
-	UWorld* World = DomeActor ? DomeActor->GetWorld() : nullptr;
-	if (!World)
-	{
-		return;
-	}
-	const bool bShowDome = CVarCloudSky.GetValueOnGameThread() != 0;
-	DomeActor->SetActorHiddenInGame(!bShowDome);
-	if (APlayerController* Controller = World->GetFirstPlayerController())
-	{
-		if (Controller->PlayerCameraManager)
-		{
-			DomeActor->SetActorLocation(Controller->PlayerCameraManager->GetCameraLocation());
-		}
-	}
-	DomeMaterial->SetVectorParameterValue(TEXT("SunDirection"), FLinearColor(Inputs.SunDirection.X, Inputs.SunDirection.Y, Inputs.SunDirection.Z, 0.f));
-	DomeMaterial->SetScalarParameterValue(TEXT("SunVisibility"), Inputs.SunVisibility);
 	if (!CloudMaterial)
 	{
 		return;
@@ -251,6 +302,125 @@ void UCloudSkyRig::Update(const FCloudSkyInputs& Inputs)
 			CloudMaterial->SetVectorParameterValue(Parameter.Key, Parameter.Value.Value);
 		}
 	}
+}
+
+bool UCloudSkyRig::NeedsRefresh(const FCloudSkyInputs& Inputs, const FVector& ViewerLocation) const
+{
+	if (bRefreshRequested || !bHasCapture)
+	{
+		return true;
+	}
+	if (Inputs.Seconds - SecondsAtLastCapture >= CVarCloudSkyRefreshSeconds.GetValueOnGameThread())
+	{
+		return true;
+	}
+	if (FMath::Abs(Inputs.CloudCover - CapturedCover) >= CloudSkyDetail::RefreshCoverDelta
+		|| FMath::Abs(Inputs.RainIntensity - CapturedRain) >= CloudSkyDetail::RefreshRainDelta)
+	{
+		return true;
+	}
+	const double SunAngleDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(Inputs.SunDirection, CapturedSunDirection), -1.0, 1.0)));
+	if (SunAngleDegrees >= CloudSkyDetail::RefreshSunDegrees)
+	{
+		return true;
+	}
+	return FVector::DistXY(ViewerLocation, CapturePosition) >= CloudSkyDetail::RefreshViewerDistanceCentimetres;
+}
+
+void UCloudSkyRig::CaptureFace(int32 SetIndex, int32 FaceIndex)
+{
+	USceneCaptureComponent2D* Capture = FaceCaptures[FaceIndex];
+	Capture->TextureTarget = FaceTargets[SetIndex * 6 + FaceIndex];
+	Capture->CaptureScene();
+}
+
+void UCloudSkyRig::CaptureNextFace()
+{
+	CaptureFace(HiddenSet, NextFace);
+	++NextFace;
+	if (NextFace >= 6)
+	{
+		NextFace = 0;
+		State = ERefreshState::Blending;
+		UE_LOG(LogCloudSky, Log, TEXT("Cloud sky refreshed (cover %.2f), fading in set %d"), CapturedCover, HiddenSet);
+	}
+}
+
+void UCloudSkyRig::AdvanceBlend(float DeltaSeconds)
+{
+	const float BlendSeconds = FMath::Max(CVarCloudSkyBlendSeconds.GetValueOnGameThread(), 0.1f);
+	const float Goal = HiddenSet == 1 ? 1.f : 0.f;
+	Blend = FMath::FInterpConstantTo(Blend, Goal, DeltaSeconds, 1.f / BlendSeconds);
+	if (FMath::IsNearlyEqual(Blend, Goal))
+	{
+		ShownSet = HiddenSet;
+		HiddenSet = 1 - HiddenSet;
+		State = ERefreshState::Idle;
+	}
+}
+
+void UCloudSkyRig::Update(const FCloudSkyInputs& Inputs, float DeltaSeconds)
+{
+	AStaticMeshActor* DomeActor = Dome.Get();
+	UWorld* World = DomeActor ? DomeActor->GetWorld() : nullptr;
+	if (!World)
+	{
+		return;
+	}
+	LastInputs = Inputs;
+	// The main views and the sky light's own capture never trace the cloud; only this class's scene captures do.
+	if (UGameViewportClient* Viewport = World->GetGameViewport())
+	{
+		Viewport->EngineShowFlags.SetCloud(false);
+	}
+	DomeActor->SetActorHiddenInGame(CVarCloudSky.GetValueOnGameThread() == 0);
+
+	FVector ViewerLocation = FVector::ZeroVector;
+	if (APlayerController* Controller = World->GetFirstPlayerController())
+	{
+		if (Controller->PlayerCameraManager)
+		{
+			ViewerLocation = Controller->PlayerCameraManager->GetCameraLocation();
+		}
+	}
+	DomeActor->SetActorLocation(ViewerLocation);
+	ApplyCloudParameters(Inputs);
+
+	if (State == ERefreshState::Idle && NeedsRefresh(Inputs, ViewerLocation))
+	{
+		bRefreshRequested = false;
+		CapturePosition = ViewerLocation;
+		CapturedCover = Inputs.CloudCover;
+		CapturedRain = Inputs.RainIntensity;
+		CapturedSunDirection = Inputs.SunDirection;
+		SecondsAtLastCapture = Inputs.Seconds;
+		CaptureActor->SetActorLocation(CapturePosition);
+		if (!bHasCapture)
+		{
+			// The first sky has nothing to fade from: render both sets at once, so it shows from the first frame.
+			for (int32 SetIndex = 0; SetIndex < 2; ++SetIndex)
+			{
+				for (int32 FaceIndex = 0; FaceIndex < 6; ++FaceIndex)
+				{
+					CaptureFace(SetIndex, FaceIndex);
+				}
+			}
+			bHasCapture = true;
+		}
+		else
+		{
+			State = ERefreshState::Capturing;
+		}
+	}
+	if (State == ERefreshState::Capturing)
+	{
+		CaptureNextFace();
+	}
+	else if (State == ERefreshState::Blending)
+	{
+		AdvanceBlend(DeltaSeconds);
+	}
+	DomeMaterial->SetScalarParameterValue(TEXT("Blend"), Blend);
 }
 
 void UCloudSkyRig::SetDebugParameter(FName Name, const FLinearColor& Value, bool bScalar)

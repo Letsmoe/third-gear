@@ -25,6 +25,8 @@ namespace WeatherVisualsDetail
 {
 	/** Sky luminance factor under a traced cloud deck, to match the light of the plain-atmosphere overcast sky. */
 	constexpr float TracedDeckSkyGain = 1.2f;
+	/** Share of the beam that broken cloud takes on average when the clouds are traced. */
+	constexpr float TracedCloudSunLoss = 0.4f;
 
 	/** Latitude of the map origin, as in WeatherSubsystem.cpp. */
 	constexpr double MapLatitudeDegrees = 53.4880;
@@ -377,7 +379,7 @@ void UWeatherVisualsSubsystem::Tick(float DeltaTime)
 	ApplyFog();
 	ApplyExposure();
 	ApplyMaterialParameters();
-	ApplyClouds();
+	ApplyClouds(DeltaTime);
 }
 
 TStatId UWeatherVisualsSubsystem::GetStatId() const
@@ -476,10 +478,20 @@ void UWeatherVisualsSubsystem::Smooth(float DeltaTime)
 float UWeatherVisualsSubsystem::SunTransmission() const
 {
 	const float Cover = Current.CloudCover;
-	// Broken cloud: the sun is behind a cloud for about the covered share of the time, in spells of a minute or so.
-	const float Noise = 0.5f + 0.5f * FMath::PerlinNoise1D(float(ElapsedSeconds / 45.0));
-	const float BehindCloud = WeatherVisualsDetail::SmoothStep01(-0.04f, 0.04f, Cover - Noise);
-	const float ThroughCloud = FMath::Lerp(1.f, 0.1f, BehindCloud);
+	float ThroughCloud = 1.f;
+	if (CloudSky && CloudSky->IsActive())
+	{
+		// Real clouds are in the sky now and the sky capture lights them with this sun, so it is not switched on and
+		// off behind imaginary ones; broken cloud takes a steady share of the beam.
+		ThroughCloud = 1.f - WeatherVisualsDetail::TracedCloudSunLoss * WeatherVisualsDetail::SmoothStep01(0.25f, 0.9f, Cover);
+	}
+	else
+	{
+		// Broken cloud: the sun is behind a cloud for about the covered share of the time, in spells of a minute or so.
+		const float Noise = 0.5f + 0.5f * FMath::PerlinNoise1D(float(ElapsedSeconds / 45.0));
+		const float BehindCloud = WeatherVisualsDetail::SmoothStep01(-0.04f, 0.04f, Cover - Noise);
+		ThroughCloud = FMath::Lerp(1.f, 0.1f, BehindCloud);
+	}
 	// Overcast: one closed deck that lets only a trace of the beam through.
 	const float Overcast = WeatherVisualsDetail::SmoothStep01(0.5f, 1.f, Cover);
 	return FMath::Min(ThroughCloud, FMath::Lerp(1.f, WeatherVisualsDetail::OvercastSunTransmission, Overcast));
@@ -595,7 +607,7 @@ void UWeatherVisualsSubsystem::ApplyExposure()
 	}
 }
 
-void UWeatherVisualsSubsystem::ApplyClouds()
+void UWeatherVisualsSubsystem::ApplyClouds(float DeltaTime)
 {
 	CloudSkyFrameLog::Record(GetWorld());
 	if (!CloudSky || !CloudSky->IsActive())
@@ -611,8 +623,7 @@ void UWeatherVisualsSubsystem::ApplyClouds()
 	{
 		Inputs.SunDirection = -Sun->GetActorForwardVector();
 	}
-	Inputs.SunVisibility = WeatherVisualsDetail::SmoothStep01(0.3f, 0.9f, SunTransmission());
-	CloudSky->Update(Inputs);
+	CloudSky->Update(Inputs, DeltaTime);
 }
 
 void UWeatherVisualsSubsystem::ApplyMaterialParameters()

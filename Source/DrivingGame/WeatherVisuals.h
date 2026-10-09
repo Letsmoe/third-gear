@@ -106,7 +106,7 @@ private:
 	void ApplyFog();
 	void ApplyExposure();
 	void ApplyMaterialParameters();
-	void ApplyClouds();
+	void ApplyClouds(float DeltaTime);
 
 	/** How much direct sun gets through the clouds right now, 0 to 1. */
 	float SunTransmission() const;
