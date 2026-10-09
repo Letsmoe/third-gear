@@ -18,7 +18,7 @@ POM_FUNCTION = "/Engine/Functions/Engine_MaterialFunctions01/Texturing/ParallaxO
 # 0.18, concrete slabs 0.25 to 0.35, red brick paving about 0.25, dark red-brown clinker 0.13 to 0.19.
 # section -> (texture folder/set, tile size m, overrides)
 SECTIONS = {
-    "Road_Asphalt": ("Asphalt/Asphalt015", 2.5, {"tint": (0.85, 0.85), "roughness_scale": 1.4}),
+    "Road_Asphalt": ("Asphalt/Asphalt015", 2.5, {"tint": (0.85, 0.85), "roughness_scale": 1.4, "cracks": 0.5}),
     "Road_Cobble": ("Cobble/cobblestone_floor_08", 2.0, {"parallax": 0.03}),
     "Road_Pavers": ("Pavers/PavingStones092", 2.0, {"tint": (0.9, 0.9), "parallax": 0.015}),
     "Pavement": ("Pavers/concrete_pavement_02", 2.5, {"tint": (1.35, 1.35), "parallax": 0.012}),
@@ -146,6 +146,23 @@ Roughness = rough;
 return col * macro;
 """
 TERRAIN_INCLUDE = "/Plugin/MapRuntime/Private/TerrainNoise.ush"  # DgValueNoise, DG_LAYER
+
+# Road defects (issue 71): cracks, sealed cracks and patches from the generated atlas, scattered by cell hash so they
+# never repeat (Plugins/MapRuntime/Shaders/Private/RoadCracks.ush). Wear sets how many cells hold a defect.
+ROAD_CRACKS_INCLUDE = "/Plugin/MapRuntime/Private/RoadCracks.ush"
+ROAD_CRACKS_SET = "Generated/road_cracks"
+ROAD_CRACKS_HLSL = """
+FDgRoadDefects D = DgRoadDefects(CrackMask, CrackMaskSampler, CrackNormal, CrackNormalSampler, UV, Wear);
+float crack = D.Masks.x;
+float seal = D.Masks.y;
+float patch = D.Masks.z;
+// Patches are fresher, darker asphalt; cracks hold dirt and shadow; the sealant is black bitumen with a dull sheen.
+float3 c = Color * lerp(1.0, 0.72, patch) * (1.0 - crack * 0.8);
+c = lerp(c, float3(0.022, 0.021, 0.02), seal);
+Roughness = lerp(lerp(Rough, 0.45, seal), 1.0, crack);
+NormalOut = normalize(float3(Nrm.xy * (1.0 - seal * 0.7) + D.NormalXY, Nrm.z));
+return c;
+"""
 
 mel = unreal.MaterialEditingLibrary
 asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
@@ -351,6 +368,44 @@ def add_lit_windows(m, texcoord, vertex_color, glass_mask):
     mel.connect_material_property(switch, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
 
+def add_road_cracks(m, texcoord, color, rough, normal):
+    """Behind the Cracks static switch (road instances only): lays the generated crack atlas over the surface.
+    Returns colour, roughness and normal nodes; without the atlas imported they pass through unchanged."""
+    path = f"{TEX}/{ROAD_CRACKS_SET}/T_RoadCracks_"
+    if not eal.does_asset_exist(path + "Mask"):
+        unreal.log_warning("create_materials: road crack atlas not imported (Scripts/import_road_cracks.py)")
+        return color, rough, normal
+    custom = expr(m, unreal.MaterialExpressionCustom, -1000, -800, description="RoadCracks",
+                  output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3, code=ROAD_CRACKS_HLSL,
+                  include_file_paths=[TERRAIN_INCLUDE, ROAD_CRACKS_INCLUDE],
+                  inputs=[custom_input(n) for n in ("UV", "Wear", "Color", "Rough", "Nrm", "CrackMask", "CrackNormal")])
+    outputs = []
+    for name, kind in (("Roughness", unreal.CustomMaterialOutputType.CMOT_FLOAT1),
+                       ("NormalOut", unreal.CustomMaterialOutputType.CMOT_FLOAT3)):
+        output = unreal.CustomOutput()
+        output.set_editor_property("output_name", name)
+        output.set_editor_property("output_type", kind)
+        outputs.append(output)
+    custom.set_editor_property("additional_outputs", outputs)
+    link(texcoord, "", custom, "UV")
+    link(scalar(m, "Wear", 0.5, -1300, -700), "", custom, "Wear")
+    link(color, "", custom, "Color")
+    link(rough, "", custom, "Rough")
+    link(normal, "RGB", custom, "Nrm")
+    for name, sampler, y in (("Mask", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR, -650),
+                             ("Normal", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL, -600)):
+        texture = expr(m, unreal.MaterialExpressionTextureObjectParameter, -1300, y, parameter_name=f"Crack{name}",
+                       texture=unreal.load_asset(path + name), sampler_type=sampler)
+        link(texture, "", custom, f"Crack{name}")
+    results = []
+    for pin, source, source_pin, y in (("", color, "", -900), ("Roughness", rough, "", -850), ("NormalOut", normal, "RGB", -800)):
+        switch = expr(m, unreal.MaterialExpressionStaticSwitchParameter, -800, y, parameter_name="Cracks", default_value=False)
+        link(custom, pin, switch, "True")
+        link(source, source_pin, switch, "False")
+        results.append(switch)
+    return results[0], results[1], results[2]
+
+
 def build_master():
     if eal.does_asset_exist(MASTER):
         m = unreal.load_asset(MASTER)
@@ -385,6 +440,7 @@ def build_master():
     rough_scaled = expr(m, unreal.MaterialExpressionMultiply, -800, 200)
     link(rough, "R", rough_scaled, "A")
     link(scalar(m, "RoughnessScale", 1.0, -1000, 300), "", rough_scaled, "B")
+    tinted, rough_scaled, normal = add_road_cracks(m, texcoord, tinted, rough_scaled, normal)
 
     # Procedural windows (static switch so non-facade instances pay nothing).
     custom = expr(m, unreal.MaterialExpressionCustom, -1000, 1300, code=WINDOW_HLSL,
@@ -423,7 +479,7 @@ def build_master():
     link(glass_mask, "", any_window, "A")
     link(frame_mask, "", any_window, "B")
     normal_windows = expr(m, unreal.MaterialExpressionLinearInterpolate, -500, -100)
-    link(normal, "RGB", normal_windows, "A")
+    link(normal, "", normal_windows, "A")
     link(flat, "", normal_windows, "B")
     link(any_window, "", normal_windows, "Alpha")
 
@@ -486,6 +542,11 @@ def build_instance(master, section, set_path, tile_size, opts):
         mel.set_material_instance_scalar_parameter_value(mi, "HeightRatio", opts["parallax"])
     else:
         mel.set_material_instance_static_switch_parameter_value(mi, "Parallax", False)
+    if "cracks" in opts:
+        mel.set_material_instance_static_switch_parameter_value(mi, "Cracks", True)
+        mel.set_material_instance_scalar_parameter_value(mi, "Wear", opts["cracks"])
+    else:
+        mel.set_material_instance_static_switch_parameter_value(mi, "Cracks", False)
     if opts.get("windows"):
         mel.set_material_instance_static_switch_parameter_value(mi, "Windows", True)
     mel.update_material_instance(mi)
