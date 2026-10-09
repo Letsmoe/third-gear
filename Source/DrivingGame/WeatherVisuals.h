@@ -81,7 +81,16 @@ public:
 	/** Broadcast at every lightning flash. */
 	FOnLightningStrike OnLightning;
 
+	/**
+	 * Stops the eye has closed down for the car's own headlight beams, 0 with the lights off. Added to the exposure
+	 * (scaled by how dark it is), so a road lit at 50 to 250 lux does not blow out while the dark street beside it
+	 * still reads. The caller smooths it with the adaptation time of the eye.
+	 */
+	void SetHeadlightAdaptationStops(float Stops) { HeadlightAdaptationStops = Stops; }
+
 private:
+	float HeadlightAdaptationStops = 0.f;
+
 	/** Finds the sun, atmosphere, fog and post process volume of the level. */
 	void FindLevelActors();
 

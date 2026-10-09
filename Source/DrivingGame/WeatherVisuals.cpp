@@ -554,13 +554,15 @@ void UWeatherVisualsSubsystem::ApplyExposure()
 	const float Relative = WeatherVisualsDetail::RelativeGroundIlluminance(float(Position.GetAltitudeDegrees()), SunTransmission(), Current.CloudCover);
 	// The eye adapts only part of the way: a dull day still looks duller than a sunny one.
 	const float EV100 = FMath::Max(WeatherVisualsDetail::CalibratedEV100 + 0.75f * FMath::Log2(FMath::Max(Relative, 1e-6f)), WeatherVisualsDetail::NightEV100);
-	Volume->Settings.AutoExposureMinBrightness = EV100;
-	Volume->Settings.AutoExposureMaxBrightness = EV100;
+	// Headlights light the road far above the night exposure's range; the eye closes down for them (higher EV100 is darker).
+	const float AdaptedEV100 = EV100 + HeadlightAdaptationStops * NightFactor();
+	Volume->Settings.AutoExposureMinBrightness = AdaptedEV100;
+	Volume->Settings.AutoExposureMaxBrightness = AdaptedEV100;
 	// The VR menu panel cancels the exposure with an explicit gain (GameMenuPanel.cpp); keep it in step.
 	static IConsoleVariable* PanelExposure = IConsoleManager::Get().FindConsoleVariable(TEXT("dg.MenuPanelExposureEv"));
 	if (PanelExposure)
 	{
-		PanelExposure->Set(EV100, ECVF_SetByCode);
+		PanelExposure->Set(AdaptedEV100, ECVF_SetByCode);
 	}
 }
 

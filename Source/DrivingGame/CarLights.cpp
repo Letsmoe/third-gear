@@ -5,13 +5,21 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "Materials/MaterialInterface.h"
+#include "WeatherVisuals.h"
+#include "Engine/TextureLightProfile.h"
 
 namespace
 {
 TAutoConsoleVariable<int32> CVarHeadlightShadows(TEXT("tg.Headlights.Shadows"), 0,
 	TEXT("Virtual shadow maps for the headlights: 1 = on, 0 = off (a moving light invalidates cached shadow pages every frame)."), ECVF_Default);
+
+TAutoConsoleVariable<int32> CVarHeadlightMegaLights(TEXT("tg.Headlights.MegaLights"), 1,
+	TEXT("Whether the headlight spot lights may use MegaLights (read when the car spawns): 1 = yes, 0 = classic deferred lights."), ECVF_Default);
+
+TAutoConsoleVariable<float> CVarHeadlightTestWall(TEXT("tg.Headlights.Wall"), 0.f,
+	TEXT("Test wall in metres ahead of the headlamps to photograph the beam pattern on; 0 = none."), ECVF_Default);
 
 TAutoConsoleVariable<int32> CVarHeadlightMode(TEXT("tg.Headlights.Mode"), -1,
 	TEXT("Test override of the light switch: -1 = driver's switch, 0 = off, 1 = low beam, 2 = high beam."), ECVF_Default);
@@ -26,8 +34,11 @@ const FName LightMaterialSlotName(TEXT("veh_light"));
 /** LED headlamps, about 5500 K: slightly cool white (halogen would be about 3200 K, 1.0, 0.8, 0.55). */
 const FLinearColor WarmWhite(0.92f, 0.96f, 1.f);
 const FLinearColor TailRed(1.f, 0.03f, 0.01f);
-const FLinearColor ReverseWhite(1.f, 0.97f, 0.9f);
-const FLinearColor IndicatorAmber(1.f, 0.38f, 0.02f);
+
+/** Stops of exposure the eye closes for the low beam and for the high beam on top of it, and the seconds it takes to adapt. */
+constexpr float LowBeamAdaptationStops = 1.5f;
+constexpr float HighBeamAdaptationStops = 1.0f;
+constexpr float AdaptationSeconds = 1.5f;
 
 /** Fraction per second at which a bulb's glow follows the switch (filaments warm and cool in about 0.1 s). */
 constexpr float GlowRiseRate = 14.f;
@@ -107,28 +118,28 @@ USpotLightComponent* UCarLightsComponent::AddLamp(const TCHAR* Name, const FVect
 	return Light;
 }
 
-USpotLightComponent* UCarLightsComponent::AddHeadlamp(const TCHAR* Name, const FVector& Location, float AimDownDegrees, float RangeCm, UMaterialInterface* Function)
+USpotLightComponent* UCarLightsComponent::AddHeadlamp(const TCHAR* Name, const FVector& Location, float AimDownDegrees, float RangeCm, float ConeDegrees, UTextureLightProfile* Profile)
 {
 	USpotLightComponent* Light = NewObject<USpotLightComponent>(GetOwner(), Name);
 	Light->SetMobility(EComponentMobility::Movable);
 	Light->SetupAttachment(GetCar()->GetMesh());
-	Light->SetRelativeLocationAndRotation(Location, FRotator(-AimDownDegrees, 0.f, 0.f));
+	Light->SetRelativeLocationAndRotation(Location, FRotator(-AimDownDegrees, 0.f, GetDefault<UCarLightSettings>()->ProfileRollDegrees));
 	Light->SetLightColor(WarmWhite);
 	Light->IntensityUnits = ELightUnits::Candelas;
 	Light->SetIntensity(0.f);
 	Light->SetAttenuationRadius(RangeCm);
 	Light->SetSourceRadius(4.f);
-	Light->SetInnerConeAngle(40.f);
-	Light->SetOuterConeAngle(45.f);
+	// The profile shapes the beam; the cone only has to contain it. Inner angle 0 keeps the cone from adding its own falloff.
+	Light->SetInnerConeAngle(0.f);
+	Light->SetOuterConeAngle(ConeDegrees);
 	Light->SetCastShadows(CVarHeadlightShadows.GetValueOnGameThread() != 0);
 	Light->SetVisibility(false);
-	if (Function)
+	if (Profile)
 	{
-		UMaterialInstanceDynamic* FunctionInstance = UMaterialInstanceDynamic::Create(Function, this);
-		BeamFunctions.Add(Light, FunctionInstance);
-		Light->SetLightFunctionMaterial(FunctionInstance);
-		Light->SetLightFunctionScale(FVector(1.f)); // the function then sees the lit point in centimetres from the lamp
+		Light->SetIESTexture(Profile);
+		Light->SetUseIESBrightness(false); // the profile is normalised; the intensity below is the peak candela
 	}
+	Light->bAllowMegaLights = CVarHeadlightMegaLights.GetValueOnGameThread() != 0;
 	Light->RegisterComponent();
 	return Light;
 }
@@ -136,26 +147,20 @@ USpotLightComponent* UCarLightsComponent::AddHeadlamp(const TCHAR* Name, const F
 void UCarLightsComponent::CreateLights()
 {
 	const UCarLightSettings* Settings = GetDefault<UCarLightSettings>();
-	UMaterialInterface* LowFunction = Settings->LowBeamFunction.LoadSynchronous();
-	UMaterialInterface* HighFunction = Settings->HighBeamFunction.LoadSynchronous();
+	UTextureLightProfile* LowProfile = Settings->LowBeamProfile.LoadSynchronous();
+	UTextureLightProfile* HighProfile = Settings->HighBeamProfile.LoadSynchronous();
 
 	for (const float Side : {-1.f, 1.f})
 	{
 		const TCHAR* SideName = Side < 0.f ? TEXT("Left") : TEXT("Right");
 		const FVector Headlamp(Settings->HeadlampLocation.X, Side * Settings->HeadlampLocation.Y, Settings->HeadlampLocation.Z);
 		LowBeamLights.Add(AddHeadlamp(*FString::Printf(TEXT("LowBeam%s"), SideName), Headlamp, Settings->LowBeamAimDownDegrees,
-			Settings->LowBeamRangeCm, LowFunction));
+			Settings->LowBeamRangeCm, Settings->LowBeamConeDegrees, LowProfile));
 		HighBeamLights.Add(AddHeadlamp(*FString::Printf(TEXT("HighBeam%s"), SideName), Headlamp, 0.f,
-			Settings->HighBeamRangeCm, HighFunction));
+			Settings->HighBeamRangeCm, Settings->HighBeamConeDegrees, HighProfile));
 
 		const FVector Tail(Settings->TailLampLocation.X, Side * Settings->TailLampLocation.Y, Settings->TailLampLocation.Z);
 		TailLights.Add(AddLamp(*FString::Printf(TEXT("Tail%s"), SideName), Tail, 180.f, TailRed, 250.f));
-		ReverseLights.Add(AddLamp(*FString::Printf(TEXT("Reverse%s"), SideName), Tail + FVector(-4.f, -Side * 22.f, -4.f), 180.f, ReverseWhite, 500.f));
-
-		const FVector Front(Settings->FrontIndicatorLocation.X, Side * Settings->FrontIndicatorLocation.Y, Settings->FrontIndicatorLocation.Z);
-		IndicatorLights.Add({AddLamp(*FString::Printf(TEXT("IndicatorFront%s"), SideName), Front, Side * 35.f, IndicatorAmber, 250.f), Side < 0.f});
-		const FVector Rear = Tail + FVector(0.f, Side * 2.f, 3.f);
-		IndicatorLights.Add({AddLamp(*FString::Printf(TEXT("IndicatorRear%s"), SideName), Rear, 180.f - Side * 35.f, IndicatorAmber, 250.f), Side < 0.f});
 	}
 }
 
@@ -241,27 +246,6 @@ void UCarLightsComponent::UpdateIndicator(float DeltaTime, float SteeringWheelDe
 	SetLampPhase(bPhaseOn);
 }
 
-void UCarLightsComponent::UpdateBeamFrames()
-{
-	for (const TPair<TObjectPtr<USpotLightComponent>, TObjectPtr<UMaterialInstanceDynamic>>& Beam : BeamFunctions)
-	{
-		const USpotLightComponent* Lamp = Beam.Key;
-		UMaterialInstanceDynamic* Function = Beam.Value;
-		if (!Lamp || !Function)
-		{
-			continue;
-		}
-		const FVector Position = Lamp->GetComponentLocation();
-		Function->SetVectorParameterValue(TEXT("LampPosition"), FLinearColor(Position.X, Position.Y, Position.Z, 0.f));
-		const FVector Forward = Lamp->GetForwardVector();
-		const FVector Right = Lamp->GetRightVector();
-		const FVector Up = Lamp->GetUpVector();
-		Function->SetVectorParameterValue(TEXT("LampForward"), FLinearColor(Forward.X, Forward.Y, Forward.Z, 0.f));
-		Function->SetVectorParameterValue(TEXT("LampRight"), FLinearColor(Right.X, Right.Y, Right.Z, 0.f));
-		Function->SetVectorParameterValue(TEXT("LampUp"), FLinearColor(Up.X, Up.Y, Up.Z, 0.f));
-	}
-}
-
 void UCarLightsComponent::ApplyState(float DeltaTime, const FCarDriverInput& Input, const FCarTelemetry& Telemetry)
 {
 	const UCarLightSettings* Settings = GetDefault<UCarLightSettings>();
@@ -309,16 +293,43 @@ void UCarLightsComponent::ApplyState(float DeltaTime, const FCarDriverInput& Inp
 		Light->SetVisibility(Candela > 0.05f);
 		Light->SetIntensity(Candela);
 	}
-	for (USpotLightComponent* Light : ReverseLights)
+}
+
+void UCarLightsComponent::UpdateTestWall()
+{
+	const float DistanceMeters = CVarHeadlightTestWall.GetValueOnGameThread();
+	if (DistanceMeters <= 0.f)
 	{
-		Light->SetVisibility(ReverseGlow > 0.01f);
-		Light->SetIntensity(Settings->ReverseCandela * RearScale * ReverseGlow);
+		if (TestWall)
+		{
+			TestWall->SetVisibility(false);
+		}
+		return;
 	}
-	for (const FLampLight& Lamp : IndicatorLights)
+	if (!TestWall)
 	{
-		const float Glow = Lamp.bLeft ? LeftGlow : RightGlow;
-		Lamp.Light->SetVisibility(Glow > 0.01f);
-		Lamp.Light->SetIntensity(Settings->IndicatorCandela * Glow);
+		UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+		TestWall = NewObject<UStaticMeshComponent>(GetOwner(), TEXT("HeadlightTestWall"));
+		TestWall->SetStaticMesh(Cube);
+		TestWall->SetupAttachment(GetCar()->GetMesh());
+		TestWall->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		TestWall->SetCastShadow(false);
+		TestWall->RegisterComponent();
+	}
+	// A 14 m wide, 5 m high light grey wall whose face is the given distance from the headlamps.
+	const UCarLightSettings* Settings = GetDefault<UCarLightSettings>();
+	TestWall->SetRelativeLocation(FVector(Settings->HeadlampLocation.X + DistanceMeters * 100.f + 5.f, 0.f, 200.f));
+	TestWall->SetRelativeScale3D(FVector(0.1f, 14.f, 5.f));
+	TestWall->SetVisibility(true);
+}
+
+void UCarLightsComponent::UpdateEyeAdaptation(float DeltaTime)
+{
+	const float TargetStops = LowBeamAdaptationStops * BeamGlow + HighBeamAdaptationStops * HighBeamGlow;
+	AdaptationStops = FMath::FInterpTo(AdaptationStops, TargetStops, DeltaTime, 1.f / AdaptationSeconds);
+	if (UWeatherVisualsSubsystem* Visuals = GetWorld() ? GetWorld()->GetSubsystem<UWeatherVisualsSubsystem>() : nullptr)
+	{
+		Visuals->SetHeadlightAdaptationStops(AdaptationStops);
 	}
 }
 
@@ -327,5 +338,6 @@ void UCarLightsComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	UpdateIndicator(DeltaTime, LastInput.SteeringWheelDeg);
 	ApplyState(DeltaTime, LastInput, LastTelemetry);
-	UpdateBeamFrames();
+	UpdateEyeAdaptation(DeltaTime);
+	UpdateTestWall();
 }

@@ -8,9 +8,9 @@
 
 class ACarPawn;
 class UMaterialInstanceDynamic;
-class UMaterialInterface;
 class USpotLightComponent;
 class UStaticMeshComponent;
+class UTextureLightProfile;
 
 /** Indicator stalk position. */
 UENUM()
@@ -63,24 +63,30 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Beams")
 	float HighBeamRangeCm = 40000.f;
 
+	/** Light profiles of the beams (Tools/texturegen/headlamp_ies.py, imported by Scripts/import_headlight_profiles.py). */
 	UPROPERTY(Config, EditAnywhere, Category = "Beams")
-	TSoftObjectPtr<UMaterialInterface> LowBeamFunction;
+	TSoftObjectPtr<UTextureLightProfile> LowBeamProfile;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Beams")
-	TSoftObjectPtr<UMaterialInterface> HighBeamFunction;
+	TSoftObjectPtr<UTextureLightProfile> HighBeamProfile;
 
-	/** Glow on the road behind the car, candela per lamp. */
+	/** Roll of the profile around the lamp axis, degrees; sets which side of the beam the cut-off steps up on. */
+	UPROPERTY(Config, EditAnywhere, Category = "Beams")
+	float ProfileRollDegrees = 0.f;
+
+	/** Cone angle of the headlamp spot lights; the profile shapes the beam inside it, so it must cover the widest angle of the profile. */
+	UPROPERTY(Config, EditAnywhere, Category = "Beams")
+	float LowBeamConeDegrees = 50.f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Beams")
+	float HighBeamConeDegrees = 25.f;
+
+	/** Glow on the road behind the car, candela per lamp. Only the tail and brake lamp has a real light; reverse lamps and indicators are emissive only. */
 	UPROPERTY(Config, EditAnywhere, Category = "Rear")
 	float TailCandela = 0.02f;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Rear")
 	float BrakeCandela = 0.25f;
-
-	UPROPERTY(Config, EditAnywhere, Category = "Rear")
-	float ReverseCandela = 1.f;
-
-	UPROPERTY(Config, EditAnywhere, Category = "Rear")
-	float IndicatorCandela = 0.5f;
 
 	/** Indicator blink rate, Hz (the legal range is 1.0 to 2.0, relays click at about 1.5). */
 	UPROPERTY(Config, EditAnywhere, Category = "Indicators")
@@ -96,9 +102,10 @@ public:
 };
 
 /**
- * All lights of the player car: low and high beam (spot lights with a light function that draws the asymmetric
+ * All lights of the player car: low and high beam (spot lights with IES light profiles that draw the asymmetric
  * European beam with its cut-off line), tail, brake and reverse lamps, indicators and hazards. Each switches an
- * emissive parameter on the body's light material and a real light that falls on the road and surroundings.
+ * emissive parameter on the body's light material; the beams and one small tail light per side are real lights
+ * that fall on the road and surroundings.
  * The dashboard tell-tales and the indicator relay click read their state from here.
  */
 UCLASS(ClassGroup = (Car), meta = (BlueprintSpawnableComponent))
@@ -130,24 +137,20 @@ public:
 	FIndicatorLampDelegate OnIndicatorLamp;
 
 private:
-	/** One indicator lamp: a light and the side of the car it is on. */
-	struct FLampLight
-	{
-		TObjectPtr<USpotLightComponent> Light;
-		bool bLeft = false;
-	};
-
 	void CreateLights();
 	USpotLightComponent* AddLamp(const TCHAR* Name, const FVector& Location, float YawDegrees, const FLinearColor& Colour, float RadiusCm);
-	USpotLightComponent* AddHeadlamp(const TCHAR* Name, const FVector& Location, float AimDownDegrees, float RangeCm, UMaterialInterface* Function);
+	USpotLightComponent* AddHeadlamp(const TCHAR* Name, const FVector& Location, float AimDownDegrees, float RangeCm, float ConeDegrees, UTextureLightProfile* Profile);
 
 	/** Moves the blink phase and decides when the lamps are on; cancels the indicator after a completed turn. */
 	void UpdateIndicator(float DeltaTime, float SteeringWheelDeg);
 	void SetLampPhase(bool bOn);
 
 	/** Writes the light state into the body material and the real lights. */
-	/** Hands each beam's light function the lamp's position and axes, since the engine's Light Vector node proved unusable. */
-	void UpdateBeamFrames();
+	/** Lets the night exposure follow the beams with the adaptation time of the eye. */
+	void UpdateEyeAdaptation(float DeltaTime);
+
+	/** Shows or hides the test wall of tg.Headlights.Wall. */
+	void UpdateTestWall();
 
 	void ApplyState(float DeltaTime, const FCarDriverInput& Input, const FCarTelemetry& Telemetry);
 
@@ -171,6 +174,7 @@ private:
 	float BeamGlow = 0.f;
 	float ReverseGlow = 0.f;
 	float HighBeamGlow = 0.f;
+	float AdaptationStops = 0.f;
 
 	FCarDriverInput LastInput;
 	FCarTelemetry LastTelemetry;
@@ -178,9 +182,6 @@ private:
 	TObjectPtr<UMaterialInstanceDynamic> LightMaterial;
 	TArray<TObjectPtr<USpotLightComponent>> LowBeamLights;
 	TArray<TObjectPtr<USpotLightComponent>> HighBeamLights;
-	/** One light function instance per headlamp, keyed by the lamp it belongs to. */
-	TMap<TObjectPtr<USpotLightComponent>, TObjectPtr<UMaterialInstanceDynamic>> BeamFunctions;
 	TArray<TObjectPtr<USpotLightComponent>> TailLights;
-	TArray<TObjectPtr<USpotLightComponent>> ReverseLights;
-	TArray<FLampLight> IndicatorLights;
+	TObjectPtr<UStaticMeshComponent> TestWall;
 };
