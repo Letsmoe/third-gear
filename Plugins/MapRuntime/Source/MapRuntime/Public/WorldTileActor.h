@@ -58,8 +58,12 @@ public:
 	/** Adds the road markings (never collide). */
 	void AddMarkings(UE::Geometry::FDynamicMesh3&& Mesh, const TArray<UMaterialInterface*>& Materials);
 
-	/** Adds the buildings, colliding when bCollision. */
-	void AddBuildings(UE::Geometry::FDynamicMesh3&& Mesh, const TArray<UMaterialInterface*>& Materials, bool bCollision, bool bCookNow);
+	/** Adds the buildings, colliding when bCollision; with bVisible false only the collision is there. */
+	void AddBuildings(UE::Geometry::FDynamicMesh3&& Mesh, const TArray<UMaterialInterface*>& Materials, bool bCollision, bool bCookNow,
+		bool bVisible = true);
+
+	/** Adds the instances of one building kit piece (transforms relative to the tile); null meshes are skipped. */
+	void AddKitInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow);
 
 	/**
 	 * Adds instances of one plant model (transforms relative to the tile). WindMaterials, when not empty, replace the

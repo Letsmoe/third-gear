@@ -84,12 +84,25 @@ void AWorldTileActor::AddMarkings(UE::Geometry::FDynamicMesh3&& Mesh, const TArr
 	AddMeshComponent(MoveTemp(Mesh), Materials, /*bCastShadow=*/false);
 }
 
-void AWorldTileActor::AddBuildings(UE::Geometry::FDynamicMesh3&& Mesh, const TArray<UMaterialInterface*>& Materials, bool bCollision, bool bCookNow)
+void AWorldTileActor::AddBuildings(UE::Geometry::FDynamicMesh3&& Mesh, const TArray<UMaterialInterface*>& Materials, bool bCollision, bool bCookNow,
+	bool bVisible)
 {
-	UDynamicMeshComponent* Component = AddMeshComponent(MoveTemp(Mesh), Materials, /*bCastShadow=*/true);
+	UDynamicMeshComponent* Component = AddMeshComponent(MoveTemp(Mesh), Materials, /*bCastShadow=*/bVisible);
+	if (Component && !bVisible)
+	{
+		Component->SetVisibility(false);
+	}
 	if (Component && bCollision)
 	{
 		EnableCollision(Component, bCookNow);
+	}
+}
+
+void AWorldTileActor::AddKitInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow)
+{
+	if (Mesh && !Transforms.IsEmpty())
+	{
+		AddInstances(Mesh, Transforms, 0)->SetCastShadow(bCastShadow);
 	}
 }
 

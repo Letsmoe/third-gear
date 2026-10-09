@@ -26,13 +26,13 @@ from osmimport import building_types as bt  # noqa: E402
 TYPOLOGY_SHARES = {
     "gruenderzeit_clinker": 7, "brick_block_1920s": 3, "postwar_plaster": 12, "slab_block": 3, "terraced": 3,
     "semidetached": 4, "detached_postwar": 16, "villa": 1, "modern": 5, "commercial_groundfloor": 4,
-    "vierlande_farmhouse": 0, "shed_garage": 26, "industrial_hall": 2, "public": 2,
+    "vierlande_farmhouse": 0, "shed_garage": 26, "industrial_hall": 2, "public": 2, "retail_centre": 1, "halftimbered_town": 1,
 }
 CLASS_COLOURS = {
     "gruenderzeit_clinker": "#b5121b", "brick_block_1920s": "#7b2d1e", "postwar_plaster": "#f2c14e",
     "slab_block": "#6a4fb3", "terraced": "#f28c28", "semidetached": "#e7a1c5", "detached_postwar": "#4aa564",
     "villa": "#1b7a3a", "modern": "#2da0d8", "commercial_groundfloor": "#e6194b", "vierlande_farmhouse": "#8b5a2b",
-    "shed_garage": "#9a9a9a", "industrial_hall": "#3d3d3d", "public": "#0b3d91",
+    "shed_garage": "#9a9a9a", "industrial_hall": "#3d3d3d", "public": "#0b3d91", "retail_centre": "#ff00ff", "halftimbered_town": "#00ffff",
 }
 ROOF_COLOURS = {"flat": "#888", "gabled": "#d35400", "hipped": "#27ae60", "half_hipped": "#16a085",
                 "mansard": "#8e44ad", "gambrel": "#c0392b", "pyramidal": "#f1c40f", "skillion": "#2980b9",

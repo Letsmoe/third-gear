@@ -6,6 +6,7 @@
 struct FWorldTileData;
 struct FWorldFurnitureInstances;
 struct FWorldSnowMeshes;
+struct FWorldKitInstances;
 
 /** How much of a tile is built, by its distance from the viewer. */
 enum class EWorldTileDetail : uint8
@@ -50,6 +51,10 @@ struct FWorldTileMeshes
 	FWorldMeshBuilder Markings;
 	/** Walls and roofs. */
 	FWorldMeshBuilder Buildings;
+	/** Generated roofs of the kit buildings (near detail only), see WorldKitBuildings.h. */
+	FWorldMeshBuilder KitRoofs;
+	/** The plain extruded shells of the kit buildings, spawned invisible as their collision. */
+	FWorldMeshBuilder KitCollision;
 	/**
 	 * The builders as dynamic meshes, converted at the end of BuildWorldTileMeshes. The ground is split into
 	 * ChunksPerSide² square chunks (row-major from the tile corner), so spawning and collision cooking can be
@@ -61,6 +66,10 @@ struct FWorldTileMeshes
 	FVector2f ChunkSizeCm = FVector2f::ZeroVector;
 	UE::Geometry::FDynamicMesh3 MarkingsMesh;
 	UE::Geometry::FDynamicMesh3 BuildingsMesh;
+	UE::Geometry::FDynamicMesh3 KitRoofsMesh;
+	UE::Geometry::FDynamicMesh3 KitCollisionMesh;
+	/** Wall, window and decoration instances of the kit buildings, or null. */
+	TSharedPtr<FWorldKitInstances> Kit;
 	TArray<FWorldPlantInstances> Plants;
 	/** Trunk collision cylinders: base point (cm, tile-relative) and diameter (cm). */
 	TArray<FVector> TrunkBases;
