@@ -24,6 +24,8 @@ constexpr float SnowDepthPerColorStep = 0.005f;
 constexpr float SnowEdgeDistancePerColorStep = 0.02f;
 /** Largest flat block merged into two triangles, in cells. */
 constexpr int32 SnowMaxBlockCells = 8;
+/** How far the skirts of merged blocks hang below the surface, cm. */
+constexpr float SnowSkirtDepthCm = 6.f;
 /** Flatness tolerances for merging cells, metres. */
 constexpr float SnowSurfaceTolerance = 0.012f;
 constexpr float SnowDepthTolerance = 0.012f;
@@ -648,7 +650,7 @@ private:
 		const FVector3f Up(0.f, 0.f, 1.f);
 		if (Size > 1)
 		{
-			EmitFan(X0, Y0, Size);
+			EmitFlatBlock(X0, Y0, Size);
 			return;
 		}
 		const int32 X1 = FMath::Min(X0 + Size, Samples.CountX - 1);
@@ -670,33 +672,30 @@ private:
 	}
 
 	/**
-	 * A flat block as a fan from its centre to every sample on its outline. The outline keeps all its vertices so a
-	 * finer neighbour shares them exactly and no crack opens between blocks of different size.
+	 * A flat block as two triangles with a short skirt hanging from each edge. A finer neighbour has vertices along the
+	 * shared edge that this block lacks, so the edges can differ by a few millimetres; the skirt closes that gap.
 	 */
-	void EmitFan(int32 X0, int32 Y0, int32 Size)
+	void EmitFlatBlock(int32 X0, int32 Y0, int32 Size)
 	{
-		TArray<int32> Outline;
-		for (int32 Step = 0; Step < Size; ++Step)
+		const int32 Corners[4][2] = {{X0, Y0}, {X0 + Size, Y0}, {X0 + Size, Y0 + Size}, {X0, Y0 + Size}};
+		int32 Top[4];
+		int32 Bottom[4];
+		for (int32 Corner = 0; Corner < 4; ++Corner)
 		{
-			Outline.Add(VertexAt(X0 + Step, Y0));
+			const int32 X = FMath::Min(Corners[Corner][0], Samples.CountX - 1);
+			const int32 Y = FMath::Min(Corners[Corner][1], Samples.CountY - 1);
+			Top[Corner] = VertexAt(X, Y);
+			Bottom[Corner] = Builder.AddVertex(Builder.GetPosition(Top[Corner]) - FVector3f(0.f, 0.f, SnowSkirtDepthCm),
+				FVector2f(float(Tile.Origin.X) + X * SnowCellMetres, float(Tile.Origin.Y) + Y * SnowCellMetres), SnowVertexColor(Samples, Samples.Index(X, Y)));
 		}
-		for (int32 Step = 0; Step < Size; ++Step)
-		{
-			Outline.Add(VertexAt(X0 + Size, Y0 + Step));
-		}
-		for (int32 Step = Size; Step > 0; --Step)
-		{
-			Outline.Add(VertexAt(X0 + Step, Y0 + Size));
-		}
-		for (int32 Step = Size; Step > 0; --Step)
-		{
-			Outline.Add(VertexAt(X0, Y0 + Step));
-		}
-		const int32 Centre = VertexAt(X0 + Size / 2, Y0 + Size / 2);
 		const FVector3f Up(0.f, 0.f, 1.f);
-		for (int32 Index = 0; Index < Outline.Num(); ++Index)
+		Builder.AddTriangle(Top[0], Top[1], Top[2], 0, Up);
+		Builder.AddTriangle(Top[0], Top[2], Top[3], 0, Up);
+		const FVector3f Outward[4] = {FVector3f(0.f, -1.f, 0.f), FVector3f(1.f, 0.f, 0.f), FVector3f(0.f, 1.f, 0.f), FVector3f(-1.f, 0.f, 0.f)};
+		for (int32 Edge = 0; Edge < 4; ++Edge)
 		{
-			Builder.AddTriangle(Centre, Outline[Index], Outline[(Index + 1) % Outline.Num()], 0, Up);
+			const int32 Next = (Edge + 1) % 4;
+			Builder.AddQuad(Top[Edge], Top[Next], Bottom[Next], Bottom[Edge], 0, Outward[Edge]);
 		}
 	}
 
