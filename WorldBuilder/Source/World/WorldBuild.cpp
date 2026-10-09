@@ -11,8 +11,11 @@
 #include <thread>
 #include <vector>
 
+#include "BuildingRecords.h"
+#include "BuildingTiles.h"
 #include "HeightGrid.h"
 #include "LandCover.h"
+#include "Lanes.h"
 #include "OsmReader.h"
 #include "Assumptions.h"
 #include "Paths.h"
@@ -141,9 +144,12 @@ FPolygonSet BuildingFootprints(const std::vector<FOsmArea>& Buildings)
 	return Footprints;
 }
 
-/** The furniture, parked cars and painted bars standing in one tile. */
+/** The furniture, parked cars and buildings standing in one tile. */
 struct FTileContents
 {
+	std::vector<const FBuilding*> Buildings;
+	/** Indices into FRegionInputs::LaneQueries of the lane points in this tile. */
+	std::vector<size_t> LanePoints;
 	std::vector<const FLamp*> Lamps;
 	std::vector<const FSignalHead*> Heads;
 	std::vector<const FSign*> Signs;
@@ -170,6 +176,9 @@ struct FRegionInputs
 	const FRoadSurfaces* Roads = nullptr;
 	std::vector<FBar> Bars;
 	FSpatialIndex BarIndex;
+	/** The places the lanes need a road height, and the heights the tiles fill in (each index by one tile). */
+	std::vector<FStreetPoint> LaneQueries;
+	std::vector<double>* LaneHeights = nullptr;
 	/** What stands in each tile, by tile index (Region.Tiles() order). */
 	std::vector<FTileContents> Contents;
 };
@@ -391,6 +400,15 @@ void BuildTile(const FTileBounds& Tile, size_t TileIndex, const FRegionInputs& I
 	WriteMarkings(Writer, *Inputs.Roads);
 	WriteBars(Writer, Inputs);
 	WritePois(Writer, Inputs.Contents[TileIndex], Pavement, Ground, RoadHeight);
+	for (const FBuilding* Building : Inputs.Contents[TileIndex].Buildings)
+	{
+		WriteBuilding(Writer, *Building, Ground, Window, Box);
+	}
+	for (const size_t Query : Inputs.Contents[TileIndex].LanePoints)
+	{
+		const FStreetPoint& Point = Inputs.LaneQueries[Query];
+		(*Inputs.LaneHeights)[Query] = RoadHeight.Sample(Point.X, Point.Y);
+	}
 	Clock.Next(StageSurfaces);
 
 	const double Reach = FVegetationSources::WindowMargin();
@@ -504,7 +522,7 @@ int TileIndexOf(const FRegion& Region, double X, double Y)
 
 /** The furniture and parked cars by the tile they stand in. */
 std::vector<FTileContents> SortIntoTiles(const FRegion& Region, const FFurniture& Furniture,
-										 const std::vector<FParkedCar>& Cars)
+										 const std::vector<FParkedCar>& Cars, const std::vector<FBuilding>& Buildings)
 {
 	std::vector<FTileContents> Contents(Region.Tiles().size());
 	auto Place = [&](double X, double Y, auto Member, const auto* Item) {
@@ -530,7 +548,35 @@ std::vector<FTileContents> SortIntoTiles(const FRegion& Region, const FFurniture
 	{
 		Place(Car.X, Car.Y, &FTileContents::Cars, &Car);
 	}
+	for (const FBuilding& Building : Buildings)
+	{
+		const FWorldPoint& Point = Building.RepresentativePoint;
+		Place(Point.X, Point.Y, &FTileContents::Buildings, &Building);
+	}
 	return Contents;
+}
+
+/**
+ * Sorts the lane points needing a height into the tiles, whose road height field fills them in. The few outside every
+ * tile (bridge ends past the region's edge) are computed here.
+ */
+void PrepareLaneHeights(FRegionInputs& Inputs, const FRegion& Region, const FLaneGraph& Lanes,
+						const FTerrainGrid& Terrain, const FRoadSurfaces& Roads, std::vector<double>& Heights)
+{
+	Inputs.LaneQueries = LaneHeightQueries(Lanes);
+	Heights.assign(Inputs.LaneQueries.size(), 0.0);
+	Inputs.LaneHeights = &Heights;
+	for (size_t Query = 0; Query < Inputs.LaneQueries.size(); ++Query)
+	{
+		const FStreetPoint& Point = Inputs.LaneQueries[Query];
+		const int Index = TileIndexOf(Region, Point.X, Point.Y);
+		if (Index < 0)
+		{
+			Heights[Query] = RoadHeightAt(Terrain, Roads.Ground(), Point.X, Point.Y);
+			continue;
+		}
+		Inputs.Contents[Index].LanePoints.push_back(Query);
+	}
 }
 
 FPolyline ToPolyline(const FStreetPolyline& Line)
@@ -615,6 +661,9 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	auto CoverTask = std::async(std::launch::async, [&] { return FLandCover(Osm.Areas); });
 	auto PathsTask = std::async(std::launch::async, [&] { return FPathSurfaces(Osm); });
 	const std::string TreeTable = (Geodata / "raw" / "strassenbaeume" / "street_trees.tsv").string();
+	auto KitBuildingsTask = std::async(std::launch::async, [&] {
+		return BuildBuildings(Osm, [&](double X, double Y) { return Terrain.Sample(X, Y); }, Threads);
+	});
 	auto VegetationTask = std::async(std::launch::async, [&] { return FVegetationSources(Osm, ReadStreetTrees(TreeTable)); });
 
 	const FPolygonSet Buildings = BuildingsTask.get();
@@ -629,8 +678,14 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	const FFurniture Furniture = BuildFurniture(Osm, Graph, Roads.Ground(), Buildings);
 	const std::vector<FParkedCar> Cars = BuildParkedCars(Osm, Graph, Furniture.Zebras, Roads.Ground(), Buildings, Inputs.Extent);
 	AddBars(Inputs, Furniture, Roads);
-	Inputs.Contents = SortIntoTiles(Region, Furniture, Cars);
+	const std::vector<FBuilding> KitBuildings = KitBuildingsTask.get();
+	Log("buildings: " + std::to_string(KitBuildings.size()) + " footprints");
+	Inputs.Contents = SortIntoTiles(Region, Furniture, Cars, KitBuildings);
 	WriteTrafficJson((OutputDirectory / "traffic.json").string(), Furniture.Network);
+	FLaneGraph Lanes = BuildLaneGraph(Streets, Graph, Furniture, Inputs.Extent);
+	std::vector<double> LaneHeights;
+	PrepareLaneHeights(Inputs, Region, Lanes, Terrain, Roads, LaneHeights);
+	Log("lanes: " + std::to_string(Lanes.Lanes.size()) + ", " + std::to_string(Lanes.GoodCount) + " in the connected network");
 	Log("furniture: " + std::to_string(Furniture.Network.Junctions.size()) + " signal junctions, "
 		+ std::to_string(Furniture.Heads.size()) + " signal poles, " + std::to_string(Furniture.Signs.size()) + " signs, "
 		+ std::to_string(Furniture.Lamps.size()) + " lamps, " + std::to_string(Furniture.Zebras.size()) + " zebras, "
@@ -650,6 +705,9 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	const std::vector<FTileBounds> Tiles = Region.Tiles();
 	BuildTiles(Tiles, Inputs, OutputDirectory, Threads);
 	LogStageTimes();
+	ApplyLaneHeights(Lanes, LaneHeights);
+	WriteLanesJson((OutputDirectory / "lanes.json").string(), Lanes);
+	Log("wrote lanes.json");
 	WriteWorldJson(Region, Tiles, FindStart(Streets, Terrain, Roads.Ground()), OutputDirectory / "world.json");
 	Log("wrote " + std::to_string(Tiles.size()) + " tiles to " + OutputDirectory.string() + " on "
 		+ std::to_string(Threads) + " threads");
