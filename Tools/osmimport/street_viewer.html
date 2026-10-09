@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Third Gear street viewer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  html, body, #map { height: 100%; margin: 0; }
+  .legend { background: rgba(255, 255, 255, 0.92); padding: 6px 10px; font: 12px sans-serif; line-height: 18px; }
+  .legend i { display: inline-block; width: 22px; height: 0; margin-right: 6px; vertical-align: middle; border-top-width: 3px; }
+  .legend b { display: inline-block; width: 10px; height: 10px; margin: 0 12px 0 6px; border-radius: 50%; vertical-align: middle; border: 1px solid #000; }
+  .tags { font: 11px monospace; border-collapse: collapse; }
+  .tags td { padding: 0 6px 0 0; vertical-align: top; }
+  .tags tr.derived td { color: #06c; }
+  .sign-label { background: #c00; color: #fff; border: 0; font: 10px sans-serif; padding: 0 3px; box-shadow: none; }
+  .sign-label::before { display: none; }
+  #status { position: absolute; bottom: 8px; left: 8px; z-index: 1000; background: rgba(255,255,255,0.9); font: 12px sans-serif; padding: 3px 8px; white-space: pre; }
+  #reload { position: absolute; top: 80px; left: 10px; z-index: 1000; font: 13px sans-serif; padding: 4px 8px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<button id="reload" title="Rebuild the layers from the current code (R)">Reload layers</button>
+<div id="status">loading…</div>
+<script>
+// Line styles by feature style; dashArray in screen pixels.
+const LINE_STYLES = {
+  centre:           { color: "#ffffff", weight: 1, opacity: 0.7 },
+  carriageway_edge: { color: "#ffd400", weight: 2, dashArray: "6 4" },
+  lane_divider:     { color: "#33ffff", weight: 1.5 },
+  cycle_lane:       { color: "#2f7bff", weight: 3 },
+  cycle_track:      { color: "#2f7bff", weight: 3, dashArray: "5 4" },
+  shared_lane:      { color: "#2f7bff", weight: 2, dashArray: "1 4" },
+  cycleway:         { color: "#2f7bff", weight: 2.5 },
+  footway:          { color: "#dddddd", weight: 1.5, dashArray: "3 3" },
+  crossing_way:     { color: "#ff3fd5", weight: 3 },
+  railway:          { color: "#111111", weight: 3, dashArray: "8 6" },
+  bridge:           { color: "#99bbee", weight: 1.5, fillOpacity: 0.35 },
+  road_area:        { color: "#ff8c00", weight: 1, fillOpacity: 0.25 },
+};
+const POINT_STYLES = {
+  traffic_signals: { color: "#000", fillColor: "#ff2020", radius: 6 },
+  stop:            { color: "#fff", fillColor: "#ff2020", radius: 6 },
+  give_way:        { color: "#ff2020", fillColor: "#ffffff", radius: 6 },
+  mini_roundabout: { color: "#000", fillColor: "#2f7bff", radius: 5 },
+  crossing:        { color: "#000", fillColor: "#ff3fd5", radius: 5 },
+  street_lamp:     { color: "#665", fillColor: "#fff38a", radius: 3 },
+  bus_stop:        { color: "#000", fillColor: "#22ee22", radius: 5 },
+  traffic_sign:    { color: "#fff", fillColor: "#cc0000", radius: 4 },
+};
+const LEGEND = [
+  ["line", "carriageway_edge", "carriageway edge (from width or lanes)"],
+  ["line", "lane_divider", "lane divider"],
+  ["line", "cycle_lane", "cycle lane on the road"],
+  ["line", "cycle_track", "cycle track beside the road"],
+  ["line", "cycleway", "separate cycleway"],
+  ["line", "footway", "footway"],
+  ["line", "crossing_way", "crossing"],
+  ["line", "railway", "railway"],
+  ["point", "traffic_signals", "traffic signals"],
+  ["point", "give_way", "give way"],
+  ["point", "crossing", "crossing node"],
+  ["point", "traffic_sign", "traffic sign"],
+  ["point", "bus_stop", "bus stop"],
+];
+
+const map = L.map("map", { preferCanvas: true, maxZoom: 23, zoomSnap: 0.5 });
+const aerial = L.tileLayer.wms("https://geodienste.hamburg.de/wms_dop_zeitreihe_unbelaubt", {
+  layers: "dop_zeitreihe_unbelaubt", format: "image/jpeg", maxZoom: 23, tileSize: 512,
+  attribution: "Luftbild © Freie und Hansestadt Hamburg, LGV (dl-de/by-2-0)",
+}).addTo(map);
+const osmMap = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 23, maxNativeZoom: 19, attribution: "© OpenStreetMap contributors",
+});
+const layerControl = L.control.layers({ "Aerial (Hamburg, leaf-off)": aerial, "OpenStreetMap": osmMap }, {},
+                                      { collapsed: false }).addTo(map);
+L.control.scale({ imperial: false, maxWidth: 200 }).addTo(map);
+
+const overlays = {};       // layer name -> L.GeoJSON currently shown in the control
+const hiddenLayers = new Set();
+let outline = null;
+let fitted = false;
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function popupHtml(properties) {
+  const rows = [];
+  for (const [key, value] of Object.entries(properties.derived || {})) {
+    rows.push(`<tr class="derived"><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`);
+  }
+  for (const key of Object.keys(properties.tags || {}).sort()) {
+    rows.push(`<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(properties.tags[key])}</td></tr>`);
+  }
+  const link = `https://www.openstreetmap.org/${properties.kind === "node" ? "node" : "way"}/${properties.osm_id}`;
+  return `<b>${escapeHtml(properties.kind)}</b> <a href="${link}" target="_blank">${properties.osm_id}</a>` +
+         `<table class="tags">${rows.join("")}</table>`;
+}
+
+function makeLayer(collection) {
+  return L.geoJSON(collection, {
+    style: feature => LINE_STYLES[feature.properties.style] || { color: "#f0f" },
+    pointToLayer: (feature, latlng) => {
+      const style = POINT_STYLES[feature.properties.style] || { color: "#000", fillColor: "#f0f", radius: 4 };
+      return L.circleMarker(latlng, { ...style, weight: 1.5, fillOpacity: 0.95 });
+    },
+    onEachFeature: (feature, layer) => {
+      layer.bindPopup(popupHtml(feature.properties), { maxWidth: 420, maxHeight: 400 });
+      if (feature.properties.label) {
+        layer.bindTooltip(feature.properties.label, { permanent: true, direction: "right", className: "sign-label" });
+      }
+    },
+  });
+}
+
+async function loadLayers() {
+  const status = document.getElementById("status");
+  status.textContent = "loading layers…";
+  const started = performance.now();
+  const response = await fetch("/layers.json", { cache: "no-store" });
+  if (!response.ok) {
+    status.textContent = "layer build failed:\n" + await response.text();
+    return;
+  }
+  const data = await response.json();
+  for (const [name, layer] of Object.entries(overlays)) {
+    if (!map.hasLayer(layer)) hiddenLayers.add(name); else hiddenLayers.delete(name);
+    map.removeLayer(layer);
+    layerControl.removeLayer(layer);
+    delete overlays[name];
+  }
+  if (outline) map.removeLayer(outline);
+  outline = L.geoJSON(data.outline, { style: { color: "#fff", weight: 1, fill: false, dashArray: "2 6" }, interactive: false }).addTo(map);
+  let count = 0;
+  for (const name of Object.keys(data.layers).sort()) {
+    const layer = makeLayer(data.layers[name]);
+    overlays[name] = layer;
+    layerControl.addOverlay(layer, `${name} (${data.layers[name].features.length})`);
+    if (!hiddenLayers.has(name)) layer.addTo(map);
+    count += data.layers[name].features.length;
+  }
+  if (!fitted) { map.fitBounds(outline.getBounds()); fitted = true; }
+  status.textContent = `${data.region}: ${count} features, built in ${Math.round(performance.now() - started)} ms`;
+}
+
+const legend = L.control({ position: "bottomright" });
+legend.onAdd = () => {
+  const box = L.DomUtil.create("div", "legend");
+  box.innerHTML = LEGEND.map(([type, style, text]) => {
+    if (type === "line") {
+      const s = LINE_STYLES[style];
+      return `<i style="border-top: 3px ${s.dashArray ? "dashed" : "solid"} ${s.color}"></i>${text}`;
+    }
+    const s = POINT_STYLES[style];
+    return `<b style="background:${s.fillColor}; border-color:${s.color}"></b>${text}`;
+  }).join("<br>");
+  return box;
+};
+legend.addTo(map);
+
+document.getElementById("reload").onclick = loadLayers;
+document.addEventListener("keydown", event => { if (event.key === "r" && !event.ctrlKey) loadLayers(); });
+loadLayers();
+</script>
+</body>
+</html>
