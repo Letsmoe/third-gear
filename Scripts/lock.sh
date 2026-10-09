@@ -11,12 +11,21 @@
 #   Scripts/lock.sh build $UE/Engine/Build/BatchFiles/Linux/Build.sh DrivingGameEditor Linux Development ...
 # Nested calls don't deadlock: a lock already held by a parent process (THIRD_GEAR_LOCK_<NAME> set) is reused.
 # Every wait and hold is logged to /tmp/third-gear-locks.log.
+#
+# The command runs in its own systemd scope with a memory cap. systemd's default OOM policy stops the whole unit a
+# process belongs to when the kernel OOM-kills it, so an Unreal run that ran out of memory used to take down the
+# terminal session (and every agent in it) that started it. In its own scope only the run itself dies.
 set -euo pipefail
 
 # Slot 0 keeps the old single lock's file name, so checkouts with an older copy of this script still take turns.
 GPU_SLOT_FILES=(/tmp/third-gear-gpu.lock /tmp/third-gear-gpu.1.lock)
-# The second slot is only taken when at least this much VRAM is free.
+# The second slot is only taken when at least this much VRAM and RAM are free.
 SECOND_SLOT_FREE_MIB=7000
+SECOND_SLOT_FREE_RAM_MIB=14000
+# Memory caps of one locked command (its scope), RAM and swap.
+MEMORY_MAX_GPU=14G
+MEMORY_MAX_BUILD=12G
+SWAP_MAX=4G
 LOG_FILE=/tmp/third-gear-locks.log
 
 # Re-runs the calling script under the named lock unless this process tree already holds it.
@@ -57,6 +66,24 @@ free_vram_mib() {
 	nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | head -1 || echo 0
 }
 
+# Available RAM in MiB.
+free_ram_mib() {
+	awk '/MemAvailable/ {print int($2 / 1024)}' /proc/meminfo
+}
+
+# Runs the command in its own systemd scope with a memory cap and OOMPolicy=continue (see the top of this file).
+# Falls back to running it directly where there is no systemd user manager.
+run_isolated() {
+	local memory_max=$1
+	shift
+	if ! systemctl --user is-system-running >/dev/null 2>&1 && ! systemctl --user status >/dev/null 2>&1; then
+		"$@"
+		return
+	fi
+	systemd-run --user --scope --quiet --collect -p OOMPolicy=continue -p "MemoryMax=$memory_max" \
+		-p "MemorySwapMax=$SWAP_MAX" "$@"
+}
+
 # Takes one gpu slot on file descriptor 8 or 9, waiting until one is free. Slot 1 also needs enough free VRAM for
 # the last 45 seconds: a run that has just taken slot 0 hasn't loaded its map yet.
 take_gpu_slot() {
@@ -70,7 +97,7 @@ take_gpu_slot() {
 			GPU_SLOT=0
 			return 0
 		fi
-		if [ "$(free_vram_mib)" -ge "$SECOND_SLOT_FREE_MIB" ]; then
+		if [ "$(free_vram_mib)" -ge "$SECOND_SLOT_FREE_MIB" ] && [ "$(free_ram_mib)" -ge "$SECOND_SLOT_FREE_RAM_MIB" ]; then
 			roomy_checks=$((roomy_checks + 1))
 		else
 			roomy_checks=0
@@ -118,7 +145,11 @@ run_locked() {
 	log_event acquired "$name" "$waited" "$@"
 	export "$(held_lock_variable "${name%%.*}")=1"
 	local status=0
-	"$@" || status=$?
+	local memory_max=$MEMORY_MAX_GPU
+	if [ "$name" = build ]; then
+		memory_max=$MEMORY_MAX_BUILD
+	fi
+	run_isolated "$memory_max" "$@" || status=$?
 	log_event released "$name" "$((SECONDS - started - waited))" "$@"
 	return "$status"
 }
