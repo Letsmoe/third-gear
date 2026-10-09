@@ -31,6 +31,7 @@ MARKING_STYLE = {  # kind -> (width m, dash (on, off) or None); RMS dimensions, 
     "cycle_furt": (0.25, assumptions.CYCLE_FURT_DASH),
     "turn_lane_dash": (0.25, assumptions.TURN_LANE_DASH),
     "turn_lane_solid": (0.25, None),
+    "hatch": (assumptions.HATCH_STRIPE_WIDTH, None),
 }
 SURFACE_SECTIONS = {"asphalt": "Road_Asphalt", "pavers": "Road_Pavers", "cobble": "Road_Cobble"}
 

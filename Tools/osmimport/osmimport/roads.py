@@ -11,7 +11,7 @@ from scipy import ndimage
 from .dem import HeightGrid
 from .osm import OsmData, Way
 from .streets.cross_section import CrossSection, RoadContext, cross_section
-from .streets import assumptions, road_lines
+from .streets import assumptions, dual_carriageways, road_lines
 from .streets.tags import is_oneway, number  # noqa: F401 (is_oneway: used as roads.is_oneway)
 
 # Higher rank wins where surfaces overlap (junction area belongs to the major road).
@@ -98,15 +98,17 @@ def build(osm: OsmData, dem: HeightGrid, buildings_union=None) -> RoadNetwork:
     contexts = {w.id: road_context(w, buildings_union) for w in ways}
     sections = {w.id: cross_section(w.tags, contexts[w.id]) for w in ways}
     widths = {way_id: section.width() for way_id, section in sections.items()}
-    ground_ways = [w for w in ways if _is_ground(w)]
+    ground_ways = dual_carriageways.straighten([w for w in ways if _is_ground(w)], sections)
     bridge_ways = [w for w in ways if not _is_ground(w)]
+    ways = ground_ways + bridge_ways
     lines = road_lines.build(ground_ways, sections, {way_id: context.urban for way_id, context in contexts.items()},
                              _signal_points(osm))
     _take_corrected_sections(lines, sections, widths)
 
     # --- surface polygons per kind, major road classes win overlaps ---
     strips = _way_surfaces(lines)
-    ground = shapely.union_all(list(strips.values()))
+    gore_surfaces = [shapely.make_valid(shapely.Polygon(gore.paved)) for gore in lines.gores]
+    ground = shapely.union_all(list(strips.values()) + gore_surfaces)
     junction_zones = _junction_zones(ground_ways, widths)
     # Fillet concave corners (kerb radii at junctions) without growing the outline elsewhere. Only inside junctions:
     # along the road the same closing would pave over medians and islands narrower than twice the radius.
@@ -145,6 +147,41 @@ def build(osm: OsmData, dem: HeightGrid, buildings_union=None) -> RoadNetwork:
                       pavement=pavement, height=height, junction_zones=junction_zones)
     net.markings = build_markings(lines, ground)
     return net
+
+
+def _gore_markings(gores) -> list:
+    """(kind, points) of the gores' hatching and of their outlines where the carriageways paint no edge line."""
+    result = []
+    for gore in gores:
+        result += [("edge", line) for line in gore.outline]
+        area = shapely.make_valid(shapely.Polygon(gore.hatched))
+        for stripe in _hatch_stripes(area):
+            result.append(("hatch", np.asarray(stripe.coords)))
+    return result
+
+
+def _hatch_stripes(area) -> list:
+    """Straight stripes across an area at HATCH_ANGLE_DEGREES to its long axis, HATCH_SPACING apart."""
+    if area.is_empty or area.area < 1.0:
+        return []
+    corners = np.asarray(area.minimum_rotated_rectangle.exterior.coords)[:4]
+    sides = [corners[1] - corners[0], corners[2] - corners[1]]
+    axis = max(sides, key=lambda side: float(np.hypot(*side)))
+    axis = axis / np.hypot(*axis)
+    angle = np.radians(assumptions.HATCH_ANGLE_DEGREES)
+    cosine, sine = np.cos(angle), np.sin(angle)
+    along = np.array([axis[0] * cosine - axis[1] * sine, axis[0] * sine + axis[1] * cosine])
+    across = np.array([-along[1], along[0]])
+    points = np.asarray(area.envelope.exterior.coords)
+    centre = points.mean(axis=0)
+    reach = float(np.hypot(*(points.max(axis=0) - points.min(axis=0))))
+    stripes = []
+    for offset in np.arange(-reach, reach, assumptions.HATCH_SPACING):
+        base = centre + across * offset
+        clipped = shapely.LineString([base - along * reach, base + along * reach]).intersection(area)
+        stripes += [part for part in getattr(clipped, "geoms", [clipped])
+                    if isinstance(part, shapely.LineString) and part.length > 0.3]
+    return stripes
 
 
 def _take_corrected_sections(lines, sections: dict, widths: dict):
@@ -268,7 +305,7 @@ def build_markings(lines, ground):
     cuts, and the guide lines through junctions), kept on the road surface."""
     markings = []
     inside = ground.buffer(-0.1)
-    for kind, xy in lines.painted():
+    for kind, xy in lines.painted() + _gore_markings(lines.gores):
         if len(xy) < 2:
             continue
         clipped = shapely.LineString(xy).intersection(inside)

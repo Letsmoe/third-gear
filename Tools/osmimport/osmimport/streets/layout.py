@@ -68,7 +68,7 @@ class SegmentLayout:
 
     def width_at_end(self, at_start: bool) -> float:
         """The kerb to kerb width at one end of the segment."""
-        shape = _end_shape(self, at_start)
+        shape = end_shape(self, at_start)
         left = shape.node_offsets.get(LineKey(LineKind.KERB, Side.LEFT), self.lines[LineKey(LineKind.KERB, Side.LEFT)])
         right = shape.node_offsets.get(LineKey(LineKind.KERB, Side.RIGHT),
                                        self.lines[LineKey(LineKind.KERB, Side.RIGHT)])
@@ -115,15 +115,15 @@ def _shape_split(layouts: list, split: Split):
     # carriageway's inner side is its right and the outgoing one's its left.
     for one_way, inner_side in ((split.incoming, Side.RIGHT), (split.outgoing, Side.LEFT)):
         layout = layouts[one_way.segment]
-        shape = _end_shape(layout, one_way.at_start)
+        shape = end_shape(layout, one_way.at_start)
         shape.taper = min(split.gore_length, layout.segment.length() * assumptions.TAPER_MAX_SEGMENT_SHARE)
         for key, offset in arm_lines(layout.lines, one_way).items():
             meeting = _split_meeting_offset(key, inner_side, two_way_lines)
-            segment_key, _ = _to_segment_frame(key, 0.0, one_way)
+            segment_key, _ = to_segment_frame(key, 0.0, one_way)
             if meeting is None:
                 shape.cuts[segment_key] = shape.taper
                 continue
-            shape.node_offsets[segment_key] = _to_segment_frame(key, meeting, one_way)[1]
+            shape.node_offsets[segment_key] = to_segment_frame(key, meeting, one_way)[1]
 
 
 def _split_meeting_offset(key: LineKey, inner_side: Side, two_way_lines: dict):
@@ -137,7 +137,7 @@ def _split_meeting_offset(key: LineKey, inner_side: Side, two_way_lines: dict):
     return -two_way_lines[counterpart]
 
 
-def _end_shape(layout: SegmentLayout, at_start: bool) -> EndShape:
+def end_shape(layout: SegmentLayout, at_start: bool) -> EndShape:
     if at_start:
         return layout.start
     return layout.end
@@ -157,7 +157,7 @@ def arm_keys(values: dict, end: SegmentEnd) -> dict:
     return {line_rules.mirrored(key): value for key, value in values.items()}
 
 
-def _to_segment_frame(key: LineKey, offset: float, end: SegmentEnd):
+def to_segment_frame(key: LineKey, offset: float, end: SegmentEnd):
     """A line given facing out of the node at this end, in the segment's own frame."""
     if end.at_start:
         return key, offset
@@ -167,10 +167,10 @@ def _to_segment_frame(key: LineKey, offset: float, end: SegmentEnd):
 def _cut_at_mouth(layout: SegmentLayout, end: SegmentEnd, mouths: dict):
     """Painted lines stop at the junction's mouth (mouths: the arm's distance under the end, and some lines' own
     distance under (end, key facing out of the node))."""
-    shape = _end_shape(layout, end.at_start)
+    shape = end_shape(layout, end.at_start)
     limit = layout.segment.length() * assumptions.TAPER_MAX_SEGMENT_SHARE
     for key in layout.painted:
-        arm_key, _ = _to_segment_frame(key, 0.0, end)  # mirroring is its own inverse
+        arm_key, _ = to_segment_frame(key, 0.0, end)  # mirroring is its own inverse
         mouth = mouths.get((end, arm_key), mouths.get(end, 0.0))
         shape.cuts[key] = min(mouth, limit)
 
@@ -192,17 +192,17 @@ def _shape_continuation(network, layouts, urban, first: SegmentEnd, second: Segm
     if shift < 0.05 and not unmatched_owner and not unmatched_other:
         return
     taper = _taper(owner_layout, shift, urban[owner.segment])
-    owner_shape = _end_shape(owner_layout, owner.at_start)
+    owner_shape = end_shape(owner_layout, owner.at_start)
     owner_shape.taper = taper
     for key, offset in meeting.items():
-        segment_key, segment_offset = _to_segment_frame(key, offset, owner)
+        segment_key, segment_offset = to_segment_frame(key, offset, owner)
         owner_shape.node_offsets[segment_key] = segment_offset
     for key in unmatched_owner:
-        owner_shape.cuts[_to_segment_frame(key, 0.0, owner)[0]] = taper
-    other_shape = _end_shape(other_layout, other.at_start)
+        owner_shape.cuts[to_segment_frame(key, 0.0, owner)[0]] = taper
+    other_shape = end_shape(other_layout, other.at_start)
     other_limit = other_layout.segment.length() * assumptions.TAPER_MAX_SEGMENT_SHARE
     for key in unmatched_other:
-        other_shape.cuts[_to_segment_frame(key, 0.0, other)[0]] = min(taper, other_limit)
+        other_shape.cuts[to_segment_frame(key, 0.0, other)[0]] = min(taper, other_limit)
 
 
 def _taper_owner(layouts, first: SegmentEnd, second: SegmentEnd):

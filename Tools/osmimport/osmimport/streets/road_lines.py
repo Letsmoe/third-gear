@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from . import assumptions, corrections, lines as line_rules, tags as osm_tags
 from .cross_section import Travel
+from .gores import split_gores
 from .junctions import JunctionLines
 from .layout import build_layouts
 from .lines import LineKey, LineKind, Side
@@ -18,6 +19,7 @@ class RoadLines:
     network: SegmentNetwork
     layouts: list           # SegmentLayout per segment id
     guides: list            # (marking kind, (n, 2) points)
+    gores: list             # gores.Gore of the dual carriageway splits
 
     def painted(self) -> list:
         """(marking kind, (n, 2) points) of every painted line: along the segments, then inside the junctions."""
@@ -43,7 +45,7 @@ def build(ways, sections: dict, urban: dict, signal_points) -> RoadLines:
     junctions = JunctionLines(network, signal_points)
     mouths = junctions.mouths()
     layouts = build_layouts(network, painted, urban_by_segment, mouths)
-    return RoadLines(network, layouts, junctions.guide_lines(layouts, mouths))
+    return RoadLines(network, layouts, junctions.guide_lines(layouts, mouths), split_gores(network, layouts))
 
 
 def _painted_pieces(layout, key: LineKey, kind: str) -> list:

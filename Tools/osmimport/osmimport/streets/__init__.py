@@ -23,6 +23,8 @@ Modules:
 * layout.py: each segment's lines along it, with the tapers between roads and where lines start and stop.
 * corrections.py: fixes for OSM mistakes recognisable from the network (short mis-tagged narrowings).
 * splits.py: dual carriageway splits, where a two-way road divides into two one-way carriageways.
+* dual_carriageways.py: short dual carriageway sections redrawn parallel around their common axis.
+* gores.py: the paved and hatched wedge between the carriageways at a split.
 * junctions.py: junction mouths, crosses and the guide lines inside junctions.
 * road_lines.py: builds all of the above for a set of ways.
 """

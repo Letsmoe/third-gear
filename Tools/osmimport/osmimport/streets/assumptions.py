@@ -159,6 +159,14 @@ MERGE_GAP = 2.0
 # A two-way road and two one-way carriageways meeting at a node, each within this angle of straight on, are a dual
 # carriageway split (splits.py).
 SPLIT_MAX_DEFLECTION = 45.0
+# A short dual carriageway section that ends at a junction (not another split) opens from the junction's node over
+# this length; the junction's mouth hides it.
+DUAL_SECTION_JUNCTION_RAMP = 6.0
+# Hatched areas (Sperrfläche, Zeichen 298) in the gores of splits: stripes at this angle to the road, this wide and
+# this far apart (the dimensions are not in the free sources).
+HATCH_ANGLE_DEGREES = 45.0
+HATCH_STRIPE_WIDTH = 0.3
+HATCH_SPACING = 1.5
 # Two arms are one road going straight through a junction when their directions differ by at most this much.
 THROUGH_MAX_DEFLECTION_DEGREES = 35.0
 # Side arms of these classes (driveways, parking aisles) don't interrupt the lines of the road they join.
