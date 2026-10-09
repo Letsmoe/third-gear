@@ -5,8 +5,9 @@
                  hot spot just below the cut-off right of centre, foreground fill. Drawn in degrees from the lamp's axis.
   M_LF_HighBeam  round, far reaching high beam with a soft surround.
 
-The functions are drawn from the lamp's pose, which UCarLightsComponent writes into the vector parameters LightPosition,
-LightForward, LightRight and LightUp every frame (a light function has no direct access to the light's transform).
+A light function receives the lit point in the light's own frame (the Light Vector node: z along the beam, y to the
+right, x up), so the pattern follows the lamp and needs no parameters. The light function atlas (128 pixels per light) is
+switched off for deferred lighting in DefaultEngine.ini, because it would blur the cut-off line over about 3 degrees.
 
 Run:
   UnrealEditor-Cmd <project>.uproject -run=pythonscript -script=<this file> -unattended -nosplash
@@ -17,14 +18,14 @@ FOLDER = "/Game/Vehicles/Materials"
 mel = unreal.MaterialEditingLibrary
 
 COMMON_HLSL = """
-float3 Offset = WorldPos - LightPosition.xyz;
-float Depth = dot(Offset, LightForward.xyz);
-if (Depth < 30.0)
+// The engine hands light functions the vector swizzled: z along the beam, y to the right, x up.
+float Depth = LightVec.z;
+if (Depth < 0.2 * length(LightVec))
 {
     return float3(0, 0, 0);
 }
-float H = degrees(atan2(dot(Offset, LightRight.xyz), Depth));
-float V = degrees(atan2(dot(Offset, LightUp.xyz), Depth));
+float H = degrees(atan2(LightVec.y, Depth));
+float V = degrees(atan2(LightVec.x, Depth));
 """
 
 LOW_BEAM_HLSL = COMMON_HLSL + """
@@ -61,20 +62,13 @@ def build(name, code):
     material = unreal.AssetToolsHelpers.get_asset_tools().create_asset(name, FOLDER, unreal.Material, unreal.MaterialFactoryNew())
     material.set_editor_property("material_domain", unreal.MaterialDomain.MD_LIGHT_FUNCTION)
 
-    def parameter(parameter_name, y):
-        node = mel.create_material_expression(material, unreal.MaterialExpressionVectorParameter, -700, y)
-        node.set_editor_property("parameter_name", parameter_name)
-        return node
-
-    world = mel.create_material_expression(material, unreal.MaterialExpressionWorldPosition, -700, -150)
+    light_vector = mel.create_material_expression(material, unreal.MaterialExpressionLightVector, -700, 0)
     custom = mel.create_material_expression(material, unreal.MaterialExpressionCustom, -300, 0)
     custom.set_editor_property("code", code)
     custom.set_editor_property("description", "BeamPattern")
     custom.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT3)
-    custom.set_editor_property("inputs", [custom_input(n) for n in ("WorldPos", "LightPosition", "LightForward", "LightRight", "LightUp")])
-    mel.connect_material_expressions(world, "", custom, "WorldPos")
-    for row, parameter_name in enumerate(("LightPosition", "LightForward", "LightRight", "LightUp")):
-        mel.connect_material_expressions(parameter(parameter_name, row * 120), "", custom, parameter_name)
+    custom.set_editor_property("inputs", [custom_input("LightVec")])
+    mel.connect_material_expressions(light_vector, "", custom, "LightVec")
     mel.connect_material_property(custom, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.recompile_material(material)
     unreal.EditorAssetLibrary.save_loaded_asset(material)

@@ -51,11 +51,11 @@ public:
 
 	/** Peak intensity of one low beam headlamp, candela. */
 	UPROPERTY(Config, EditAnywhere, Category = "Beams")
-	float LowBeamCandela = 5000.f;
+	float LowBeamCandela = 30000.f;
 
 	/** Peak intensity of one high beam headlamp, candela. */
 	UPROPERTY(Config, EditAnywhere, Category = "Beams")
-	float HighBeamCandela = 14000.f;
+	float HighBeamCandela = 80000.f;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Beams")
 	float LowBeamRangeCm = 15000.f;
@@ -139,7 +139,7 @@ private:
 
 	void CreateLights();
 	USpotLightComponent* AddLamp(const TCHAR* Name, const FVector& Location, float YawDegrees, const FLinearColor& Colour, float RadiusCm);
-	USpotLightComponent* AddHeadlamp(const TCHAR* Name, const FVector& Location, float AimDownDegrees, float RangeCm, UMaterialInterface* Function, UMaterialInstanceDynamic*& OutFunctionInstance);
+	USpotLightComponent* AddHeadlamp(const TCHAR* Name, const FVector& Location, float AimDownDegrees, float RangeCm, UMaterialInterface* Function);
 
 	/** Moves the blink phase and decides when the lamps are on; cancels the indicator after a completed turn. */
 	void UpdateIndicator(float DeltaTime, float SteeringWheelDeg);
@@ -147,9 +147,6 @@ private:
 
 	/** Writes the light state into the body material and the real lights. */
 	void ApplyState(float DeltaTime, const FCarDriverInput& Input, const FCarTelemetry& Telemetry);
-
-	/** Gives each beam's light function the light's pose, which the function needs to draw the pattern on the ground. */
-	void UpdateBeamFunctions();
 
 	ACarPawn* GetCar() const;
 
@@ -178,7 +175,6 @@ private:
 	TObjectPtr<UMaterialInstanceDynamic> LightMaterial;
 	TArray<TObjectPtr<USpotLightComponent>> LowBeamLights;
 	TArray<TObjectPtr<USpotLightComponent>> HighBeamLights;
-	TArray<TObjectPtr<UMaterialInstanceDynamic>> BeamFunctionInstances;
 	TArray<TObjectPtr<USpotLightComponent>> TailLights;
 	TArray<TObjectPtr<USpotLightComponent>> ReverseLights;
 	TArray<FLampLight> IndicatorLights;

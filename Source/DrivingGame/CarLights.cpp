@@ -83,6 +83,7 @@ USpotLightComponent* UCarLightsComponent::AddLamp(const TCHAR* Name, const FVect
 {
 	// A wide spot light that shines away from the car, so the lamp does not light the cabin through the body.
 	USpotLightComponent* Light = NewObject<USpotLightComponent>(GetOwner(), Name);
+	Light->SetMobility(EComponentMobility::Movable); // a light is static by default and then ignores every runtime change
 	Light->SetupAttachment(GetCar()->GetMesh());
 	Light->SetRelativeLocationAndRotation(Location, FRotator(0.f, YawDegrees, 0.f));
 	Light->SetInnerConeAngle(30.f);
@@ -98,10 +99,10 @@ USpotLightComponent* UCarLightsComponent::AddLamp(const TCHAR* Name, const FVect
 	return Light;
 }
 
-USpotLightComponent* UCarLightsComponent::AddHeadlamp(const TCHAR* Name, const FVector& Location, float AimDownDegrees, float RangeCm,
-	UMaterialInterface* Function, UMaterialInstanceDynamic*& OutFunctionInstance)
+USpotLightComponent* UCarLightsComponent::AddHeadlamp(const TCHAR* Name, const FVector& Location, float AimDownDegrees, float RangeCm, UMaterialInterface* Function)
 {
 	USpotLightComponent* Light = NewObject<USpotLightComponent>(GetOwner(), Name);
+	Light->SetMobility(EComponentMobility::Movable);
 	Light->SetupAttachment(GetCar()->GetMesh());
 	Light->SetRelativeLocationAndRotation(Location, FRotator(-AimDownDegrees, 0.f, 0.f));
 	Light->SetLightColor(WarmWhite);
@@ -115,9 +116,8 @@ USpotLightComponent* UCarLightsComponent::AddHeadlamp(const TCHAR* Name, const F
 	Light->SetVisibility(false);
 	if (Function)
 	{
-		OutFunctionInstance = UMaterialInstanceDynamic::Create(Function, this);
-		Light->SetLightFunctionMaterial(OutFunctionInstance);
-		Light->SetLightFunctionScale(FVector(1.f));
+		Light->SetLightFunctionMaterial(Function);
+		Light->SetLightFunctionScale(FVector(1.f)); // the function then sees the lit point in centimetres from the lamp
 	}
 	Light->RegisterComponent();
 	return Light;
@@ -133,13 +133,10 @@ void UCarLightsComponent::CreateLights()
 	{
 		const TCHAR* SideName = Side < 0.f ? TEXT("Left") : TEXT("Right");
 		const FVector Headlamp(Settings->HeadlampLocation.X, Side * Settings->HeadlampLocation.Y, Settings->HeadlampLocation.Z);
-		UMaterialInstanceDynamic* Function = nullptr;
 		LowBeamLights.Add(AddHeadlamp(*FString::Printf(TEXT("LowBeam%s"), SideName), Headlamp, Settings->LowBeamAimDownDegrees,
-			Settings->LowBeamRangeCm, LowFunction, Function));
-		BeamFunctionInstances.Add(Function);
+			Settings->LowBeamRangeCm, LowFunction));
 		HighBeamLights.Add(AddHeadlamp(*FString::Printf(TEXT("HighBeam%s"), SideName), Headlamp, 0.f,
-			Settings->HighBeamRangeCm, HighFunction, Function));
-		BeamFunctionInstances.Add(Function);
+			Settings->HighBeamRangeCm, HighFunction));
 
 		const FVector Tail(Settings->TailLampLocation.X, Side * Settings->TailLampLocation.Y, Settings->TailLampLocation.Z);
 		TailLights.Add(AddLamp(*FString::Printf(TEXT("Tail%s"), SideName), Tail, 180.f, TailRed, 900.f));
@@ -234,29 +231,6 @@ void UCarLightsComponent::UpdateIndicator(float DeltaTime, float SteeringWheelDe
 	SetLampPhase(bPhaseOn);
 }
 
-void UCarLightsComponent::UpdateBeamFunctions()
-{
-	// The light function draws the beam on whatever it hits from the light's pose: position and the three axes.
-	for (int32 Index = 0; Index < BeamFunctionInstances.Num(); ++Index)
-	{
-		UMaterialInstanceDynamic* Function = BeamFunctionInstances[Index];
-		const USpotLightComponent* Light = (Index % 2 == 0)
-			? LowBeamLights[Index / 2].Get() : HighBeamLights[Index / 2].Get();
-		if (!Function || !Light || !Light->IsVisible())
-		{
-			continue;
-		}
-		const FTransform& Pose = Light->GetComponentTransform();
-		Function->SetVectorParameterValue(TEXT("LightPosition"), FLinearColor(Pose.GetLocation().X, Pose.GetLocation().Y, Pose.GetLocation().Z, 0.f));
-		const FVector Forward = Pose.GetUnitAxis(EAxis::X);
-		const FVector Right = Pose.GetUnitAxis(EAxis::Y);
-		const FVector Up = Pose.GetUnitAxis(EAxis::Z);
-		Function->SetVectorParameterValue(TEXT("LightForward"), FLinearColor(Forward.X, Forward.Y, Forward.Z, 0.f));
-		Function->SetVectorParameterValue(TEXT("LightRight"), FLinearColor(Right.X, Right.Y, Right.Z, 0.f));
-		Function->SetVectorParameterValue(TEXT("LightUp"), FLinearColor(Up.X, Up.Y, Up.Z, 0.f));
-	}
-}
-
 void UCarLightsComponent::ApplyState(float DeltaTime, const FCarDriverInput& Input, const FCarTelemetry& Telemetry)
 {
 	const UCarLightSettings* Settings = GetDefault<UCarLightSettings>();
@@ -309,7 +283,6 @@ void UCarLightsComponent::ApplyState(float DeltaTime, const FCarDriverInput& Inp
 		Lamp.Light->SetVisibility(Glow > 0.01f);
 		Lamp.Light->SetIntensity(Settings->IndicatorCandela * Glow);
 	}
-	UpdateBeamFunctions();
 }
 
 void UCarLightsComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
