@@ -13,7 +13,11 @@
 #include "HeightGrid.h"
 #include "LandCover.h"
 #include "OsmReader.h"
+#include "Assumptions.h"
 #include "Paths.h"
+#include "PolygonSet.h"
+#include "RoadSurfaces.h"
+#include "Roads.h"
 #include "Terrain.h"
 #include "TileWriter.h"
 #include "Vegetation.h"
@@ -37,6 +41,41 @@ constexpr double TerrainMargin = 100.0;
 /** Paths sit this far above the terrain (build_world.py's PATH_LIFT). */
 constexpr float PathLift = 0.04f;
 
+/** A marking kind's style id in the MARK section, painted width and dash (build_world.py's MARKING_STYLES). */
+struct FMarkingStyle
+{
+	const char* Kind;
+	uint8_t Style;
+	float Width;
+	Assumptions::FDashGap Dash;
+};
+const FMarkingStyle MarkingStyles[] = {
+	{"dash_urban", 0, 0.12f, {3.0, 6.0}},
+	{"dash_rural", 1, 0.12f, {4.0, 8.0}},
+	{"solid", 2, 0.12f, {0.0, 0.0}},
+	{"edge", 3, 0.25f, {0.0, 0.0}},
+	{"guide", 4, 0.12f, Assumptions::GuideLineDash},
+	{"edge_guide", 5, 0.25f, Assumptions::EdgeGuideDash},
+	{"cycle_exclusive", 6, 0.25f, {0.0, 0.0}},
+	{"cycle_advisory", 7, 0.12f, Assumptions::AdvisoryCycleLineDash},
+	{"cycle_furt", 8, 0.25f, Assumptions::CycleFurtDash},
+	{"turn_lane_dash", 9, 0.25f, Assumptions::TurnLaneDash},
+	{"turn_lane_solid", 10, 0.25f, {0.0, 0.0}},
+	{"hatch", 11, static_cast<float>(Assumptions::HatchStripeWidth), {0.0, 0.0}},
+};
+
+const FMarkingStyle* FindMarkingStyle(const std::string& Kind)
+{
+	for (const FMarkingStyle& Style : MarkingStyles)
+	{
+		if (Kind == Style.Kind)
+		{
+			return &Style;
+		}
+	}
+	return nullptr;
+}
+
 const auto BuildStart = std::chrono::steady_clock::now();
 
 /** The stages of a tile, for the time spent in each, summed over all tiles and threads. */
@@ -52,7 +91,7 @@ enum ETileStage
 	StageWrite,
 	StageCount,
 };
-const char* const StageNames[StageCount] = {"terrain window", "water and buildings", "paths", "conform", "grid",
+const char* const StageNames[StageCount] = {"terrain window", "roads, water and buildings", "paths", "conform", "grid",
 											"surfaces", "vegetation", "write"};
 std::atomic<int64_t> StageNanoseconds[StageCount];
 
@@ -79,39 +118,21 @@ void Log(const std::string& Message)
 	std::fflush(stdout);
 }
 
-/** Building footprints by bounding box. */
-struct FBuildingFootprints
+/** The OSM building footprints as a polygon set. */
+FPolygonSet BuildingFootprints(const std::vector<FOsmArea>& Buildings)
 {
-	std::vector<FPolygons> Footprints;
-	FSpatialIndex Index;
-
-	explicit FBuildingFootprints(const std::vector<FOsmArea>& Buildings)
+	FPolygonSet Footprints;
+	for (const FOsmArea& Building : Buildings)
 	{
-		for (const FOsmArea& Building : Buildings)
+		std::vector<FPolygonWithHoles> Polygons;
+		for (const FOsmPolygon& Polygon : Building.Polygons)
 		{
-			std::vector<FPolygonWithHoles> Polygons;
-			for (const FOsmPolygon& Polygon : Building.Polygons)
-			{
-				Polygons.push_back({Polygon.Rings});
-			}
-			FPolygons Paths = Clipper2Lib::Union(ToPaths(Polygons), Clipper2Lib::FillRule::EvenOdd, 4);
-			Index.Insert(BoundsOf(Paths), static_cast<int>(Footprints.size()));
-			Footprints.push_back(std::move(Paths));
+			Polygons.push_back({Polygon.Rings});
 		}
+		Footprints.Add(Clipper2Lib::Union(ToPaths(Polygons), Clipper2Lib::FillRule::EvenOdd, 4));
 	}
-
-	/** The union of the footprints, clipped to a window. */
-	FPolygons InWindow(const FBox& Window) const
-	{
-		FPolygons Pieces;
-		for (const int Item : Index.Query(Window))
-		{
-			const FPolygons Clipped = ClipToBox(Footprints[Item], Window);
-			Pieces.insert(Pieces.end(), Clipped.begin(), Clipped.end());
-		}
-		return UnionOf(Pieces);
-	}
-};
+	return Footprints;
+}
 
 /** Everything read once for the region, shared read-only by the tile workers. */
 struct FRegionInputs
@@ -122,9 +143,48 @@ struct FRegionInputs
 	const FLandCover* Cover = nullptr;
 	const FWaterBodies* Water = nullptr;
 	const FPathSurfaces* Paths = nullptr;
-	const FBuildingFootprints* Buildings = nullptr;
+	const FPolygonSet* Buildings = nullptr;
 	const FVegetationSources* Vegetation = nullptr;
+	const FRoadSurfaces* Roads = nullptr;
 };
+
+/** The road, pavement, path, water and bridge surfaces of a tile, with the height rule of each. */
+void WriteSurfaces(FTileWriter& Writer, const FWindowRoads& Roads, const FPolygons& Paved, const FPolygons& Unpaved,
+				   const std::vector<FWaterBody>& Water, const FRoadSurfaces& RoadSurfaces)
+{
+	Writer.AddSurface("Road_Asphalt", Roads.Asphalt, EHeightMode::Road);
+	Writer.AddSurface("Road_Pavers", Roads.Pavers, EHeightMode::Road);
+	Writer.AddSurface("Road_Cobble", Roads.Cobble, EHeightMode::Road);
+	Writer.AddSurface("Pavement", Roads.Pavement, EHeightMode::Road, {static_cast<float>(KerbHeight)});
+	Writer.AddSurface("Path_Paved", Paved, EHeightMode::Terrain, {PathLift});
+	Writer.AddSurface("Path_Gravel", Unpaved, EHeightMode::Terrain, {PathLift});
+	for (const FWaterBody& Body : Water)
+	{
+		Writer.AddSurface("Water", Body.Polygon, EHeightMode::Constant, {static_cast<float>(Body.Level)});
+	}
+	for (const FBridgeDeck* Deck : RoadSurfaces.BridgesNear(Writer.Bounds()))
+	{
+		Writer.AddSurface("Road_Asphalt", Deck->Polygon, EHeightMode::Ramp,
+						  {static_cast<float>(Deck->StartHeight), static_cast<float>(Deck->EndHeight),
+						   static_cast<float>(Deck->Start.X), static_cast<float>(Deck->Start.Y),
+						   static_cast<float>(Deck->End.X), static_cast<float>(Deck->End.Y)});
+	}
+}
+
+/** The painted lines crossing a tile. */
+void WriteMarkings(FTileWriter& Writer, const FRoadSurfaces& Roads)
+{
+	for (const FMarkingLine* Marking : Roads.MarkingsNear(Writer.Bounds()))
+	{
+		const FMarkingStyle* Style = FindMarkingStyle(Marking->Kind);
+		if (Style == nullptr)
+		{
+			continue;
+		}
+		Writer.AddMarking("Marking_White", Style->Style, Marking->Points, Style->Width,
+						  static_cast<float>(Style->Dash.Dash), static_cast<float>(Style->Dash.Gap));
+	}
+}
 
 /** The union of the water in a window. */
 FPolygons WaterInWindow(const std::vector<FWaterBody>& Bodies)
@@ -205,9 +265,9 @@ void BuildTile(const FTileBounds& Tile, const FRegionInputs& Inputs, const std::
 	FStageClock Clock;
 	const FHeightGrid Terrain = Inputs.Terrain->FineWindow(Window.X0, Window.Y0, Window.X1, Window.Y1);
 	Clock.Next(StageTerrain);
-	// Roads and pavements come with the street model; until then they are empty.
-	const FPolygons RoadGround;
-	const FPolygons Pavement;
+	const FWindowRoads Roads = Inputs.Roads->InWindow(Window);
+	const FPolygons& RoadGround = Roads.Ground;
+	const FPolygons& Pavement = Roads.Pavement;
 	const std::vector<FWaterBody> Water = Inputs.Water->InWindow(Window);
 	const FPolygons WaterArea = WaterInWindow(Water);
 	const FPolygons Buildings = Inputs.Buildings->InWindow(Window);
@@ -223,12 +283,8 @@ void BuildTile(const FTileBounds& Tile, const FRegionInputs& Inputs, const std::
 	FTileWriter Writer(Box);
 	WriteGrid(Writer, Ground, RoadHeight, *Inputs.Cover);
 	Clock.Next(StageGrid);
-	Writer.AddSurface("Path_Paved", Paved, EHeightMode::Terrain, {PathLift});
-	Writer.AddSurface("Path_Gravel", Unpaved, EHeightMode::Terrain, {PathLift});
-	for (const FWaterBody& Body : Water)
-	{
-		Writer.AddSurface("Water", Body.Polygon, EHeightMode::Constant, {static_cast<float>(Body.Level)});
-	}
+	WriteSurfaces(Writer, Roads, Paved, Unpaved, Water, *Inputs.Roads);
+	WriteMarkings(Writer, *Inputs.Roads);
 	Clock.Next(StageSurfaces);
 
 	const double Reach = FVegetationSources::WindowMargin();
@@ -281,8 +337,9 @@ void BuildTiles(const std::vector<FTileBounds>& Tiles, const FRegionInputs& Inpu
 	}
 }
 
-/** world.json: the tile index and attribution, as build_world.py writes it (start pose and traffic still to come). */
-void WriteWorldJson(const FRegion& Region, const std::vector<FTileBounds>& Tiles, const std::filesystem::path& Path)
+/** world.json: the tile index, start pose and attribution, as build_world.py writes it. */
+void WriteWorldJson(const FRegion& Region, const std::vector<FTileBounds>& Tiles, const FStartPose& Start,
+					const std::filesystem::path& Path)
 {
 	std::ofstream Output(Path);
 	char Buffer[256];
@@ -302,7 +359,19 @@ void WriteWorldJson(const FRegion& Region, const std::vector<FTileBounds>& Tiles
 					  Index + 1 < Tiles.size() ? "," : "");
 		Output << Buffer;
 	}
-	Output << " ],\n \"traffic\": \"traffic.json\",\n \"attribution\": [\n"
+	std::string Road;
+	for (const char Character : Start.Road)
+	{
+		if (Character == '"' || Character == '\\')
+		{
+			Road.push_back('\\');
+		}
+		Road.push_back(Character);
+	}
+	std::snprintf(Buffer, sizeof(Buffer), " ],\n \"start\": {\"x\": %.6f, \"y\": %.6f, \"z\": %.6f, \"yaw\": %.6f, \"road\": \"",
+				  Start.X, Start.Y, Start.Z, Start.Yaw);
+	Output << Buffer << Road << "\"},\n";
+	Output << " \"traffic\": \"traffic.json\",\n \"attribution\": [\n"
 		   << "  \"\\u00a9 OpenStreetMap contributors (ODbL)\",\n"
 		   << "  \"Freie und Hansestadt Hamburg, LGV (dl-de/by-2.0)\",\n"
 		   << "  \"LGLN (2025), CC BY 4.0\",\n"
@@ -343,17 +412,24 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	Log(std::to_string(Water.Levels.size()) + " water bodies");
 	const FPathSurfaces Paths(Inputs.Osm);
 	Inputs.Paths = &Paths;
-	const FBuildingFootprints Buildings(Inputs.Osm.Buildings);
+	const FPolygonSet Buildings = BuildingFootprints(Inputs.Osm.Buildings);
 	Inputs.Buildings = &Buildings;
+	const unsigned Threads = Options.Threads > 0 ? Options.Threads : std::max(1u, std::thread::hardware_concurrency());
+	const FStreetModel Streets = BuildStreetModel(Inputs.Osm);
+	Log("street model: " + std::to_string(Streets.Lines.Layouts.size()) + " segments, "
+		+ std::to_string(Streets.Markings.size()) + " painted lines");
+	const FRoadSurfaces Roads(Streets, Terrain, Buildings, Threads);
+	Inputs.Roads = &Roads;
+	Log("road surfaces: " + std::to_string(Roads.Ground().Size()) + " pieces, " + std::to_string(Roads.Markings().size())
+		+ " marking lines");
 	const FVegetationSources Vegetation(Inputs.Osm, ReadStreetTrees((Geodata / "raw" / "strassenbaeume" / "street_trees.tsv").string()));
 	Inputs.Vegetation = &Vegetation;
 	Log("sources indexed");
 
 	const std::vector<FTileBounds> Tiles = Region.Tiles();
-	const unsigned Threads = Options.Threads > 0 ? Options.Threads : std::max(1u, std::thread::hardware_concurrency());
 	BuildTiles(Tiles, Inputs, OutputDirectory, Threads);
 	LogStageTimes();
-	WriteWorldJson(Region, Tiles, OutputDirectory / "world.json");
+	WriteWorldJson(Region, Tiles, FindStart(Streets, Terrain, Roads.Ground()), OutputDirectory / "world.json");
 	Log("wrote " + std::to_string(Tiles.size()) + " tiles to " + OutputDirectory.string() + " on "
 		+ std::to_string(Threads) + " threads");
 }
