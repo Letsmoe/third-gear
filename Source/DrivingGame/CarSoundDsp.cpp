@@ -170,9 +170,11 @@ struct FCarSoundDsp::FImpl
 			RoadMid[Channel].SetBandpass(SampleRate, 600.f, 0.6f);
 			RoadHiss[Channel].SetHighpass(SampleRate, 1800.f, 0.6f); // spray and tread hiss: a shelf, so it joins the road roar without a notch
 			RoadSmooth[Channel].SetLowpass(SampleRate, 2500.f, 0.7f);
-			WindBody[Channel].SetBandpass(SampleRate, 650.f, 0.5f);
-			WindHiss[Channel].SetBandpass(SampleRate, 3000.f, 0.6f);
-			WindSmooth[Channel].SetLowpass(SampleRate, 4000.f, 0.7f);
+			// Wind in a closed cabin is a dull rush: most of it between 150 and 800 Hz, the seals and mirrors add a
+			// little hiss around 2 kHz, and the glass and insulation take off the top.
+			WindBody[Channel].SetBandpass(SampleRate, 380.f, 0.7f);
+			WindHiss[Channel].SetBandpass(SampleRate, 2000.f, 1.2f);
+			WindSmooth[Channel].SetLowpass(SampleRate, 1600.f, 0.7f);
 		}
 		CobbleLow.SetBandpass(SampleRate, 120.f, 3.f);
 		CobbleMid.SetBandpass(SampleRate, 430.f, 2.5f);
@@ -581,9 +583,11 @@ struct FCarSoundDsp::FImpl
 		Block.PaverRate = Speed / 0.20f;
 		Block.PaverGain = Pavers * FMath::Pow(FMath::Min(Speed / 14.f, 1.6f), 1.2f);
 
-		const float Wind = FMath::Pow(AirSpeedSmooth / 36.f, 2.6f);
-		Block.WindBodyGain = 0.045f * Wind * WindGust;
-		Block.WindHissGain = 0.009f * Wind * WindGust;
+		// Aerodynamic noise power rises with about the sixth power of the air speed, so it is far under the tyres in town
+		// and still about 12 dB under them at 140 km/h.
+		const float Wind = FMath::Pow(AirSpeedSmooth / 36.f, 3.f);
+		Block.WindBodyGain = 0.064f * Wind * WindGust;
+		Block.WindHissGain = 0.006f * Wind * WindGust;
 
 		Block.SquealGain = 0.11f * FMath::Pow(SquealSmooth, 1.3f);
 		Block.ScrubGain = 0.045f * SquealSmooth;
@@ -634,8 +638,8 @@ struct FCarSoundDsp::FImpl
 			const float Hiss = RoadHiss[Channel].Process(White) * Block.HissGain;
 			const float Road = RoadSmooth[Channel].Process(Roar + Mid) + Hiss;
 			const float WindWhite = NoiseGenerators[Channel].Next();
-			const float Wind = WindBody[Channel].Process(WindWhite) * Block.WindBodyGain * 2.f
-				+ WindHiss[Channel].Process(WindWhite) * Block.WindHissGain * 2.f;
+			const float Wind = WindSmooth[Channel].Process(WindBody[Channel].Process(WindWhite) * Block.WindBodyGain * 2.f
+				+ WindHiss[Channel].Process(WindWhite) * Block.WindHissGain * 2.f);
 			const float Side = Channel == 0 ? 1.f : 0.92f;
 			OutRoad[Channel] = Road + (CobbleSound + PaverSound) * Side + Squeal * Side * 0.5f;
 			OutWind[Channel] = Wind;
