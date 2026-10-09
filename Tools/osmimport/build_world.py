@@ -78,7 +78,7 @@ def detect_plants(data, area, geodata, heights, building_union, net, surfaces, g
         data, area, ground, net.ground, net.pavement, paths_union, water_union, building_union,
         os.path.join(geodata, "raw", "strassenbaeume", "strassenbaeume_bbox.geojson"), canopy_data)
     log(f"vegetation: {len(plants)} plants {counts}")
-    return plants, plant_z, (canopy_data.grid if canopy_data is not None else None)
+    return plants, plant_z, (canopy_data.grid if canopy_data is not None else None), counts
 
 
 def tile_key(area, x, y):
@@ -306,7 +306,7 @@ def main():
 
     data, heights, building_union, net, surfaces, ground = load_sources(
         area, geodata, os.path.join(out_dir, "cache.pkl"), args.reuse)
-    plants, plant_z, canopy_grid = detect_plants(data, area, geodata, heights, building_union, net, surfaces, ground)
+    plants, plant_z, canopy_grid, plant_counts = detect_plants(data, area, geodata, heights, building_union, net, surfaces, ground)
     cover = landcover.LandCover(data.areas)
 
     builder = furniture.FurnitureBuilder(data, net, building_union)
@@ -354,6 +354,7 @@ def main():
         "tiles": tiles,
         "start": find_start(net),
         "traffic": "traffic.json",
+        "plants_by_source": plant_counts,
         "attribution": ATTRIBUTION,
     }
     with open(os.path.join(out_dir, "traffic.json"), "w") as f:
