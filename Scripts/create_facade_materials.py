@@ -28,15 +28,21 @@ MASTER = f"{FOLDER}/M_FacadeMaster"
 BOARD_FOLDER = f"{FOLDER}/Board"
 MEGASCANS = "/Game/Megascans/Textures"
 FACADE_INCLUDE = "/Plugin/MapRuntime/Private/FacadeSurface.ush"
+WEATHERING_INCLUDES = ["/Plugin/MapRuntime/Private/MarkingWear.ush", "/Plugin/MapRuntime/Private/FacadeWeathering.ush"]
+WEATHERING_FOLDER = f"{MEGASCANS}/Weathering"
 
 # Per-instance texture parameters and the Custom node inputs they feed.
 MAP_KINDS = ("BaseColor", "Normal", "Roughness", "AO")
 
+WALL_UV_HLSL = """
+// Wall space in metres: the mesher's UV already is (u along the wall, -height). The material board's cubes have no such UV,
+// so with Board 1 it maps world x and height instead.
+return lerp(UV, float2(WorldPos.x, -WorldPos.z) * 0.01, Board);
+"""
+
 UV_HLSL = """
-// One tile of the scan covers Tile metres. Each building starts at its own place in the texture. The material board
-// (Board 1) has no wall UVs in metres, so it maps world x and height instead.
-float2 Metres = lerp(UV, float2(WorldPos.x, -WorldPos.z) * 0.01, Board);
-return Metres / Tile + frac(Variation * float2(7.31, 3.17)) * (1.0 - Board);
+// One tile of the scan covers Tile metres. Each building starts at its own place in the texture.
+return Wall / Tile + frac(Variation * float2(7.31, 3.17));
 """
 
 SURFACE_HLSL = """
@@ -156,13 +162,101 @@ FACADES = {
     "Roof_Slate": dict(set="Roof/roof_slates_02", tile=(2.5, 2.5), tint=(0.75, 1.05), parallax=0.025),
     "Roof_MetalGreen": dict(set="ms:painted_roof_764bd55b", tile=(2, 1), parallax=0.02, tint=(0.85, 1.1)),
 }
+# Weathering by class: Age (0 new, 1 neglected; each building scales it by its own hash), effect amounts and the colour of
+# repairs. Brick takes repairs and moss but not flaking paint; render fades, flakes and streaks; concrete streaks heavily.
+RENDER_WEATHER = dict(Age=0.6, FadeAmount=1.0, FlakeAmount=0.7, MossAmount=0.9, RepairColor=(0.80, 0.78, 0.72))
+BRICK_WEATHER = dict(Age=0.6, FadeAmount=0.0, FlakeAmount=0.0, MossAmount=0.8, RepairAmount=0.8, RepairColor=(0.58, 0.56, 0.52))
+CONCRETE_WEATHER = dict(Age=0.7, StreakAmount=1.2, FadeAmount=0.2, FlakeAmount=0.0, RepairColor=(0.62, 0.60, 0.56))
+CLASS_WEATHER = {
+    "Facade_Brick": BRICK_WEATHER, "Facade_ClinkerDeepRed": BRICK_WEATHER, "Facade_ClinkerYellowBrown": BRICK_WEATHER,
+    "Facade_BrickGruenderzeit": dict(BRICK_WEATHER, Age=0.8), "Facade_BrickSooty": dict(BRICK_WEATHER, Age=0.9),
+    "Facade_BrickPostwar": dict(BRICK_WEATHER, Age=0.5),
+    "Facade_Plaster": RENDER_WEATHER, "Facade_RenderScratchWhite": RENDER_WEATHER, "Facade_RenderScratchBeige": RENDER_WEATHER,
+    "Facade_RenderScratchPastel": RENDER_WEATHER, "Facade_RenderScratchGrey": RENDER_WEATHER,
+    "Facade_RenderSmoothWhite": dict(RENDER_WEATHER, Age=0.45), "Facade_RenderSmoothBeige": dict(RENDER_WEATHER, Age=0.45),
+    "Facade_RenderSmoothPastel": dict(RENDER_WEATHER, Age=0.45), "Facade_RenderSmoothGrey": dict(RENDER_WEATHER, Age=0.45),
+    "Facade_Concrete": CONCRETE_WEATHER, "Facade_ConcreteSlab": CONCRETE_WEATHER, "Facade_ConcreteSmooth": CONCRETE_WEATHER,
+    "Facade_Plinth": dict(CONCRETE_WEATHER, PlinthAmount=0.0, Age=0.8),
+    "Facade_TimberPainted": dict(RENDER_WEATHER, FlakeAmount=0.5),
+    "Facade_TimberBeam": dict(BRICK_WEATHER, RepairAmount=0.0),
+    "Facade_Metal": dict(CONCRETE_WEATHER, RepairAmount=0.0), "Facade_MetalCladdingGrey": dict(CONCRETE_WEATHER, RepairAmount=0.0),
+    "Facade_MetalCladdingGreen": dict(CONCRETE_WEATHER, RepairAmount=0.0), "Facade_MetalCladdingWhite": dict(CONCRETE_WEATHER, RepairAmount=0.0),
+}
 SECTION_ALIASES = ("Facade_Brick", "Facade_Plaster", "Facade_Concrete", "Facade_Metal", "Roof_Tiles")
 
 
-def add_weathering(m, color, rough, normal, ao):
-    """Hook for the facade weathering overlay (#84): rain streaks, plinth dirt, moss, repairs, faded paint. Takes and returns
-    (node, pin) pairs for colour, roughness, normal and occlusion; for now it passes them through."""
-    return color, rough, normal, ao
+WEATHERING_HLSL = """
+float2 Wall = float2(UV.x, -UV.y);
+// Each building ages differently: the instance's age scaled by a hash of the building's variation value.
+float BuildingAge = saturate(Age * lerp(0.35, 1.35, DgHash(float2(Variation, 0.37))));
+float Spacing = lerp(2.6, 3.6, Variation);
+FDgFacadeWeathering Weathered = DgFacadeWeather(WeatherAtlas, WeatherAtlasSampler, WeatherMoss, WeatherMossSampler, WeatherFlake,
+	WeatherFlakeSampler, Color, Rough, Wall, Variation, NormalY, BuildingAge, StreakAmount, PlinthAmount, MossAmount, RepairAmount,
+	FadeAmount, FlakeAmount, PlinthHeight, Spacing, FloorHeight, RepairColor);
+NormalOut = normalize(float3(Nrm.xy + Weathered.NormalTilt, Nrm.z));
+RoughOut = Weathered.Roughness;
+return Weathered.Color;
+"""
+
+# Instance parameters of the weathering layer and their defaults (class settings override them, see FACADES "weather").
+WEATHERING_DEFAULTS = dict(Age=0.6, StreakAmount=1.0, PlinthAmount=1.0, MossAmount=1.0, RepairAmount=1.0, FadeAmount=1.0,
+                           FlakeAmount=0.0, PlinthHeight=0.6)
+
+
+def weathering_default(kind):
+    """Default texture of one weathering input: the atlas, the moss and the substrate under flaking paint."""
+    if kind == "WeatherFlake":
+        return set_asset("ms:flaked_paint_wall_42731ac6", "BaseColor")
+    name = {"WeatherAtlas": "weathering_atlas", "WeatherMoss": "weathering_moss"}[kind]
+    path = f"{WEATHERING_FOLDER}/T_{name}"
+    return unreal.load_asset(path) if eal.does_asset_exist(path) else None
+
+
+def add_weathering(m, wall_uv, vertex_color, color, rough, normal):
+    """Weathering overlay (#84) behind the Weathering static switch: rain streaks, plinth dirt, algae and moss, repairs, faded
+    and flaking paint (FacadeWeathering.ush). Takes and returns (node, pin) pairs for colour, roughness and normal; the
+    atlas is Tools/buildingkit/build_weathering_atlas.py's, imported by import_megascans.py. Occlusion is untouched."""
+    if weathering_default("WeatherAtlas") is None:
+        unreal.log_warning("create_facade_materials: weathering atlas not imported, no weathering")
+        return color, rough, normal
+    node = expr(m, unreal.MaterialExpressionCustom, -400, 900, code=WEATHERING_HLSL, description="FacadeWeathering",
+                output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                include_file_paths=[cm.TERRAIN_INCLUDE, *WEATHERING_INCLUDES])
+    names = ["UV", "Variation", "NormalY", "Color", "Rough", "Nrm", "FloorHeight", "RepairColor", *WEATHERING_DEFAULTS]
+    node.set_editor_property("inputs", [custom_input(n) for n in ("WeatherAtlas", "WeatherMoss", "WeatherFlake", *names)])
+    node.set_editor_property("additional_outputs", [
+        cm.custom_output("NormalOut", unreal.CustomMaterialOutputType.CMOT_FLOAT3),
+        cm.custom_output("RoughOut", unreal.CustomMaterialOutputType.CMOT_FLOAT1)])
+    for index, kind in enumerate(("WeatherAtlas", "WeatherMoss", "WeatherFlake")):
+        sampler = unreal.MaterialSamplerType.SAMPLERTYPE_COLOR if kind != "WeatherAtlas" else \
+            unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR
+        texture = expr(m, unreal.MaterialExpressionTextureObjectParameter, -700, 900 + index * 120, parameter_name=kind,
+                       texture=weathering_default(kind), sampler_type=sampler)
+        link(texture, "", node, kind)
+    link(wall_uv, "", node, "UV")
+    link(vertex_color, "G", node, "Variation")
+    normal_y = expr(m, unreal.MaterialExpressionComponentMask, -500, 1250, r=False, g=True, b=False, a=False)
+    link(expr(m, unreal.MaterialExpressionVertexNormalWS, -700, 1250), "", normal_y, "")
+    link(normal_y, "", node, "NormalY")
+    link(*color, node, "Color")
+    link(*rough, node, "Rough")
+    link(*normal, node, "Nrm")
+    link(scalar(m, "FloorHeight", 3.0, -700, 1400), "", node, "FloorHeight")
+    repair = expr(m, unreal.MaterialExpressionVectorParameter, -700, 1500, parameter_name="RepairColor",
+                  default_value=unreal.LinearColor(0.42, 0.40, 0.36, 1))
+    repair_rgb = expr(m, unreal.MaterialExpressionComponentMask, -500, 1500, r=True, g=True, b=True, a=False)
+    link(repair, "", repair_rgb, "")
+    link(repair_rgb, "", node, "RepairColor")
+    for index, (name, default) in enumerate(WEATHERING_DEFAULTS.items()):
+        link(scalar(m, name, default, -700, 1600 + index * 100), "", node, name)
+    out = []
+    for pin, source in (("", color), ("RoughOut", rough), ("NormalOut", normal)):
+        switch = expr(m, unreal.MaterialExpressionStaticSwitchParameter, -200, 900 + len(out) * 100, parameter_name="Weathering",
+                      default_value=False)
+        link(node, pin, switch, "True")
+        link(*source, switch, "False")
+        out.append((switch, ""))
+    return out[0], out[1], out[2]
 
 
 def texture_object(m, name, set_ref, kind, sampler, x, y):
@@ -187,13 +281,16 @@ def build_master():
                 default_value=unreal.LinearColor(2, 2, 0, 0))
     tile_xy = expr(m, unreal.MaterialExpressionComponentMask, -2200, 400, r=True, g=True, b=False, a=False)
     link(tile, "", tile_xy, "")
+    wall_uv = expr(m, unreal.MaterialExpressionCustom, -2200, 100, code=WALL_UV_HLSL, description="WallUV",
+                   output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT2,
+                   inputs=[custom_input("UV"), custom_input("WorldPos"), custom_input("Board")])
+    link(texcoord, "", wall_uv, "UV")
+    link(expr(m, unreal.MaterialExpressionWorldPosition, -2400, 600), "", wall_uv, "WorldPos")
+    link(scalar(m, "Board", 0.0, -2400, 700), "", wall_uv, "Board")
     uv_node = expr(m, unreal.MaterialExpressionCustom, -2000, 100, code=UV_HLSL, description="FacadeUV",
                    output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT2,
-                   inputs=[custom_input("UV"), custom_input("Tile"), custom_input("Variation"), custom_input("WorldPos"),
-                           custom_input("Board")])
-    link(texcoord, "", uv_node, "UV")
-    link(expr(m, unreal.MaterialExpressionWorldPosition, -2200, 600), "", uv_node, "WorldPos")
-    link(scalar(m, "Board", 0.0, -2200, 700), "", uv_node, "Board")
+                   inputs=[custom_input("Wall"), custom_input("Tile"), custom_input("Variation")])
+    link(wall_uv, "", uv_node, "Wall")
     link(tile_xy, "", uv_node, "Tile")
     link(vertex_color, "G", uv_node, "Variation")
     uv = cm.parallax_uv(m, uv_node, set_asset(default_set, "Height"))
@@ -233,7 +330,7 @@ def build_master():
         y += 100
 
     color, rough, normal, ao = (surface, ""), (surface, "RoughOut"), (surface, "NormalOut"), (surface, "AOOut")
-    color, rough, normal, ao = add_weathering(m, color, rough, normal, ao)
+    color, rough, normal = add_weathering(m, wall_uv, vertex_color, color, rough, normal)
 
     # Old painted windows for the streamed buildings, a static switch so kit pieces pay nothing.
     window = expr(m, unreal.MaterialExpressionCustom, -800, 1300, code=cm.WINDOW_HLSL, description="WindowMask",
@@ -329,6 +426,17 @@ def build_instance(master, name, settings, board=False):
     if parallax is not None:
         mel.set_material_instance_scalar_parameter_value(mi, "HeightRatio", parallax)
     mel.set_material_instance_static_switch_parameter_value(mi, "Windows", bool(settings.get("windows")))
+    weather = CLASS_WEATHER.get(name) if not name.startswith("Roof_") else None
+    mel.set_material_instance_static_switch_parameter_value(mi, "Weathering", weather is not None)
+    if weather is not None:
+        for parameter, value in {**WEATHERING_DEFAULTS, **weather}.items():
+            if parameter != "RepairColor":
+                mel.set_material_instance_scalar_parameter_value(mi, parameter, value)
+        repair = srgb_to_linear(weather.get("RepairColor", (0.68, 0.66, 0.62)))
+        mel.set_material_instance_vector_parameter_value(mi, "RepairColor", unreal.LinearColor(*repair, 1))
+        flake = weathering_default("WeatherFlake")
+        if flake is not None:
+            mel.set_material_instance_texture_parameter_value(mi, "WeatherFlake", flake)
     snow_keep, leaf_keep = (1.0, 0.35) if name.startswith("Roof_") else (1.0, 0.0)
     mel.set_material_instance_scalar_parameter_value(mi, "SnowKeep", snow_keep)
     mel.set_material_instance_scalar_parameter_value(mi, "LeafKeep", leaf_keep)
