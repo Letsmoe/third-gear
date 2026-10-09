@@ -11,6 +11,8 @@ CMakeLists.txt
 __pycache__/
 .claude/
 /.worktrees
+# Link to the data root (Tools/bootstrap/data_root.py)
+/External
 
 # Plugin build output
 Plugins/*/Binaries/

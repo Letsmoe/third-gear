@@ -1,0 +1,84 @@
+# Every external data source of the project. `Tools/bootstrap/fetch.py` downloads what is missing into
+# <data root>/downloads/<id>/ and checks the sha256 where one is recorded.
+#
+# kind = "url"   one file; `pinned = false` means the file changes upstream (e.g. daily OSM extracts), so no
+#                checksum is kept and an existing download is reused as it is.
+# kind = "stac"  every asset of a STAC search whose item id matches `item_filter`.
+# kind = "wfs"   all features of a WFS layer inside `bbox`, paged, saved as one GeoJSON file.
+# `optional = true` sources are only fetched with --all or by id (data for features not built yet).
+#
+# Bounding box of the project (EPSG:25832): E 569599–588427, N 5917282–5932054
+# (WGS84 lon 10.05–10.33, lat 53.40–53.53).
+
+[osm_hamburg]
+kind = "url"
+url = "https://download.geofabrik.de/europe/germany/hamburg-latest.osm.pbf"
+pinned = false
+licence = "ODbL 1.0"
+attribution = "© OpenStreetMap contributors"
+
+[osm_schleswig_holstein]
+kind = "url"
+url = "https://download.geofabrik.de/europe/germany/schleswig-holstein-latest.osm.pbf"
+pinned = false
+licence = "ODbL 1.0"
+attribution = "© OpenStreetMap contributors"
+
+[osm_niedersachsen]
+kind = "url"
+url = "https://download.geofabrik.de/europe/germany/niedersachsen-latest.osm.pbf"
+pinned = false
+licence = "ODbL 1.0"
+attribution = "© OpenStreetMap contributors"
+
+[dgm1_hamburg]
+description = "Hamburg terrain model DGM1 2022, 1 m GeoTIFF tiles in a zip"
+kind = "url"
+url = "https://daten-hamburg.de/opendata/fernerkundung_hoehenmodelle/dgm/dgm1_hh_2022-04-30.zip"
+size = 1364773543
+licence = "dl-de/by-2.0"
+attribution = "Freie und Hansestadt Hamburg, Landesbetrieb Geoinformation und Vermessung (LGV)"
+
+[bdom_hamburg]
+description = "Hamburg surface model bDOM 2020, 1 m XYZ tiles (image matching), a zip despite the .ASCII name; used to detect trees"
+kind = "url"
+url = "https://archiv.transparenz.hamburg.de/hmbtgarchive/HMDK/dom1_xyz_hh_2020_04_30_74375_snap_1.ASCII"
+file = "dom1_xyz_hh_2020.zip"
+licence = "dl-de/by-2.0"
+attribution = "Freie und Hansestadt Hamburg, Landesbetrieb Geoinformation und Vermessung (LGV)"
+
+[dgm1_niedersachsen]
+description = "Lower Saxony terrain model DGM1, 1 m cloud-optimised GeoTIFFs; only the 2025 survey is used"
+kind = "stac"
+url = "https://dgm.stac.lgln.niedersachsen.de/search"
+bbox = [10.05, 53.40, 10.33, 53.53]
+item_filter = "_2025"
+licence = "CC BY 4.0"
+attribution = "© LGLN"
+
+[glo30]
+description = "Copernicus GLO-30 surface model, 30 m, fallback for Schleswig-Holstein"
+kind = "url"
+url = "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N53_00_E010_00_DEM/Copernicus_DSM_COG_10_N53_00_E010_00_DEM.tif"
+size = 33503867
+licence = "Copernicus DEM licence"
+attribution = "© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA"
+
+[street_trees_hamburg]
+description = "Hamburg street tree register (species, crown diameter, planting year)"
+kind = "wfs"
+url = "https://geodienste.hamburg.de/HH_WFS_Strassenbaumkataster"
+typename = "de.hh.up:strassenbaumkataster"
+bbox = [569599, 5917282, 588427, 5932054]
+crs = "EPSG:25832"
+file = "strassenbaeume_bbox.geojson"
+licence = "dl-de/by-2.0"
+attribution = "Freie und Hansestadt Hamburg, Behörde für Umwelt, Klima, Energie und Agrarwirtschaft"
+
+[lod2_hamburg]
+description = "Hamburg 3D city model LoD2 (CityGML, real roof shapes), for the building work in #23"
+kind = "url"
+url = "https://daten-hamburg.de/opendata/3d_stadtmodell_lod2/LoD2-DE_HH_2026-04-28.zip"
+optional = true
+licence = "dl-de/by-2.0"
+attribution = "Freie und Hansestadt Hamburg, Landesbetrieb Geoinformation und Vermessung (LGV)"
