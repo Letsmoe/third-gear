@@ -148,8 +148,9 @@ Readability and maintainability over cleverness. Match the surrounding code when
 - `Plugins/WheelInput/` — evdev wheel/pedals/shifter input + constant-force FFB on a ~1 kHz thread
   (`UWheelInputSubsystem`: `GetState()`, `SetSteeringForce()` +1 = clockwise, `SetSteeringResistance(damping, friction)`
   applied at 1 kHz from the measured wheel speed, `SetWheelRange()`; force fades out if not refreshed for 0.25 s).
-  Axis codes, pedal inversion, shifter/button indices and force sign are in `UWheelInputSettings` (DefaultGame.ini) —
-  defaults are guesses until verified with the real wheel (checklist in "Car & wheel").
+  Axis codes, pedal inversion, shifter/button indices and force sign are in `UWheelInputSettings` (DefaultGame.ini),
+  measured on the real G923 (wheel 0x00, throttle 0x02, brake 0x05, clutch 0x01, gears 1–6 = buttons 12–17, R = 18,
+  force inverted). `BrakeFullTravel` 0.75: the G923 brake's rubber stop is too stiff to press to the end.
 - `Scripts/` — headless editor Python scripts (level/asset creation). `create_proving_ground.py` builds `/Game/Maps/ProvingGround`.
 - `Tools/wheeltest/` — standalone C diagnostic: `./wheeltest list|monitor|ffb` (axes, button indices, force direction).
 - `Tools/asset_fetch/`, `RawAssets/` — downloaded CC0 photoreal textures (with height maps), models, HDRIs, German sign SVGs; see `RawAssets/MANIFEST.md`.

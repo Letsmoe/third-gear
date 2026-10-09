@@ -28,6 +28,7 @@ void UWheelInputSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Config.bInvertBrake = Settings->bInvertBrake;
 	Config.bInvertClutch = Settings->bInvertClutch;
 	Config.PedalDeadzone = FMath::Clamp(Settings->PedalDeadzone, 0.f, 0.5f);
+	Config.BrakeFullTravel = FMath::Clamp(Settings->BrakeFullTravel, 0.3f, 1.f);
 	Config.GearButtonIndices = Settings->GearButtonIndices;
 	Config.ReverseButtonIndex = Settings->ReverseButtonIndex;
 	Config.bInvertForce = Settings->bInvertForce;

@@ -21,6 +21,7 @@ struct FEvdevWheelConfig
 	bool bInvertBrake = true;
 	bool bInvertClutch = true;
 	float PedalDeadzone = 0.03f;
+	float BrakeFullTravel = 0.75f;
 	TArray<int32> GearButtonIndices;
 	int32 ReverseButtonIndex = -1;
 	bool bInvertForce = false;

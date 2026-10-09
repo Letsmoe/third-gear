@@ -56,6 +56,11 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Axes")
 	float PedalDeadzone = 0.03f;
 
+	/** Brake pedal travel (0..1) that counts as fully pressed. The G923 brake has a progressive rubber stop that
+	 *  can't comfortably be pushed to the end, so full braking has to come earlier. */
+	UPROPERTY(Config, EditAnywhere, Category = "Axes")
+	float BrakeFullTravel = 0.75f;
+
 	/** Button indices for gears 1..N of the H-shifter. No gear button pressed = neutral. */
 	UPROPERTY(Config, EditAnywhere, Category = "Shifter")
 	TArray<int32> GearButtonIndices = {12, 13, 14, 15, 16, 17};

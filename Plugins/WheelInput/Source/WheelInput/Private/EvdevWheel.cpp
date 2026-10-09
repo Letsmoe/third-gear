@@ -451,7 +451,7 @@ void FEvdevWheel::PublishState()
 	State.Steering = Steering;
 	State.SteeringDegrees = Steering * RangeDegrees * 0.5f;
 	State.Throttle = Pedal(Config.ThrottleAxis, Config.bInvertThrottle);
-	State.Brake = Pedal(Config.BrakeAxis, Config.bInvertBrake);
+	State.Brake = FMath::Min(Pedal(Config.BrakeAxis, Config.bInvertBrake) / Config.BrakeFullTravel, 1.f);
 	State.Clutch = Pedal(Config.ClutchAxis, Config.bInvertClutch);
 	State.ShifterGear = Gear;
 	State.Buttons = Buttons;
