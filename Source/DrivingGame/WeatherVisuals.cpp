@@ -67,6 +67,41 @@ namespace WeatherVisualsDetail
 	constexpr float ClearSkyGain = 1.8f;
 
 	const TCHAR* RainMaterialPath = TEXT("/Game/World/Materials/M_RainStreaks.M_RainStreaks");
+	const TCHAR* LeavesMaterialPath = TEXT("/Game/World/Materials/M_FallingLeaves.M_FallingLeaves");
+
+	/** The deciduous year in Hamburg, days of the year counted from 0 on the first of January. */
+	constexpr float LeafOutStart = 99.f;     // 10 April
+	constexpr float LeafOutEnd = 125.f;      // 6 May
+	constexpr float ColourStart = 273.f;     // 1 October
+	constexpr float ColourEnd = 303.f;       // 31 October
+	constexpr float LeafFallStart = 292.f;   // 20 October
+	constexpr float LeafFallEnd = 328.f;     // 25 November
+	constexpr float LeavesClearedBy = 350.f; // mid December: swept, blown away and rotted
+
+	/** Season state for materials: foliage density and colour, leaves on the ground and in the air. */
+	struct FSeasonState
+	{
+		float LeafDensity = 1.f;
+		float LeafColour = 0.f;
+		float FallenLeaves = 0.f;
+		float LeafFall = 0.f;
+	};
+
+	FSeasonState SeasonAt(float DayOfYear, float WindSpeed)
+	{
+		FSeasonState State;
+		const float Growing = FMath::SmoothStep(LeafOutStart, LeafOutEnd, DayOfYear);
+		const float Dropped = FMath::SmoothStep(LeafFallStart, LeafFallEnd, DayOfYear);
+		State.LeafDensity = Growing * (1.f - Dropped);
+		State.LeafColour = DayOfYear < LeafOutEnd ? 0.f : FMath::SmoothStep(ColourStart, ColourEnd, DayOfYear);
+		State.FallenLeaves = Dropped * (1.f - FMath::SmoothStep(LeafFallEnd, LeavesClearedBy, DayOfYear));
+		// Most leaves come down in the middle of the fall period, and more in a stiff breeze.
+		const float Middle = (LeafFallStart + LeafFallEnd) * 0.5f;
+		const float HalfWidth = (LeafFallEnd - LeafFallStart) * 0.5f;
+		const float Peak = FMath::Max(0.f, 1.f - FMath::Square((DayOfYear - Middle) / HalfWidth));
+		State.LeafFall = Peak * FMath::Lerp(0.3f, 1.f, FMath::Clamp(WindSpeed / 8.f, 0.f, 1.f));
+		return State;
+	}
 
 	/** At full thunder activity a strike every eight seconds on average; strikes land 1 to 10 km away. */
 	constexpr float StrikesPerSecondAtFullActivity = 0.12f;
@@ -169,6 +204,13 @@ void UWeatherVisualsSubsystem::SpawnEffects()
 		Effect->Initialise(Material);
 		Effect->SetActorHiddenInGame(true);
 		Rain = Effect;
+	}
+	if (UMaterialInterface* LeafMaterial = LoadObject<UMaterialInterface>(nullptr, WeatherVisualsDetail::LeavesMaterialPath, nullptr, LOAD_NoWarn))
+	{
+		ARainEffect* Effect = World->SpawnActor<ARainEffect>(SpawnParameters);
+		Effect->Initialise(LeafMaterial, 2500);
+		Effect->SetActorHiddenInGame(true);
+		Leaves = Effect;
 	}
 	else
 	{
@@ -340,7 +382,7 @@ void UWeatherVisualsSubsystem::SampleTarget()
 	if (!bHasState)
 	{
 		Current = Target;
-		Wetness = Overrides.Contains(TEXT("Rain")) && Target.RainMillimetresPerHour > 0.1f ? 1.f : 0.f;
+		Wetness = Overrides.Contains(TEXT("Rain")) && Target.RainMillimetresPerHour > 0.1f && Target.SnowFraction < 0.5f ? 1.f : 0.f;
 		SnowCover = Target.SnowFraction > 0.5f && Target.TemperatureCelsius < 1.f && Overrides.Contains(TEXT("Snow")) ? 1.f : 0.f;
 		bHasState = true;
 	}
@@ -522,4 +564,22 @@ void UWeatherVisualsSubsystem::ApplyMaterialParameters()
 	Instance->SetScalarParameterValue(TEXT("CloudCover"), Current.CloudCover);
 	Instance->SetScalarParameterValue(TEXT("Thunder"), Current.ThunderActivity);
 	Instance->SetScalarParameterValue(TEXT("Night"), NightFactor());
+	const UWeatherSubsystem* Weather = GetWorld()->GetSubsystem<UWeatherSubsystem>();
+	if (Weather)
+	{
+		const FIsobarCalendar Calendar = IsobarCalendarAt(Weather->GetWeatherSeconds());
+		WeatherVisualsDetail::FSeasonState Season = WeatherVisualsDetail::SeasonAt(float(Calendar.GetContinuousDayOfYear()), WindSpeed);
+		if (const float* Fallen = Overrides.Find(TEXT("FallenLeaves")))
+		{
+			Season.FallenLeaves = *Fallen;
+		}
+		Instance->SetScalarParameterValue(TEXT("LeafDensity"), Season.LeafDensity);
+		Instance->SetScalarParameterValue(TEXT("LeafColour"), Season.LeafColour);
+		Instance->SetScalarParameterValue(TEXT("FallenLeaves"), Season.FallenLeaves);
+		Instance->SetScalarParameterValue(TEXT("LeafFall"), Season.LeafFall);
+		if (ARainEffect* Effect = Leaves.Get())
+		{
+			Effect->SetActorHiddenInGame(Season.LeafFall < 0.02f);
+		}
+	}
 }

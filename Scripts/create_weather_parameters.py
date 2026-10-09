@@ -21,6 +21,10 @@ SCALARS = {
     "CloudCover": 0.0,
     "Thunder": 0.0,         # nearest thunderstorm's activity
     "Night": 0.0,           # 1 once the sun is 6 degrees below the horizon: lit windows, lamps
+    "LeafDensity": 1.0,     # foliage on deciduous trees: 0 bare (winter) to 1 full (summer)
+    "LeafColour": 0.0,      # autumn colouring of the remaining foliage: 0 green to 1 fully turned
+    "FallenLeaves": 0.0,    # leaves lying on the ground
+    "LeafFall": 0.0,        # leaves falling right now, with the wind
 }
 
 
