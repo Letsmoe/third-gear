@@ -8,6 +8,7 @@
 #include "CarPawn.h"
 #include "DriveTest.h"
 #include "GameFlow.h"
+#include "RuleTest.h"
 #include "StreamTest.h"
 #include "GameFramework/PlayerStart.h"
 #include "SeatedVRPawn.h"
@@ -27,7 +28,7 @@ bool ADrivingGameMode::UseFreeCamera()
 {
 	FString Value;
 	return FParse::Param(FCommandLine::Get(), TEXT("FreeCam")) || FParse::Value(FCommandLine::Get(), TEXT("Shots="), Value)
-		|| FParse::Value(FCommandLine::Get(), TEXT("StreamTest="), Value);
+		|| FParse::Value(FCommandLine::Get(), TEXT("StreamTest="), Value) || FParse::Param(FCommandLine::Get(), TEXT("RuleTest"));
 }
 
 bool ADrivingGameMode::UsesFreeCameraPawn() const
@@ -134,6 +135,12 @@ void ADrivingGameMode::BeginPlay()
 	if (FParse::Param(FCommandLine::Get(), TEXT("DriveTest")) && !UseFreeCamera())
 	{
 		GetWorld()->SpawnActor<ADriveTestRunner>();
+	}
+
+	// Rule checker test on the real signals and roads of the region (see Scripts/rule_test.sh).
+	if (FParse::Param(FCommandLine::Get(), TEXT("RuleTest")))
+	{
+		GetWorld()->SpawnActor<ARuleTestRunner>();
 	}
 
 	// Automated run through the generated world (see Scripts/stream_test.sh).

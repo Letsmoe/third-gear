@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "WheeledVehiclePawn.h"
 #include "CarSimTypes.h"
+#include "TrafficRuleComponent.h"
 #include "CarPawn.generated.h"
 
 class UCameraComponent;
@@ -60,9 +61,20 @@ protected:
 	TObjectPtr<UTextRenderComponent> Dashboard;
 
 	UPROPERTY(VisibleAnywhere, Category = "Components")
+	TObjectPtr<UTextRenderComponent> RuleMessage;
+
+	/** Notices red lights and speeding (see UTrafficRuleComponent) and tells the driver through RuleMessage. */
+	UPROPERTY(VisibleAnywhere, Category = "Components")
+	TObjectPtr<UTrafficRuleComponent> RuleChecker;
+
+	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TArray<TObjectPtr<UStaticMeshComponent>> AttachedMeshes;
 
 private:
+	/** Shows a violation for a few seconds next to the dashboard. */
+	UFUNCTION()
+	void OnRuleViolation(const FTrafficViolation& Violation);
+
 	FCarDriverInput GatherInput(float DeltaSeconds);
 	void UpdateForceFeedback(const FCarTelemetry& Telemetry);
 	void UpdateDashboard(const FCarTelemetry& Telemetry);
@@ -85,4 +97,5 @@ private:
 	float StarterTimeLeft = 0.f;
 	int64 PrevWheelButtons = 0;
 	FRotator DesktopLook = FRotator::ZeroRotator;
+	double RuleMessageHideTime = 0.0;
 };
