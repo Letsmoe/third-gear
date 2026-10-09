@@ -6,3 +6,4 @@ rasterio
 osmium
 mapbox-earcut
 matplotlib
+tornado

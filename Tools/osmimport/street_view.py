@@ -1,4 +1,5 @@
-"""Draws the streets as OSM tags them over the Hamburg aerial photo, in an interactive window for review.
+"""Draws the streets as OSM tags them over the Hamburg aerial photo, as an interactive page for review
+(http://127.0.0.1:8988/ in the browser).
 
   Tools/osmimport/.venv/bin/python -I Tools/osmimport/street_view.py <region> [--centre x,y --size m] [--png out.png]
 
@@ -222,12 +223,16 @@ def main():
     parser.add_argument("region", choices=sorted(geo.AREAS))
     parser.add_argument("--centre", help="world x,y in metres (x east, y south); default the whole region")
     parser.add_argument("--size", type=float, default=150.0, help="side of the viewed square with --centre")
-    parser.add_argument("--png", help="write an image instead of opening a window")
+    parser.add_argument("--png", help="write an image instead of serving the interactive view")
+    parser.add_argument("--port", type=int, default=8988, help="port of the interactive view on localhost")
     args = parser.parse_args()
     if args.png:
         matplotlib.use("Agg")
     else:
-        matplotlib.use("TkAgg")
+        # The browser backend: the session's X display is not reachable from every shell, a local web page is.
+        matplotlib.use("WebAgg")
+        matplotlib.rcParams["webagg.port"] = args.port
+        matplotlib.rcParams["webagg.open_in_browser"] = False
     import matplotlib.pyplot as plt
 
     area = geo.AREAS[args.region]
@@ -259,6 +264,7 @@ def main():
         figure.savefig(args.png, dpi=150)
         return
     figure.canvas.mpl_connect("button_press_event", view.on_click)
+    print(f"Street view at http://127.0.0.1:{args.port}/", flush=True)
     plt.show()
 
 
