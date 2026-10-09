@@ -21,7 +21,10 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "TrafficSubsystem.h"
 #include "GrassField.h"
+#include "ParkedCars.h"
+#include "AITrafficCar.h"
 #include "WorldFurniture.h"
+#include "WorldKitBuildings.h"
 #include "WorldSnow.h"
 #include "WorldTileActor.h"
 #include "WorldTileData.h"
@@ -65,6 +68,8 @@ struct FTileSpawnJob
 	double LongestStepSeconds = 0.0;
 	/** Next part of the street furniture to add (see AWorldTileActor::AddFurnitureStep). */
 	int32 FurnitureStep = 0;
+	/** Next group of building kit pieces to add (see AddKitInstancesStep). */
+	int32 KitStep = 0;
 };
 
 /** State shared with worker tasks, which may still finish after the streamer is gone. */
@@ -244,6 +249,22 @@ void AWorldStreamer::LoadPlantWindMaterials(const FString& ModelKey, const UStat
 	LoadedPlantWindMaterials.Add(ModelKey, MoveTemp(SlotMaterials));
 }
 
+void AWorldStreamer::PrepareParkedCars()
+{
+	if (ParkedCars::IsDisabled())
+	{
+		return;
+	}
+	for (const TSharedPtr<FTrafficVehicleModel>& Model : ParkedCars::GetModels())
+	{
+		if (Model->Load())
+		{
+			Model->CollectAssets(ParkedCarAssets);
+		}
+	}
+	ParkedCarCollider = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+}
+
 void AWorldStreamer::PrepareFurniture()
 {
 	const FString Folder = TEXT("/Game/World/Furniture/Meshes");
@@ -265,6 +286,7 @@ void AWorldStreamer::PrepareFurniture()
 			UE_LOG(LogWorldStreamer, Warning, TEXT("Street furniture mesh %s missing; run Scripts/create_furniture_assets.py"), *Name);
 		}
 	}
+	PrepareParkedCars();
 	SignMasterMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/World/Furniture/M_SignFace.M_SignFace"), nullptr, LOAD_NoWarn);
 	// Loading a sign texture the first time a tile needs it stalls that frame, so load them all up front.
 	TArray<FAssetData> Textures;
@@ -315,14 +337,30 @@ void AWorldStreamer::PreloadMaterials()
 	}
 }
 
+UMaterialInterface* AWorldStreamer::FindBuildingMaterial(const FString& Section) const
+{
+	// The scanned facade and roof materials (Scripts/create_facade_materials.py) replace the plain ones where they exist.
+	const bool bBuildingSection = Section.StartsWith(TEXT("Facade_")) || Section.StartsWith(TEXT("Roof_"));
+	if (!bBuildingSection || FParse::Param(FCommandLine::Get(), TEXT("NoFacadeMaterials")))
+	{
+		return nullptr;
+	}
+	const FString Path = FString::Printf(TEXT("%s/M_%s.M_%s"), *BuildingMaterialFolder, *Section, *Section);
+	return LoadObject<UMaterialInterface>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+}
+
 UMaterialInterface* AWorldStreamer::FindMaterial(const FString& Section)
 {
 	if (TObjectPtr<UMaterialInterface>* Found = Materials.Find(Section))
 	{
 		return *Found;
 	}
+	UMaterialInterface* Material = FindBuildingMaterial(Section);
 	const FString Path = FString::Printf(TEXT("%s/M_%s.M_%s"), *MaterialFolder, *Section, *Section);
-	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *Path, nullptr, LOAD_NoWarn);
+	if (!Material)
+	{
+		Material = LoadObject<UMaterialInterface>(nullptr, *Path, nullptr, LOAD_NoWarn);
+	}
 	if (!Material)
 	{
 		UE_LOG(LogWorldStreamer, Warning, TEXT("Material %s missing; run Scripts/create_materials.py"), *Path);
@@ -489,6 +527,14 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 	else if (Step == ChunkSteps + 2)
 	{
 		Actor->AddBuildings(MoveTemp(Meshes.BuildingsMesh), Job.Materials, bNear, bCookNow);
+		if (Meshes.KitRoofsMesh.TriangleCount() > 0)
+		{
+			Actor->AddBuildings(MoveTemp(Meshes.KitRoofsMesh), Job.Materials, false, false);
+		}
+		if (Meshes.KitCollisionMesh.TriangleCount() > 0)
+		{
+			Actor->AddBuildings(MoveTemp(Meshes.KitCollisionMesh), Job.Materials, true, bCookNow, /*bVisible=*/false);
+		}
 	}
 	else if (Step <= ChunkSteps + 2 + PlantSteps)
 	{
@@ -504,7 +550,11 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 	}
 	else if (Step == ChunkSteps + 3 + PlantSteps)
 	{
-		if (Meshes.Furniture)
+		if (Meshes.Kit && !AddKitInstancesStep(*Actor, *Meshes.Kit, Job.KitStep++))
+		{
+			--Job.NextStep; // more kit pieces to add: come back to this step
+		}
+		else if (Meshes.Furniture)
 		{
 			FFurnitureMeshes Furniture;
 			const auto Find = [this](const TCHAR* Name) { const TObjectPtr<UStaticMesh>* Mesh = FurnitureMeshes.Find(Name); return Mesh ? Mesh->Get() : nullptr; };
@@ -513,6 +563,11 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 			Furniture.SignalHead = Find(FurnitureAssets::SignalHead);
 			Furniture.SignPlate = Find(FurnitureAssets::SignPlate);
 			Furniture.SignClamp = Find(FurnitureAssets::SignClamp);
+			for (const TSharedPtr<FTrafficVehicleModel>& Model : ParkedCars::GetModels())
+			{
+				Furniture.ParkedModels.Add(Model->bLoaded ? Model.Get() : nullptr);
+			}
+			Furniture.ParkedCollider = ParkedCarCollider;
 			for (const int32 Height : GetSignPoleHeightsCm())
 			{
 				Furniture.SignPoles.Add(Height, Find(*FString::Printf(TEXT("SM_SignPole_%d"), Height)));

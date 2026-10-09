@@ -1,5 +1,6 @@
 #include "WorldFurniture.h"
 
+#include "ParkedCars.h"
 #include "WorldTileData.h"
 
 namespace
@@ -174,6 +175,7 @@ void BuildWorldFurniture(const FWorldTileData& Tile, FWorldFurnitureInstances& O
 		case EWorldPoiKind::Lamp: AddLamp(Poi, Out); break;
 		case EWorldPoiKind::SignalHead: AddSignalHead(Poi, Out); break;
 		case EWorldPoiKind::Sign: AddSign(Tile, Poi, Out); break;
+		case EWorldPoiKind::ParkedCar: ParkedCars::AddParkedCar(Poi, Tile.Origin, Out); break;
 		}
 	}
 }

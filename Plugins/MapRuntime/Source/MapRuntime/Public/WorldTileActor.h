@@ -12,6 +12,7 @@ namespace UE::Geometry { class FDynamicMesh3; }
 struct FWorldFurnitureInstances;
 class FTrafficNetwork;
 enum class ESignalAspect : uint8;
+struct FTrafficVehicleModel;
 
 /** The street furniture meshes and sign materials, resolved by the world streamer. */
 struct FFurnitureMeshes
@@ -25,6 +26,9 @@ struct FFurnitureMeshes
 	TMap<int32, UStaticMesh*> SignPoles;
 	/** Material per sign graphic name. */
 	TMap<FString, UMaterialInterface*> SignMaterials;
+	/** The loaded models of the parked cars (index = model index of the POIS records) and the 100 cm cube their collision boxes are made of. */
+	TArray<const FTrafficVehicleModel*> ParkedModels;
+	UStaticMesh* ParkedCollider = nullptr;
 };
 
 /**
@@ -54,8 +58,12 @@ public:
 	/** Adds the road markings (never collide). */
 	void AddMarkings(UE::Geometry::FDynamicMesh3&& Mesh, const TArray<UMaterialInterface*>& Materials);
 
-	/** Adds the buildings, colliding when bCollision. */
-	void AddBuildings(UE::Geometry::FDynamicMesh3&& Mesh, const TArray<UMaterialInterface*>& Materials, bool bCollision, bool bCookNow);
+	/** Adds the buildings, colliding when bCollision; with bVisible false only the collision is there. */
+	void AddBuildings(UE::Geometry::FDynamicMesh3&& Mesh, const TArray<UMaterialInterface*>& Materials, bool bCollision, bool bCookNow,
+		bool bVisible = true);
+
+	/** Adds the instances of one building kit piece (transforms relative to the tile); null meshes are skipped. */
+	void AddKitInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow);
 
 	/**
 	 * Adds instances of one plant model (transforms relative to the tile). WindMaterials, when not empty, replace the
@@ -103,12 +111,18 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UDynamicMeshComponent>> GroundChunks;
 
-	UInstancedStaticMeshComponent* AddFurnitureInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow, bool bCollision);
+	UInstancedStaticMeshComponent* AddFurnitureInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow, bool bCollision,
+		int32 CullDistanceCm = 0);
 
 	/** Furniture components that block the car once the viewer is close, and how many of them already do. */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UInstancedStaticMeshComponent>> FurnitureColliders;
 	int32 FurnitureCollidersEnabled = 0;
+
+	/** Parked cars: invisible collision boxes for all of them, then per model the painted bodies and the glass and wheels. */
+	void AddParkedCarColliders(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes);
+	void AddParkedCarBodies(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes, int32 ModelIndex);
+	void AddParkedCarGlassAndWheels(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes, int32 ModelIndex);
 
 	/** Hands the tile's lamp and signal lights to the traffic subsystem and registers the signal heads. */
 	void RegisterFurnitureLights(const FWorldFurnitureInstances& Furniture);

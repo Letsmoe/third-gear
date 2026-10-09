@@ -164,6 +164,17 @@ def materials_run():
     run_editor_script("create_materials.py")
 
 
+def facades_done():
+    """The Megascans texture sets are imported and the facade materials exist."""
+    return os.path.exists(os.path.join(REPO, "Content", "World", "Facades", "M_Facade_Brick.uasset"))
+
+
+def facades_run():
+    """Imports the Megascans from the data root's raw assets (Fab content, downloaded by hand) and builds the facade materials."""
+    run_editor_script("import_megascans.py")
+    run_editor_script("create_facade_materials.py")
+
+
 def trees_done():
     """The tree models have been baked."""
     return has_files(os.path.join(REPO, "Content", "Vegetation"), "**/*.uasset")
@@ -184,6 +195,17 @@ def grass_run():
     """Imports the Poly Haven grass tufts and creates the grass materials."""
     run_editor_script("import_grass_models.py")
     run_editor_script("create_grass_materials.py")
+
+
+def leaves_done():
+    """The leaf card meshes and material exist."""
+    return os.path.exists(os.path.join(REPO, "Content", "Leaves", "M_LeafCard.uasset"))
+
+
+def leaves_run():
+    """Builds the leaf atlas from ambientCG leaf sets, then the leaf card meshes and material."""
+    run([data_root.venv_python("osmimport"), "-I", "Tools/leafatlas/build_leaf_atlas.py"])
+    run_editor_script("create_leaf_assets.py")
 
 
 def world_done():
@@ -212,8 +234,10 @@ STEPS = {
     "car": (car_done, car_run),
     "textures": (textures_done, textures_run),
     "materials": (materials_done, materials_run),
+    "facades": (facades_done, facades_run),
     "trees": (trees_done, trees_run),
     "grass": (grass_done, grass_run),
+    "leaves": (leaves_done, leaves_run),
     "world": (world_done, world_run),
 }
 

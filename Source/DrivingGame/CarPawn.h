@@ -8,6 +8,8 @@
 
 class UCameraComponent;
 class UCarAudioComponent;
+class UCarLightsComponent;
+class UInstrumentClusterComponent;
 class UCarMirrorsComponent;
 class UCarMovementComponent;
 class UStaticMeshComponent;
@@ -15,7 +17,7 @@ class UTextRenderComponent;
 
 /**
  * The player car: skeletal mesh + attached static meshes from UCarSettings, UCarMovementComponent physics,
- * seated driver camera (HMD-locked, tracking origin "Local", R recentres) and a small speed/rpm/gear readout.
+ * seated driver camera (HMD-locked, tracking origin "Local", R recentres) and a small instrument cluster.
  *
  * Controls are read every frame from the Logitech wheel (UWheelInputSubsystem) and/or the keyboard:
  *   W/S throttle/brake, A/D steer, Left Shift clutch, 1-6 gears, N neutral, B reverse, E start/stop engine,
@@ -38,6 +40,7 @@ public:
 
 	UCarMovementComponent* GetCarMovement() const;
 	UCarAudioComponent* GetCarAudio() const { return CarAudio; }
+	UCarLightsComponent* GetCarLights() const { return Lights; }
 	FCarTelemetry GetTelemetry() const;
 
 	/** Scripted driving (drive test): when enabled, the given input replaces wheel and keyboard. */
@@ -61,9 +64,6 @@ protected:
 	TObjectPtr<UCameraComponent> Camera;
 
 	UPROPERTY(VisibleAnywhere, Category = "Components")
-	TObjectPtr<UTextRenderComponent> Dashboard;
-
-	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TObjectPtr<UTextRenderComponent> RuleMessage;
 
 	/** Notices red lights and speeding (see UTrafficRuleComponent) and tells the driver through RuleMessage. */
@@ -79,6 +79,12 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TObjectPtr<UCarMirrorsComponent> Mirrors;
 
+	UPROPERTY(VisibleAnywhere, Category = "Components")
+	TObjectPtr<UCarLightsComponent> Lights;
+
+	UPROPERTY(VisibleAnywhere, Category = "Components")
+	TObjectPtr<UInstrumentClusterComponent> Cluster;
+
 private:
 	/** Shows a violation for a few seconds next to the dashboard. */
 	UFUNCTION()
@@ -86,7 +92,6 @@ private:
 
 	FCarDriverInput GatherInput(float DeltaSeconds);
 	void UpdateForceFeedback(const FCarTelemetry& Telemetry);
-	void UpdateDashboard(const FCarTelemetry& Telemetry);
 	void ToggleEngine();
 	void LookYaw(float Value);
 	void LookPitch(float Value);

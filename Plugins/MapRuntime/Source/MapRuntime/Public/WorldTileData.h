@@ -66,6 +66,24 @@ struct FWorldBuilding
 	/** Gabled roofs: the footprint's minimum rotated rectangle. */
 	FVector2f RoofRectangle[4];
 	FWorldPolygon Footprint;
+
+	/** Typology from the tile's BTYP section (osmimport/building_types.py); bTyped is false in older tiles. */
+	bool bTyped = false;
+	uint8 ClassId = 0;
+	uint8 TypedRoofShape = 0;
+	uint8 PitchDegrees = 0;
+	uint8 Storeys = 1;
+	uint8 AtticLevels = 0;
+	uint8 TypeFlags = 0;
+	uint8 TagBits = 0;
+	/** Raised ground floor, storey height, ground floor height and eave height above the base, metres. */
+	float PlinthMetres = 0.f;
+	float StoreyHeight = 2.75f;
+	float GroundHeight = 2.75f;
+	float TypedEaveHeight = 0.f;
+	/** Ridge direction (0..180) and the direction the street facade faces, Unreal yaw degrees. */
+	float RidgeYaw = 0.f;
+	float FrontYaw = 0.f;
 };
 
 struct FWorldPlant
@@ -84,6 +102,8 @@ enum class EWorldPoiKind : uint8
 	Lamp = 0,
 	SignalHead = 1,
 	Sign = 2,
+	/** A parked car: Variant is the model index (ParkedCars.cpp), Param0 the roll and Param1 the pitch in degrees. */
+	ParkedCar = 3,
 };
 
 /** One piece of street furniture (worldtile.py POIS): a street lamp, the pole of a signal head, or a sign pole. */

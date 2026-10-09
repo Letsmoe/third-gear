@@ -374,6 +374,11 @@ void FMenuPages::AddWheelButtonRows(FMenuPage& Page)
 	AddWheelButtonAssign(Page, TEXT("Parking brake"), TEXT("Pulls and releases the parking brake."), &UWheelInputSettings::HandbrakeButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Recentre view"), TEXT("Puts the view back where the driver looks straight ahead."), &UWheelInputSettings::RecenterViewButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Reset car"), TEXT("Puts the car back upright on the road."), &UWheelInputSettings::ResetCarButtonIndex);
+	AddWheelButtonAssign(Page, TEXT("Low beam"), TEXT("Switches the low beam and the tail lights on and off."), &UWheelInputSettings::LowBeamButtonIndex);
+	AddWheelButtonAssign(Page, TEXT("High beam"), TEXT("Switches the high beam on and off."), &UWheelInputSettings::HighBeamButtonIndex);
+	AddWheelButtonAssign(Page, TEXT("Indicator left"), TEXT("Starts and stops the left indicator. It cancels itself after the turn."), &UWheelInputSettings::IndicatorLeftButtonIndex);
+	AddWheelButtonAssign(Page, TEXT("Indicator right"), TEXT("Starts and stops the right indicator. It cancels itself after the turn."), &UWheelInputSettings::IndicatorRightButtonIndex);
+	AddWheelButtonAssign(Page, TEXT("Hazard lights"), TEXT("Switches the hazard warning lights on and off."), &UWheelInputSettings::HazardButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Open menu"), TEXT("Pauses the game and opens the menu. Holding the D-pad up for a second does the same."), &UWheelInputSettings::MenuButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Menu confirm"), TEXT("Chooses the selected entry in the menu. D-pad right does this without a button."), &UWheelInputSettings::MenuConfirmButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Menu back"), TEXT("Goes back one page. D-pad left on an entry does this without a button."), &UWheelInputSettings::MenuBackButtonIndex);

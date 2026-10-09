@@ -245,6 +245,19 @@ Official StVO sign graphics, tagged Public domain on Commons (amtliche Werke). `
 
 Codes with no matching SVG on Commons: 274.2-30, 282-50
 
+## Leaf sets - ambientCG (6)
+
+Fetched by Tools/leafatlas/build_leaf_atlas.py into `leaves/ambientcg/<id>/` (4K-JPG colour and opacity maps, CC0), cut out and packed into `leaves/leaf_atlas.png` (16 cells) for the leaf cards (/Game/Leaves, issue #41).
+
+| Local path | Source URL | License | Species |
+|---|---|---|---|
+| `leaves/ambientcg/LeafSet030/` | https://ambientcg.com/a/LeafSet030 | CC0 | oak, brown and rust |
+| `leaves/ambientcg/LeafSet028/` | https://ambientcg.com/a/LeafSet028 | CC0 | maple, yellow to dark red |
+| `leaves/ambientcg/LeafSet021/` | https://ambientcg.com/a/LeafSet021 | CC0 | maple, pale yellow |
+| `leaves/ambientcg/LeafSet027/` | https://ambientcg.com/a/LeafSet027 | CC0 | maple, green to orange |
+| `leaves/ambientcg/LeafSet007/` | https://ambientcg.com/a/LeafSet007 | CC0 | elm, bright yellow (stands in for linden) |
+| `leaves/ambientcg/LeafSet011/` | https://ambientcg.com/a/LeafSet011 | CC0 | beech, brown |
+
 ## Notes / gaps
 
 - No car: Poly Haven has only `covered_car` (a tarp-covered car prop, not a drivable/interior model), `old_tyre`, `rusted_wheel_rim_*`; ambientCG has no 3D models at all. No CC0 car with interior exists on these sources.

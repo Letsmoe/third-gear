@@ -21,6 +21,13 @@ Sections:
   BLDG  u32 count; per building: u64 osm_id, u16 facade, u16 roof, u8 roof_shape, u8 tint, u8 variation, u8 pad,
         f32 base_z, f32 eave_height, f32 roof_rectangle[8] (gabled roofs: the footprint's minimum rotated rectangle,
         4 corners), u32 ring_count, rings as in SURF
+  BTYP  building typing (building_types.py), one record per BLDG record in the same order; readers that don't know
+        the section skip it. u32 count; per building (36 bytes): u64 osm_id, u8 class (CLASS_NAMES), u8 roof shape
+        (ROOF_NAMES: flat, gabled, hipped, half_hipped, mansard, gambrel, pyramidal, skillion, round), u8 pitch in
+        degrees, u8 storeys (ground floor included, attic not), u8 attic levels, u8 flags (FLAG_* in building_types),
+        u8 tag bits (which values came from OSM tags), u8 plinth in 5 cm units, f32 storey height, f32 ground floor
+        height, f32 eave height above the terrain base (plinth, ground floor and storeys), f32 ridge yaw (degrees,
+        0..180, Unreal yaw), f32 front yaw (degrees, direction the street facade faces).
   VEGE  u32 count; per plant: u16 model, u16 pad, f32 x, y, z, yaw, crown, height, trunk
   POIS  street furniture, u32 count; per object (36 bytes): u8 kind (POI_*), u8 flags, u16 variant, u16 variant2,
         u16 pad, f32 x, y (tile-relative), z (absolute, at the foot), yaw (degrees, see below), param0, param1,
@@ -29,6 +36,9 @@ Sections:
         LAMP: variant 0, param0 mast height m, param1 arm length m, flags 1 = lamp placed from OSM (else from lit=yes).
         SIGNAL_HEAD: link = approach id in traffic.json, param0 pole height m, flags 1 = pole on the left.
         SIGN: variant = name of the graphic (Zeichen_274-30), variant2 = name of an additional sign below it or 0xFFFF.
+        PARKED_CAR: variant = model (index into the list in ParkedCars.cpp), z at the ground under the wheels, yaw = the
+        direction the car faces, param0 roll in degrees (Unreal sign: positive lowers the right side), param1 pitch in
+        degrees (positive nose up). Older readers skip the kind.
         Signal junctions, phases and the speed limit ways are in traffic.json next to world.json.
 """
 import struct
@@ -42,6 +52,7 @@ VERSION = 2
 POI_LAMP = 0
 POI_SIGNAL_HEAD = 1
 POI_SIGN = 2
+POI_PARKED_CAR = 3
 NO_VARIANT = 0xFFFF
 
 # GRID terrain value of a hole
@@ -109,6 +120,7 @@ class TileWriter:
         self.surfaces = []
         self.markings = []
         self.buildings = []
+        self.building_types = []
         self.plants = []
         self.pois = []
 
@@ -159,6 +171,15 @@ class TileWriter:
                                           self.names(roof), roof_shape, tint, variation, base_z, eave_height)
                               + corners.astype("<f4").tobytes() + _pack_rings(footprint, self.origin))
 
+    def add_building_type(self, osm_id, building_type):
+        """Adds the typing record (a building_types.BuildingType) of the building added last with add_building."""
+        record = building_type
+        self.building_types.append(struct.pack(
+            "<QBBBBBBBBfffff", osm_id & 0xFFFFFFFFFFFFFFFF, record.class_id, record.roof_shape,
+            int(round(record.pitch_degrees)), record.storeys, record.attic_levels, record.flags, record.tag_bits,
+            int(round(record.plinth / 0.05)), record.storey_height, record.ground_height, record.eave_height,
+            record.ridge_yaw, record.front_yaw))
+
     def add_plant(self, model, x, y, z, yaw, crown, height, trunk):
         """Adds one tree or shrub at world position (x, y, z)."""
         self.plants.append(struct.pack("<H2x7f", self.names(model), x - self.x0, y - self.y0, z, yaw, crown,
@@ -175,7 +196,7 @@ class TileWriter:
     def write(self, path):
         sections = [(b"NAME", self.names.pack()), (b"GRID", self.grid)]
         for tag, records in ((b"SURF", self.surfaces), (b"MARK", self.markings), (b"BLDG", self.buildings),
-                             (b"VEGE", self.plants), (b"POIS", self.pois)):
+                             (b"BTYP", self.building_types), (b"VEGE", self.plants), (b"POIS", self.pois)):
             sections.append((tag, struct.pack("<I", len(records)) + b"".join(records)))
         with open(path, "wb") as f:
             f.write(b"TGT1" + struct.pack("<Iddff", VERSION, self.x0, self.y0, self.x1 - self.x0, self.y1 - self.y0))

@@ -200,6 +200,35 @@ int32 UAITrafficSubsystem::PickModelIndex()
 	return 0;
 }
 
+int32 UAITrafficSubsystem::GetPaintPaletteCount()
+{
+	return UE_ARRAY_COUNT(PaintPalette);
+}
+
+FLinearColor UAITrafficSubsystem::GetPaintPaletteColor(int32 Index)
+{
+	return PaintPalette[FMath::Clamp(Index, 0, GetPaintPaletteCount() - 1)].Color;
+}
+
+int32 UAITrafficSubsystem::PickPaintPaletteIndex(float UnitRandom)
+{
+	float Total = 0.f;
+	for (const FPaintOption& Option : PaintPalette)
+	{
+		Total += Option.Weight;
+	}
+	float Pick = UnitRandom * Total;
+	for (int32 Index = 0; Index < GetPaintPaletteCount(); ++Index)
+	{
+		Pick -= PaintPalette[Index].Weight;
+		if (Pick <= 0.f)
+		{
+			return Index;
+		}
+	}
+	return 0;
+}
+
 FLinearColor UAITrafficSubsystem::PickPaint(const FTrafficVehicleModel& Model)
 {
 	TArray<FString> Parts;

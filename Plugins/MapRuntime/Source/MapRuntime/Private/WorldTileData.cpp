@@ -169,6 +169,33 @@ void ReadBuildings(FByteReader& Reader, TArray<FWorldBuilding>& Buildings)
 	}
 }
 
+/** BTYP: one typing record per BLDG record, in the same order; fills the typing fields of the buildings. */
+void ReadBuildingTypes(FByteReader& Reader, TArray<FWorldBuilding>& Buildings)
+{
+	const uint32 Count = Reader.Get<uint32>();
+	for (uint32 Index = 0; Index < Count && !Reader.HasFailed(); ++Index)
+	{
+		const uint64 OsmId = Reader.Get<uint64>();
+		FWorldBuilding* Building = Buildings.IsValidIndex(Index) && Buildings[Index].OsmId == OsmId ? &Buildings[Index] : nullptr;
+		FWorldBuilding Scratch;
+		FWorldBuilding& Target = Building ? *Building : Scratch;
+		Target.ClassId = Reader.Get<uint8>();
+		Target.TypedRoofShape = Reader.Get<uint8>();
+		Target.PitchDegrees = Reader.Get<uint8>();
+		Target.Storeys = Reader.Get<uint8>();
+		Target.AtticLevels = Reader.Get<uint8>();
+		Target.TypeFlags = Reader.Get<uint8>();
+		Target.TagBits = Reader.Get<uint8>();
+		Target.PlinthMetres = Reader.Get<uint8>() * 0.05f;
+		Target.StoreyHeight = Reader.Get<float>();
+		Target.GroundHeight = Reader.Get<float>();
+		Target.TypedEaveHeight = Reader.Get<float>();
+		Target.RidgeYaw = Reader.Get<float>();
+		Target.FrontYaw = Reader.Get<float>();
+		Target.bTyped = Building != nullptr;
+	}
+}
+
 void ReadPlants(FByteReader& Reader, TArray<FWorldPlant>& Plants)
 {
 	const uint32 Count = Reader.Get<uint32>();
@@ -219,6 +246,7 @@ bool ReadSection(uint32 Tag, TConstArrayView<uint8> Raw, FWorldTileData& Out)
 	case MakeTag("SURF"): ReadSurfaces(Reader, Out.Surfaces); break;
 	case MakeTag("MARK"): ReadMarkings(Reader, Out.Markings); break;
 	case MakeTag("BLDG"): ReadBuildings(Reader, Out.Buildings); break;
+	case MakeTag("BTYP"): ReadBuildingTypes(Reader, Out.Buildings); break;
 	case MakeTag("VEGE"): ReadPlants(Reader, Out.Plants); break;
 	case MakeTag("POIS"): ReadPois(Reader, Out.Pois); break;
 	default: break;

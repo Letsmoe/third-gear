@@ -4,6 +4,8 @@
 #include "Animation/AnimInstance.h"
 #include "Camera/CameraComponent.h"
 #include "CarAudioComponent.h"
+#include "CarLights.h"
+#include "InstrumentCluster.h"
 #include "CarMirrors.h"
 #include "CarMovementComponent.h"
 #include "CarSettings.h"
@@ -82,21 +84,6 @@ ACarPawn::ACarPawn(const FObjectInitializer& ObjectInitializer)
 	Camera->bUsePawnControlRotation = false;
 	Camera->SetFieldOfView(90.f);
 
-	Dashboard = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Dashboard"));
-	Dashboard->SetupAttachment(CarMesh);
-	Dashboard->SetRelativeLocation(Settings->DashboardLocation);
-	Dashboard->SetRelativeRotation(FRotator(15.f, 180.f, 0.f)); // text faces the driver, tilted like an instrument cluster
-	Dashboard->SetHorizontalAlignment(EHTA_Center);
-	Dashboard->SetVerticalAlignment(EVRTA_TextCenter);
-	Dashboard->SetWorldSize(2.4f);
-	Dashboard->SetTextRenderColor(FColor(255, 220, 140));
-	Dashboard->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Dashboard->SetCastShadow(false);
-	if (UMaterialInterface* TextMaterial = Settings->DashboardTextMaterial.LoadSynchronous())
-	{
-		Dashboard->SetTextMaterial(TextMaterial);
-	}
-
 	// Rule violations appear just below the speed readout, small and in warning colour, and fade after a few seconds.
 	RuleMessage = CreateDefaultSubobject<UTextRenderComponent>(TEXT("RuleMessage"));
 	RuleMessage->SetupAttachment(CarMesh);
@@ -117,6 +104,8 @@ ACarPawn::ACarPawn(const FObjectInitializer& ObjectInitializer)
 
 	CarAudio = CreateDefaultSubobject<UCarAudioComponent>(TEXT("CarAudio"));
 	Mirrors = CreateDefaultSubobject<UCarMirrorsComponent>(TEXT("Mirrors"));
+	Lights = CreateDefaultSubobject<UCarLightsComponent>(TEXT("Lights"));
+	Cluster = CreateDefaultSubobject<UInstrumentClusterComponent>(TEXT("Cluster"));
 
 	AutoPossessPlayer = EAutoReceiveInput::Disabled;
 	bUseControllerRotationYaw = false;
@@ -181,6 +170,11 @@ void ACarPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 	};
 	BindPressed(EKeys::SpaceBar, [this]() { bParkingBrake = !bParkingBrake; });
 	BindPressed(EKeys::B, [this]() { KeyGear = -1; });
+	BindPressed(EKeys::L, [this]() { Lights->ToggleLowBeam(); });
+	BindPressed(EKeys::H, [this]() { Lights->ToggleHighBeam(); });
+	BindPressed(EKeys::Z, [this]() { Lights->ToggleIndicator(ECarIndicator::Left); });
+	BindPressed(EKeys::X, [this]() { Lights->ToggleIndicator(ECarIndicator::Right); });
+	BindPressed(EKeys::V, [this]() { Lights->ToggleIndicator(ECarIndicator::Hazard); });
 	const FKey GearKeys[] = {EKeys::N, EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six};
 	for (int32 Gear = 0; Gear < UE_ARRAY_COUNT(GearKeys); ++Gear)
 	{
@@ -199,7 +193,8 @@ void ACarPawn::Tick(float DeltaSeconds)
 	{
 		return;
 	}
-	Movement->SetDriverInput(GatherInput(DeltaSeconds));
+	const FCarDriverInput DriverInput = GatherInput(DeltaSeconds);
+	Movement->SetDriverInput(DriverInput);
 
 	// Chaos puts resting bodies to sleep, which would freeze the engine simulation too.
 	if (!GetMesh()->IsAnyRigidBodyAwake())
@@ -209,7 +204,8 @@ void ACarPawn::Tick(float DeltaSeconds)
 
 	const FCarTelemetry Telemetry = Movement->GetTelemetry();
 	UpdateForceFeedback(Telemetry);
-	UpdateDashboard(Telemetry);
+	Lights->UpdateFromCar(DriverInput, Telemetry);
+	Cluster->UpdateFromCar(DriverInput, Telemetry);
 	if (RuleMessageHideTime > 0.0 && GetWorld()->GetTimeSeconds() > RuleMessageHideTime)
 	{
 		RuleMessage->SetText(FText::GetEmpty());
@@ -287,6 +283,26 @@ FCarDriverInput ACarPawn::GatherInput(float DeltaSeconds)
 			{
 				bParkingBrake = !bParkingBrake;
 			}
+			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->LowBeamButtonIndex))
+			{
+				Lights->ToggleLowBeam();
+			}
+			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->HighBeamButtonIndex))
+			{
+				Lights->ToggleHighBeam();
+			}
+			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->IndicatorLeftButtonIndex))
+			{
+				Lights->ToggleIndicator(ECarIndicator::Left);
+			}
+			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->IndicatorRightButtonIndex))
+			{
+				Lights->ToggleIndicator(ECarIndicator::Right);
+			}
+			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->HazardButtonIndex))
+			{
+				Lights->ToggleIndicator(ECarIndicator::Hazard);
+			}
 			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->RecenterViewButtonIndex))
 			{
 				Recenter();
@@ -334,34 +350,6 @@ void ACarPawn::UpdateForceFeedback(const FCarTelemetry& Telemetry)
 
 	Wheel->SetSteeringForce(Force);
 	Wheel->SetSteeringResistance(Damping, FMath::Min(Friction, Settings->FfbMaxForce));
-}
-
-void ACarPawn::UpdateDashboard(const FCarTelemetry& Telemetry)
-{
-	FString Gear = Telemetry.EngagedGear == -1 ? TEXT("R") : Telemetry.EngagedGear == 0 ? TEXT("N") : FString::FromInt(Telemetry.EngagedGear);
-	FString Status;
-	if (!bIgnitionOn)
-	{
-		Status = TEXT("ENGINE OFF - press E");
-	}
-	else if (!Telemetry.bEngineRunning)
-	{
-		Status = Telemetry.bCranking ? TEXT("starting...") : TEXT("STALLED - press E");
-	}
-	if (Telemetry.bGrinding)
-	{
-		Status += TEXT(" *GRIND* clutch!");
-	}
-	if (bParkingBrake)
-	{
-		Status += TEXT(" (P)");
-	}
-	if (Telemetry.bAbsActive)
-	{
-		Status += TEXT(" ABS");
-	}
-	Dashboard->SetText(FText::FromString(FString::Printf(TEXT("%.0f km/h   %s   %4.0f rpm\n%s"),
-		FMath::Abs(Telemetry.SpeedKmh), *Gear, Telemetry.EngineRpm, *Status)));
 }
 
 void ACarPawn::ToggleEngine()
