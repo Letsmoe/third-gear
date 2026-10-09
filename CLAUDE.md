@@ -170,7 +170,8 @@ Readability and maintainability over cleverness. Match the surrounding code when
   (no Epic launcher on Linux): uses the Epic login stored by Heroic (`~/.config/heroic/legendaryConfig/legendary/user.json`,
   expires after ~1 day → log in again in Heroic) and `legendary-gl` (data root venv `fab`). Output = `Content/<Pack>/…`.
 - `Tools/geodata/` — OSM + terrain sources for the Bergedorf/Vierlande bbox, see `GeoData/REPORT.md`;
-  `Tools/bootstrap/prepare_geodata.py` clips and unpacks them into `<data root>/geodata` (DGM1, bDOM, street trees).
+  `Tools/bootstrap/prepare_geodata.py` clips and unpacks them into `<data root>/geodata` (city OSM extract, DGM5 merged
+  with GLO-30 into `terrain_5m.grid`, street trees as `street_trees.tsv`).
 - `Tools/buildingkit/` — building pieces generated in Blender (four styles) + Hunyuan 3D props; output in
   `<data root>/building_kit`, see its README.
 - Isobar weather plugin: separate local repo `/home/moritz/Documents/personal/isobar` (shared with massif, private),
@@ -186,10 +187,16 @@ Readability and maintainability over cleverness. Match the surrounding code when
   with SteamVR on Linux. Re-run the script if the engine is upgraded.
 
 ## Map pipeline (OSM → Unreal)
-**Streamed world (current).** `Tools/osmimport/.venv/bin/python -I Tools/osmimport/build_world.py <region> [--reuse]`
-compiles OSM + DEM into 250 m `.tgtile` files in `<data root>/world/<region>/` (format: `osmimport/worldtile.py`,
-zlib sections NAME, GRID, SURF, MARK, BLDG, VEGE; `world.json` = index + start pose). bergedorf_core: 64 tiles, 9 MB,
-~3 min fresh, 22 s with `--reuse`. At runtime `AWorldStreamer` (`Plugins/MapRuntime`, placed in `/Game/Maps/Streamed`
+**Streamed world (current).** `WorldBuilder/` (C++, no Unreal dependency; `cmake -S WorldBuilder -B WorldBuilder/Build
+-G Ninja && cmake --build WorldBuilder/Build`, then `WorldBuilder/Build/worldbuilder build <region>`) compiles the city OSM
+extract, the 5 m terrain grid (`geodata/raw/terrain_5m.grid`) and the street tree register into 250 m `.tgtile` files in
+`<data root>/world/<region>/` (format: `osmimport/worldtile.py`, zlib sections NAME, GRID, SURF, MARK, BLDG, BTYP, ROOF,
+VEGE, POIS; `world.json` = index + start pose), plus `traffic.json` and `lanes.json`. Parts: Core (OSM, terrain, rasters,
+geometry, tile format), Streets (the street model), Buildings (typing, roofs), Traffic (furniture, parked cars, lanes),
+World (the per-tile build: each tile works on its own window, so nothing region-wide is ever merged). It is a port of
+the Python pipeline (`Tools/osmimport/build_world.py` and `build_lanes.py`, still the reference and still needed for the
+horizon's `cache.pkl`); `Programs/*Compare.cpp` check each part against it. All of Hamburg (`hamburg`, 27,225 tiles,
+2.9 GB) builds in about 60 s, bergedorf_core in 1 s. At runtime `AWorldStreamer` (`Plugins/MapRuntime`, placed in `/Game/Maps/Streamed`
 by `Scripts/create_streamed_map.py`) meshes tiles on worker threads (`WorldTileMesher`) into `UDynamicMeshComponent`s
 on `AWorldTileActor`s, in three detail levels (near < 400 m 1 m grid, middle < 1.2 km, far < 3 km), spawning in 2 ms
 budgeted steps and enabling collision per ground chunk within 150 m. `-Region=<region>` picks the region
