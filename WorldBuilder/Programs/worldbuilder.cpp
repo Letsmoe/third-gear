@@ -1,6 +1,8 @@
 /**
  * worldbuilder: the command line of the world builder.
  *
+ *   worldbuilder build <region> [--output-name <folder>] [--threads <count>] [--data-root <path>]
+ *       Builds the region's world tiles into <data root>/world/<region or folder>/, as build_world.py.
  *   worldbuilder read-osm <file.osm.pbf> [west south east north]
  *       Reads the OSM features the world uses, optionally only those with a node inside the box (degrees), and
  *       prints how many of each kind there are and how long it took.
@@ -14,6 +16,7 @@
 
 #include "OsmReader.h"
 #include "Projection.h"
+#include "WorldBuild.h"
 
 namespace
 {
@@ -21,7 +24,8 @@ using namespace WorldBuilder;
 
 int PrintUsage()
 {
-	std::fprintf(stderr, "usage: worldbuilder read-osm <file.osm.pbf> [west south east north]\n"
+	std::fprintf(stderr, "usage: worldbuilder build <region> [--output-name <folder>] [--threads <count>] [--data-root <path>]\n"
+						 "       worldbuilder read-osm <file.osm.pbf> [west south east north]\n"
 						 "       worldbuilder project <longitude> <latitude>\n");
 	return 2;
 }
@@ -59,6 +63,43 @@ int ReadOsmCommand(int ArgumentCount, char** Arguments)
 	return 0;
 }
 
+int BuildCommand(int ArgumentCount, char** Arguments)
+{
+	if (ArgumentCount < 3)
+	{
+		return PrintUsage();
+	}
+	const FRegion* Region = FindRegion(Arguments[2]);
+	if (Region == nullptr)
+	{
+		std::fprintf(stderr, "unknown region %s\n", Arguments[2]);
+		return 2;
+	}
+	FBuildOptions Options;
+	for (int Index = 3; Index + 1 < ArgumentCount; Index += 2)
+	{
+		const std::string Option = Arguments[Index];
+		if (Option == "--output-name")
+		{
+			Options.OutputName = Arguments[Index + 1];
+		}
+		else if (Option == "--threads")
+		{
+			Options.Threads = static_cast<unsigned>(std::atoi(Arguments[Index + 1]));
+		}
+		else if (Option == "--data-root")
+		{
+			Options.DataRoot = Arguments[Index + 1];
+		}
+		else
+		{
+			return PrintUsage();
+		}
+	}
+	BuildRegion(*Region, Options);
+	return 0;
+}
+
 int ProjectCommand(int ArgumentCount, char** Arguments)
 {
 	if (ArgumentCount != 4)
@@ -81,6 +122,10 @@ int main(int ArgumentCount, char** Arguments)
 		return PrintUsage();
 	}
 	const std::string Command = Arguments[1];
+	if (Command == "build")
+	{
+		return BuildCommand(ArgumentCount, Arguments);
+	}
 	if (Command == "read-osm")
 	{
 		return ReadOsmCommand(ArgumentCount, Arguments);

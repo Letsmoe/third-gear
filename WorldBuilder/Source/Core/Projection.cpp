@@ -22,6 +22,8 @@ struct FKruegerSeries
 	double RectifyingRadius = 0.0;
 	double Eccentricity = 0.0;
 	std::array<double, 6> Alpha{};
+	/** The coefficients of the inverse series. */
+	std::array<double, 6> Beta{};
 };
 
 FKruegerSeries MakeSeries()
@@ -39,15 +41,44 @@ FKruegerSeries MakeSeries()
 		34729.0 * N5 / 80640.0 - 3418889.0 * N6 / 1995840.0,
 		212378941.0 * N6 / 319334400.0,
 	};
+	Series.Beta = {
+		N / 2.0 - 2.0 * N2 / 3.0 + 37.0 * N3 / 96.0 - N4 / 360.0 - 81.0 * N5 / 512.0 + 96199.0 * N6 / 604800.0,
+		N2 / 48.0 + N3 / 15.0 - 437.0 * N4 / 1440.0 + 46.0 * N5 / 105.0 - 1118711.0 * N6 / 3870720.0,
+		17.0 * N3 / 480.0 - 37.0 * N4 / 840.0 - 209.0 * N5 / 4480.0 + 5569.0 * N6 / 90720.0,
+		4397.0 * N4 / 161280.0 - 11.0 * N5 / 504.0 - 830251.0 * N6 / 7257600.0,
+		4583.0 * N5 / 161280.0 - 108847.0 * N6 / 3991680.0,
+		20648693.0 * N6 / 638668800.0,
+	};
 	return Series;
 }
 
 const FKruegerSeries Series = MakeSeries();
+constexpr double DegreesToRadians = std::numbers::pi / 180.0;
+
+/** The tangent of the geodetic latitude from the tangent of the conformal one, by Newton's method (Karney 2011). */
+double GeodeticTangent(double ConformalTangent)
+{
+	const double E = Series.Eccentricity;
+	const double OneMinusESquared = 1.0 - E * E;
+	double Tau = ConformalTangent;
+	for (int Iteration = 0; Iteration < 5; ++Iteration)
+	{
+		const double Sigma = std::sinh(E * std::atanh(E * Tau / std::sqrt(1.0 + Tau * Tau)));
+		const double Estimate = Tau * std::sqrt(1.0 + Sigma * Sigma) - Sigma * std::sqrt(1.0 + Tau * Tau);
+		const double Step = (ConformalTangent - Estimate) / std::sqrt(1.0 + Estimate * Estimate)
+			* (1.0 + OneMinusESquared * Tau * Tau) / (OneMinusESquared * std::sqrt(1.0 + Tau * Tau));
+		Tau += Step;
+		if (std::abs(Step) < 1e-14)
+		{
+			break;
+		}
+	}
+	return Tau;
+}
 }
 
 FUtmPoint LonLatToUtm(double Longitude, double Latitude)
 {
-	constexpr double DegreesToRadians = std::numbers::pi / 180.0;
 	const double Phi = Latitude * DegreesToRadians;
 	const double Lambda = (Longitude - CentralMeridianDegrees) * DegreesToRadians;
 	const double SinPhi = std::sin(Phi);
@@ -65,6 +96,26 @@ FUtmPoint LonLatToUtm(double Longitude, double Latitude)
 		Eta += Alpha * std::cos(2.0 * Order * XiPrime) * std::sinh(2.0 * Order * EtaPrime);
 	}
 	return {FalseEasting + ScaleFactor * Series.RectifyingRadius * Eta, ScaleFactor * Series.RectifyingRadius * Xi};
+}
+
+FLonLat UtmToLonLat(double East, double North)
+{
+	const double Xi = North / (ScaleFactor * Series.RectifyingRadius);
+	const double Eta = (East - FalseEasting) / (ScaleFactor * Series.RectifyingRadius);
+	double XiPrime = Xi;
+	double EtaPrime = Eta;
+	for (int Order = 1; Order <= 6; ++Order)
+	{
+		const double Beta = Series.Beta[Order - 1];
+		XiPrime -= Beta * std::sin(2.0 * Order * Xi) * std::cosh(2.0 * Order * Eta);
+		EtaPrime -= Beta * std::cos(2.0 * Order * Xi) * std::sinh(2.0 * Order * Eta);
+	}
+	const double SinhEta = std::sinh(EtaPrime);
+	const double CosXi = std::cos(XiPrime);
+	const double ConformalTangent = std::sin(XiPrime) / std::sqrt(SinhEta * SinhEta + CosXi * CosXi);
+	const double Latitude = std::atan(GeodeticTangent(ConformalTangent));
+	const double Longitude = std::atan2(SinhEta, CosXi);
+	return {CentralMeridianDegrees + Longitude / DegreesToRadians, Latitude / DegreesToRadians};
 }
 
 FWorldPoint LonLatToWorld(double Longitude, double Latitude)

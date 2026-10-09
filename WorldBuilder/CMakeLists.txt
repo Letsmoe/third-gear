@@ -5,9 +5,10 @@
 #
 # The libraries have no Unreal dependency, so the game can later compile the same sources into a plugin.
 #
-# Layout: Source/<Part>/ holds one library each (Core: OSM, projection, terrain, geometry and the tile format; Streets:
-# the street model; Buildings: building typing and roofs). Programs/<name>.cpp each become an executable: worldbuilder
-# links everything, Streets*.cpp and Buildings*.cpp only Core and their own part, so the parts build independently.
+# Layout: Source/<Part>/ holds one library each (Core: OSM, projection, terrain, rasters, geometry and the tile format;
+# Streets: the street model; Buildings: building typing and roofs; World: the build of a region's tiles from all of
+# them). Programs/<name>.cpp each become an executable: worldbuilder links everything, Streets*.cpp and Buildings*.cpp
+# only Core and their own part, so the parts build independently.
 cmake_minimum_required(VERSION 3.24)
 project(WorldBuilder LANGUAGES CXX)
 
@@ -65,6 +66,8 @@ world_builder_library(WorldBuilderCore Core Clipper2 ZLIB::ZLIB Threads::Threads
 target_include_directories(WorldBuilderCore SYSTEM PRIVATE ${protozero_SOURCE_DIR}/include ${libosmium_SOURCE_DIR}/include)
 world_builder_library(WorldBuilderStreets Streets WorldBuilderCore)
 world_builder_library(WorldBuilderBuildings Buildings WorldBuilderCore)
+world_builder_library(WorldBuilderWorld World WorldBuilderCore WorldBuilderStreets WorldBuilderBuildings)
+target_compile_definitions(WorldBuilderWorld PRIVATE WORLD_BUILDER_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 file(GLOB Programs CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Programs/*.cpp)
 foreach(Program ${Programs})
@@ -76,6 +79,6 @@ foreach(Program ${Programs})
 	elseif(ProgramName MATCHES "^Buildings")
 		target_link_libraries(${ProgramName} PRIVATE WorldBuilderBuildings)
 	else()
-		target_link_libraries(${ProgramName} PRIVATE WorldBuilderCore WorldBuilderStreets WorldBuilderBuildings)
+		target_link_libraries(${ProgramName} PRIVATE WorldBuilderWorld)
 	endif()
 endforeach()

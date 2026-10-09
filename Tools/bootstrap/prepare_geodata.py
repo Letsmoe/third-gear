@@ -9,6 +9,7 @@ Layout written (what Tools/osmimport expects):
   raw/copernicus_glo30/*.tif                 GLO-30 fallback (links)
   raw/terrain_5m.grid                        the 5 m terrain of the city box plus TERRAIN_GRID_MARGIN, gaps filled
   raw/strassenbaeume/strassenbaeume_bbox.geojson   street tree register of the city bbox (link)
+  raw/strassenbaeume/street_trees.tsv        the register's fields the world builder uses, one tree per line
 
 Every step writes a marker file and is skipped on the next run unless --force is given.
 """
@@ -164,9 +165,27 @@ def prepare_terrain_grid(geodata):
 
 
 def prepare_street_trees(geodata):
-    """Links the street tree register of the city bbox."""
+    """Links the street tree register of the city bbox and writes the table the world builder reads."""
     for path in download_files("street_trees_hamburg", "*.geojson"):
         link(path, os.path.join(geodata, "raw", "strassenbaeume", os.path.basename(path)))
+    write_street_tree_table(os.path.join(geodata, "raw", "strassenbaeume", "strassenbaeume_bbox.geojson"),
+                            os.path.join(geodata, "raw", "strassenbaeume", "street_trees.tsv"))
+
+
+def write_street_tree_table(geojson_path, table_path):
+    """One line per tree: tree id, UTM east and north, German genus, crown diameter and trunk girth (0 when
+    unknown), tab-separated, in the register's order."""
+    import json
+    with open(geojson_path) as source:
+        features = json.load(source)["features"]
+    with open(table_path + ".part", "w") as output:
+        for feature in features:
+            east, north = feature["geometry"]["coordinates"][0][:2]
+            properties = feature["properties"]
+            genus = (properties.get("gattung_deutsch") or "").replace("\t", " ")
+            output.write(f"{properties.get('baumid') or 0}\t{east:.3f}\t{north:.3f}\t{genus}\t"
+                         f"{properties.get('kronendurchmesser') or 0}\t{properties.get('stammumfang') or 0}\n")
+    os.replace(table_path + ".part", table_path)
 
 
 STEPS = [
@@ -174,7 +193,7 @@ STEPS = [
     ("dgm5", prepare_terrain),
     ("glo30_city", prepare_glo30),
     ("terrain_grid", prepare_terrain_grid),
-    ("street_trees_city", prepare_street_trees),
+    ("street_tree_table", prepare_street_trees),
 ]
 
 

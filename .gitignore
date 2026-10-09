@@ -7,7 +7,7 @@
 Makefile
 CMakeLists.txt
 !/WorldBuilder/CMakeLists.txt
-/WorldBuilder/Build
+/WorldBuilder/Build*
 .idea/
 __pycache__/
 .claude/

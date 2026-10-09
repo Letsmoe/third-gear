@@ -22,8 +22,17 @@ struct FUtmPoint
 	double North = 0.0;
 };
 
+struct FLonLat
+{
+	double Longitude = 0.0;
+	double Latitude = 0.0;
+};
+
 /** UTM zone 32N easting and northing of a WGS84 longitude and latitude in degrees (Krüger series to n^6). */
 FUtmPoint LonLatToUtm(double Longitude, double Latitude);
+
+/** WGS84 longitude and latitude in degrees of a UTM zone 32N easting and northing (Krüger series to n^6). */
+FLonLat UtmToLonLat(double East, double North);
 
 /** World x (east) and y (south) of a WGS84 longitude and latitude in degrees. */
 FWorldPoint LonLatToWorld(double Longitude, double Latitude);
