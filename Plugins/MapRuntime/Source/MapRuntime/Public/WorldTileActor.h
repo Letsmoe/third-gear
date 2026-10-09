@@ -59,7 +59,7 @@ public:
 		bool bVisible = true);
 
 	/** Adds the instances of one building kit piece (transforms relative to the tile); null meshes are skipped. */
-	void AddKitInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms);
+	void AddKitInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow);
 
 	/**
 	 * Adds instances of one plant model (transforms relative to the tile). WindMaterials, when not empty, replace the

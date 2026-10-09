@@ -94,11 +94,11 @@ void AWorldTileActor::AddBuildings(UE::Geometry::FDynamicMesh3&& Mesh, const TAr
 	}
 }
 
-void AWorldTileActor::AddKitInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms)
+void AWorldTileActor::AddKitInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow)
 {
 	if (Mesh && !Transforms.IsEmpty())
 	{
-		AddInstances(Mesh, Transforms, 0);
+		AddInstances(Mesh, Transforms, 0)->SetCastShadow(bCastShadow);
 	}
 }
 

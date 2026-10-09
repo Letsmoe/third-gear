@@ -676,6 +676,23 @@ namespace
 {
 constexpr int32 KitPiecesPerStepCount = 6;
 
+/**
+ * Big pieces shadow the street; the small trim (sills, bands, frames, gutters, steps) is too small to show in a shadow
+ * and costs a lot in the virtual shadow maps, where every instance is rendered into several pages.
+ */
+bool PieceCastsShadow(const FName& PieceName)
+{
+	const FString Name = PieceName.ToString();
+	for (const TCHAR* Big : {TEXT("_Wall_"), TEXT("_Corner_"), TEXT("Cornice"), TEXT("RoofEdge"), TEXT("Chimney"), TEXT("Dormer"), TEXT("Balcony"), TEXT("Canopy")})
+	{
+		if (Name.Contains(Big))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 /** Kit meshes by piece name, loaded on first use and kept alive; a missing mesh is remembered as null. */
 UStaticMesh* FindKitMeshCached(const FName& PieceName)
 {
@@ -703,7 +720,7 @@ bool AddKitInstancesStep(AWorldTileActor& Actor, const FWorldKitInstances& Kit, 
 	const int32 Last = FMath::Min(First + KitPiecesPerStepCount, Names.Num());
 	for (int32 Index = First; Index < Last; ++Index)
 	{
-		Actor.AddKitInstances(FindKitMeshCached(Names[Index]), Kit.Pieces[Names[Index]]);
+		Actor.AddKitInstances(FindKitMeshCached(Names[Index]), Kit.Pieces[Names[Index]], PieceCastsShadow(Names[Index]));
 	}
 	return Last >= Names.Num();
 }
