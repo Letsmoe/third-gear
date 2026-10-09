@@ -58,6 +58,10 @@
 		{
 			"Name": "MapRuntime",
 			"Enabled": true
+		},
+		{
+			"Name": "AndroidFileServer",
+			"Enabled": false
 		}
 	]
 }
