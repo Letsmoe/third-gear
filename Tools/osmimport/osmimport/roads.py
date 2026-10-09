@@ -10,71 +10,45 @@ from scipy import ndimage
 
 from .dem import HeightGrid
 from .osm import OsmData, Way
+from .streets.cross_section import CrossSection, RoadContext, cross_section
+from .streets import assumptions, dual_carriageways, road_lines
+from .streets.tags import is_oneway, number  # noqa: F401 (is_oneway: used as roads.is_oneway)
 
-# Typical German carriageway widths (m) when OSM has no width tag. (per lane, default lanes two-way, one-way)
-CLASS_DEFAULTS = {
-    "motorway": (3.75, 2, 2), "motorway_link": (3.5, 1, 1),
-    "trunk": (3.5, 2, 2), "trunk_link": (3.5, 1, 1),
-    "primary": (3.25, 2, 2), "primary_link": (3.25, 1, 1),
-    "secondary": (3.25, 2, 1), "secondary_link": (3.25, 1, 1),
-    "tertiary": (3.0, 2, 1), "tertiary_link": (3.0, 1, 1),
-    "unclassified": (2.75, 2, 1), "residential": (2.75, 2, 1), "road": (2.75, 2, 1),
-    "living_street": (2.5, 2, 1), "service": (3.0, 1, 1),
-}
 # Higher rank wins where surfaces overlap (junction area belongs to the major road).
-CLASS_RANK = {k: i for i, k in enumerate([
-    "service", "living_street", "road", "residential", "unclassified", "tertiary_link", "tertiary", "secondary_link",
-    "secondary", "primary_link", "primary", "trunk_link", "trunk", "motorway_link", "motorway"])}
+CLASS_RANK = assumptions.ROAD_CLASS_RANK
 PAVEMENT_CLASSES = {"primary", "secondary", "tertiary", "residential", "unclassified", "living_street", "primary_link",
                     "secondary_link", "tertiary_link"}
-MARKED_CLASSES = {"motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link", "secondary",
-                  "secondary_link", "tertiary", "tertiary_link"}
 COBBLE_SURFACES = {"sett", "cobblestone", "unhewn_cobblestone", "cobblestone:flattened"}
 PAVER_SURFACES = {"paving_stones", "paving_stones:30", "concrete:plates", "grass_paver"}
 
 KERB_HEIGHT = 0.12
 PAVEMENT_WIDTH = 2.5
-FILLET_RADIUS = 4.0
+FILLET_RADIUS = assumptions.CORNER_RADIUS
 MARKING_LIFT = 0.008
 
 
-def _float(value, default=None):
-    if value is None:
-        return default
-    try:
-        return float(str(value).split(";")[0].replace(",", ".").replace("m", "").strip())
-    except ValueError:
-        return default
+# Context of the ways the viewers and checks look at one by one, without buildings around them.
+URBAN = RoadContext(urban=True)
 
 
-def is_oneway(tags) -> bool:
-    return tags.get("oneway") in {"yes", "1", "true", "-1"} or tags.get("junction") in {"roundabout", "circular"} \
-        or tags.get("highway") in {"motorway", "motorway_link"}
+def road_context(way: Way, buildings_union) -> RoadContext:
+    """What a road's surroundings say about its cross-section."""
+    return RoadContext(urban=_is_urban(way, buildings_union))
 
 
-def road_width(tags) -> float:
-    width = _float(tags.get("width"))
-    if width and 2.0 <= width <= 30.0:
-        return width
-    lane_width, lanes_two_way, lanes_one_way = CLASS_DEFAULTS.get(tags.get("highway"), (2.75, 2, 1))
-    oneway = is_oneway(tags)
-    lanes = _float(tags.get("lanes"))
-    if not lanes:
-        lanes = lanes_one_way if oneway else lanes_two_way
-    width = lanes * lane_width
-    if tags.get("highway") == "service" and tags.get("service") in {"driveway", "parking_aisle"}:
-        width = 3.0
-    if oneway and lanes == 1:
-        width = max(width, 3.5)
-    return width
+def road_section(tags, context: RoadContext = URBAN) -> CrossSection:
+    """The road's cross-section: its strips from kerb to kerb (streets.cross_section)."""
+    return cross_section(tags, context)
+
+
+def road_width(tags, context: RoadContext = URBAN) -> float:
+    """The carriageway width from kerb to kerb."""
+    return cross_section(tags, context).width()
 
 
 def road_lanes(tags) -> int:
-    lanes = _float(tags.get("lanes"))
-    if lanes:
-        return int(lanes)
-    _, two_way, one_way = CLASS_DEFAULTS.get(tags.get("highway"), (2.75, 2, 1))
-    return one_way if is_oneway(tags) else two_way
+    """The number of travel lanes for motor traffic, both directions together."""
+    return cross_section(tags, URBAN).lane_count()
 
 
 def surface_kind(tags) -> str:
@@ -89,7 +63,8 @@ def surface_kind(tags) -> str:
 @dataclass
 class RoadNetwork:
     ways: list
-    widths: dict
+    sections: dict  # way id -> CrossSection
+    widths: dict  # way id -> carriageway width
     surfaces: dict  # kind -> polygon (ground level, disjoint)
     ground: shapely.Geometry  # union of all ground road surfaces
     bridges: list  # (way, polygon)
@@ -101,11 +76,11 @@ class RoadNetwork:
 
 def _is_ground(way: Way) -> bool:
     t = way.tags
-    return t.get("bridge") in (None, "no") and _float(t.get("layer"), 0) >= 0 and t.get("tunnel") in (None, "no", "building_passage")
+    return t.get("bridge") in (None, "no") and number(t.get("layer"), 0) >= 0 and t.get("tunnel") in (None, "no", "building_passage")
 
 
 def _is_tunnel(way: Way) -> bool:
-    return way.tags.get("tunnel") not in (None, "no", "building_passage") or _float(way.tags.get("layer"), 0) < 0
+    return way.tags.get("tunnel") not in (None, "no", "building_passage") or number(way.tags.get("layer"), 0) < 0
 
 
 def node_degrees(ways) -> Counter:
@@ -120,19 +95,25 @@ def node_degrees(ways) -> Counter:
 
 def build(osm: OsmData, dem: HeightGrid, buildings_union=None) -> RoadNetwork:
     ways = [w for w in osm.roads if not _is_tunnel(w) and len(w.xy) >= 2]
-    widths = {w.id: road_width(w.tags) for w in ways}
-    ground_ways = [w for w in ways if _is_ground(w)]
+    contexts = {w.id: road_context(w, buildings_union) for w in ways}
+    sections = {w.id: cross_section(w.tags, contexts[w.id]) for w in ways}
+    widths = {way_id: section.width() for way_id, section in sections.items()}
+    ground_ways = dual_carriageways.straighten([w for w in ways if _is_ground(w)], sections)
     bridge_ways = [w for w in ways if not _is_ground(w)]
+    ways = ground_ways + bridge_ways
+    lines = road_lines.build(ground_ways, sections, {way_id: context.urban for way_id, context in contexts.items()},
+                             _signal_points(osm))
+    _take_corrected_sections(lines, sections, widths)
 
     # --- surface polygons per kind, major road classes win overlaps ---
-    strips = {}
-    for w in ground_ways:
-        strips[w.id] = shapely.buffer(shapely.LineString(w.xy), widths[w.id] / 2, cap_style="round", join_style="round",
-                                      quad_segs=4)
-    ground = shapely.union_all(list(strips.values()))
-    # Fillet concave corners (kerb radii at junctions) without growing the outline elsewhere.
-    ground = ground.buffer(FILLET_RADIUS, quad_segs=4).buffer(-FILLET_RADIUS, quad_segs=4).union(ground)
-    ground = shapely.make_valid(ground)
+    strips = _way_surfaces(lines)
+    gore_surfaces = [shapely.make_valid(shapely.Polygon(gore.paved)) for gore in lines.gores]
+    ground = shapely.union_all(list(strips.values()) + gore_surfaces)
+    junction_zones = _junction_zones(ground_ways, widths)
+    # Fillet concave corners (kerb radii at junctions) without growing the outline elsewhere. Only inside junctions:
+    # along the road the same closing would pave over medians and islands narrower than twice the radius.
+    closed = ground.buffer(FILLET_RADIUS, quad_segs=4).buffer(-FILLET_RADIUS, quad_segs=4)
+    ground = shapely.make_valid(ground.union(closed.difference(ground).intersection(junction_zones)))
 
     by_kind = defaultdict(list)
     for w in sorted(ground_ways, key=lambda w: CLASS_RANK.get(w.tags.get("highway"), 0), reverse=True):
@@ -162,22 +143,84 @@ def build(osm: OsmData, dem: HeightGrid, buildings_union=None) -> RoadNetwork:
     # --- pavements along urban roads ---
     pavement = _pavements(ground_ways, widths, ground, buildings_union, osm)
 
-    degree = node_degrees(ground_ways)
-    node_xy = {}
-    for w in ground_ways:
-        for nid, xy in zip(w.node_ids, w.xy):
-            node_xy[nid] = xy
-    zones = []
-    for nid, deg in degree.items():
-        if deg >= 3:
-            r = max((widths[w.id] for w in ground_ways if nid in w.node_ids), default=6.0) * 0.6 + 3.0
-            zones.append(shapely.Point(node_xy[nid]).buffer(r, quad_segs=6))
-    junction_zones = shapely.union_all(zones) if zones else shapely.Polygon()
-
-    net = RoadNetwork(ways=ways, widths=widths, surfaces=surfaces, ground=ground, bridges=bridges, pavement=pavement,
-                      height=height, junction_zones=junction_zones)
-    net.markings = build_markings(ground_ways, widths, junction_zones, ground)
+    net = RoadNetwork(ways=ways, sections=sections, widths=widths, surfaces=surfaces, ground=ground, bridges=bridges,
+                      pavement=pavement, height=height, junction_zones=junction_zones)
+    net.markings = build_markings(lines, ground)
     return net
+
+
+def _gore_markings(gores) -> list:
+    """(kind, points) of the gores' hatching and of their outlines where the carriageways paint no edge line."""
+    result = []
+    for gore in gores:
+        result += [("edge", line) for line in gore.outline]
+        area = shapely.make_valid(shapely.Polygon(gore.hatched))
+        for stripe in _hatch_stripes(area):
+            result.append(("hatch", np.asarray(stripe.coords)))
+    return result
+
+
+def _hatch_stripes(area) -> list:
+    """Straight stripes across an area at HATCH_ANGLE_DEGREES to its long axis, HATCH_SPACING apart."""
+    if area.is_empty or area.area < 1.0:
+        return []
+    corners = np.asarray(area.minimum_rotated_rectangle.exterior.coords)[:4]
+    sides = [corners[1] - corners[0], corners[2] - corners[1]]
+    axis = max(sides, key=lambda side: float(np.hypot(*side)))
+    axis = axis / np.hypot(*axis)
+    angle = np.radians(assumptions.HATCH_ANGLE_DEGREES)
+    cosine, sine = np.cos(angle), np.sin(angle)
+    along = np.array([axis[0] * cosine - axis[1] * sine, axis[0] * sine + axis[1] * cosine])
+    across = np.array([-along[1], along[0]])
+    points = np.asarray(area.envelope.exterior.coords)
+    centre = points.mean(axis=0)
+    reach = float(np.hypot(*(points.max(axis=0) - points.min(axis=0))))
+    stripes = []
+    for offset in np.arange(-reach, reach, assumptions.HATCH_SPACING):
+        base = centre + across * offset
+        clipped = shapely.LineString([base - along * reach, base + along * reach]).intersection(area)
+        stripes += [part for part in getattr(clipped, "geoms", [clipped])
+                    if isinstance(part, shapely.LineString) and part.length > 0.3]
+    return stripes
+
+
+def _take_corrected_sections(lines, sections: dict, widths: dict):
+    """Ways made of a single segment take its cross-section after road_lines' corrections (in place), so furniture,
+    parking and AI lanes see the same road as the surface."""
+    segments_of = defaultdict(list)
+    for segment in lines.network.segments:
+        segments_of[segment.way.id].append(segment)
+    for way_id, segments in segments_of.items():
+        if len(segments) == 1:
+            sections[way_id] = segments[0].section
+            widths[way_id] = segments[0].section.width()
+
+
+def _signal_points(osm: OsmData) -> list:
+    """(x, y) of the traffic signal nodes."""
+    return [(point.x, point.y) for point in osm.points if point.tags.get("highway") == "traffic_signals"]
+
+
+def _way_surfaces(lines) -> dict:
+    """way id -> carriageway polygon: the union of its segments' surfaces."""
+    pieces = defaultdict(list)
+    for layout in lines.layouts:
+        pieces[layout.segment.way.id].append(_segment_surface(lines, layout))
+    return {way_id: shapely.union_all(parts) for way_id, parts in pieces.items()}
+
+
+def _segment_surface(lines, layout):
+    """A segment's carriageway: a round-capped band of its width, or where it tapers, the polygon between its
+    tapered kerbs closed with a disc of the width at each end (which fills the outer side of bends at the node)."""
+    segment = layout.segment
+    centre = shapely.LineString(segment.xy)
+    if layout.start.taper <= 0 and layout.end.taper <= 0:
+        return shapely.buffer(centre, segment.section.width() / 2, cap_style="round", join_style="round", quad_segs=4)
+    left, right = lines.kerbs(layout)
+    band = shapely.make_valid(shapely.Polygon(np.concatenate([left, right[::-1]])))
+    caps = [shapely.Point(segment.xy[0]).buffer(layout.width_at_end(True) / 2, quad_segs=4),
+            shapely.Point(segment.xy[-1]).buffer(layout.width_at_end(False) / 2, quad_segs=4)]
+    return shapely.union_all([band] + caps)
 
 
 def _road_height_field(dem: HeightGrid, ground) -> HeightGrid:
@@ -207,7 +250,7 @@ def _road_height_field(dem: HeightGrid, ground) -> HeightGrid:
 def _is_urban(way: Way, buildings_union) -> bool:
     if buildings_union is None:
         return True
-    speed = _float(way.tags.get("maxspeed"))
+    speed = number(way.tags.get("maxspeed"))
     if speed and speed >= 70:
         return False
     return shapely.dwithin(buildings_union, shapely.LineString(way.xy), 35.0)
@@ -242,43 +285,31 @@ def _pavements(ground_ways, widths, ground, buildings_union, osm: OsmData):
     return pavement
 
 
-def build_markings(ground_ways, widths, junction_zones, ground):
-    """Returns a list of (kind, LineString) in world xy. kind: 'dash_urban', 'dash_rural', 'solid', 'edge'."""
-    markings = []
-    keep_out = junction_zones
+def _junction_zones(ground_ways, widths):
+    """Discs around every junction node (three or more road ends), sized by the widest road there."""
+    degree = node_degrees(ground_ways)
+    node_xy = {}
     for w in ground_ways:
-        t = w.tags
-        hw = t.get("highway")
-        if hw not in MARKED_CLASSES or t.get("lane_markings") == "no" or t.get("area") == "yes":
+        for nid, xy in zip(w.node_ids, w.xy):
+            node_xy[nid] = xy
+    zones = []
+    for nid, deg in degree.items():
+        if deg >= 3:
+            r = max((widths[w.id] for w in ground_ways if nid in w.node_ids), default=6.0) * 0.6 + 3.0
+            zones.append(shapely.Point(node_xy[nid]).buffer(r, quad_segs=6))
+    return shapely.union_all(zones) if zones else shapely.Polygon()
+
+
+def build_markings(lines, ground):
+    """(kind, LineString) of every painted line (road_lines: lane, centre and edge lines with their tapers and junction
+    cuts, and the guide lines through junctions), kept on the road surface."""
+    markings = []
+    inside = ground.buffer(-0.1)
+    for kind, xy in lines.painted() + _gore_markings(lines.gores):
+        if len(xy) < 2:
             continue
-        width = widths[w.id]
-        lanes = road_lanes(t)
-        line = shapely.LineString(w.xy)
-        if line.length < 8:
-            continue
-        speed = _float(t.get("maxspeed"), 50)
-        rural = speed >= 70
-        dash = "dash_rural" if rural else "dash_urban"
-        oneway = is_oneway(t)
-        lines = []
-        if not oneway and lanes >= 2 and width >= 5.0:
-            # centre line; multi-lane two-way roads get lane lines on each side as well
-            lines.append((dash, line))
-            per_side = lanes // 2
-            lane_w = width / max(lanes, 1)
-            for i in range(1, per_side):
-                for side in (1, -1):
-                    lines.append((dash, shapely.offset_curve(line, side * i * lane_w)))
-        elif oneway and lanes >= 2:
-            lane_w = width / lanes
-            for i in range(1, lanes):
-                lines.append((dash, shapely.offset_curve(line, -width / 2 + i * lane_w)))
-        if hw in {"motorway", "trunk", "primary", "motorway_link", "trunk_link"} or (rural and width >= 5.5):
-            for side in (1, -1):
-                lines.append(("edge", shapely.offset_curve(line, side * (width / 2 - 0.35))))
-        for kind, geom in lines:
-            clipped = geom.difference(keep_out).intersection(ground.buffer(-0.1))
-            for part in getattr(clipped, "geoms", [clipped]):
-                if isinstance(part, shapely.LineString) and part.length > 2.0:
-                    markings.append((kind, part))
+        clipped = shapely.LineString(xy).intersection(inside)
+        for part in getattr(clipped, "geoms", [clipped]):
+            if isinstance(part, shapely.LineString) and part.length > 2.0:
+                markings.append((kind, part))
     return markings

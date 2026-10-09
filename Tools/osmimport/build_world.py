@@ -29,7 +29,10 @@ from osmimport import building_types, buildings, canopy, roofs, dem, furniture, 
 from osmimport import worldtile  # noqa: E402
 
 GRID_CELL = 1.0
-MARKING_STYLES = {"dash_urban": 0, "dash_rural": 1, "solid": 2, "edge": 3}
+MARKING_STYLES = {"dash_urban": 0, "dash_rural": 1, "solid": 2, "edge": 3, "guide": 4, "edge_guide": 5,
+                  "cycle_exclusive": 6, "cycle_advisory": 7, "cycle_furt": 8,
+                  "turn_lane_dash": 9, "turn_lane_solid": 10,
+                  "hatch": 11}
 PATH_LIFT = 0.04
 ATTRIBUTION = [
     "© OpenStreetMap contributors (ODbL)",
@@ -131,6 +134,7 @@ ZEBRA_BAR_WIDTH = 0.5
 ZEBRA_BAR_LENGTH = 3.5
 ZEBRA_BAR_LENGTH_WIDE_ROAD = 4.0
 ZEBRA_WIDE_ROAD = 7.5
+ZEBRA_WIDTH_SLACK = 1.0
 
 
 def zebra_carriageway(net):
@@ -141,7 +145,10 @@ def zebra_carriageway(net):
 
 def zebra_spans(zebra, carriageway):
     """Lateral intervals (lo, hi), metres across the road from the crossing node, where the crossing line runs over
-    the carriageway within reach of the node. A split carriageway gives one interval per side of the island."""
+    the carriageway within reach of the node. A split carriageway gives one interval per side of the island.
+    The intervals end ZEBRA_WIDTH_SLACK beyond the crossed road's own width: where a slip lane opens into a junction
+    the carriageway goes on across the whole junction, but the zebra only crosses the slip lane."""
+    limit = zebra["width"] / 2 + ZEBRA_WIDTH_SLACK
     ux, uy = zebra["direction"]
     nx, ny = -uy, ux
     reach = 25.0
@@ -153,10 +160,9 @@ def zebra_spans(zebra, carriageway):
         if not isinstance(part, shapely.LineString) or part.is_empty:
             continue
         lateral = sorted((c[0] - zebra["x"]) * nx + (c[1] - zebra["y"]) * ny for c in part.coords)
-        if lateral[0] - 0.01 > 12.0 or lateral[-1] + 0.01 < -12.0:
-            continue
-        if lateral[-1] - lateral[0] >= ZEBRA_BAR_WIDTH:
-            spans.append((lateral[0], lateral[-1]))
+        low, high = max(lateral[0], -limit), min(lateral[-1], limit)
+        if high - low >= ZEBRA_BAR_WIDTH:
+            spans.append((low, high))
     return spans
 
 
@@ -215,22 +221,33 @@ def poi_ground_height(x, y, net, ground, on_pavement):
     return float(ground.sample(x, y))
 
 
+STOP_LINE_WIDTH = 0.5
+
+
+def stop_line_geometry(approach):
+    """Centre line of the painted stop line (Haltlinie) of a signal approach, just before the signal's line of sight,
+    or None when the approach is too narrow for one."""
+    x0, y0, x1, y1 = approach["stop_line"]
+    length = float(np.hypot(x1 - x0, y1 - y0))
+    if length < 1.0:
+        return None
+    ux, uy = (x1 - x0) / length, (y1 - y0) / length
+    back_x, back_y = -approach["direction"][0] * 0.25, -approach["direction"][1] * 0.25
+    inset = 0.15
+    return shapely.LineString([(x0 + ux * inset + back_x, y0 + uy * inset + back_y),
+                               (x1 - ux * inset + back_x, y1 - uy * inset + back_y)])
+
+
 def write_stop_lines(writers, junctions):
-    """Painted stop lines (Haltlinie, 0.5 m wide) across each approach, just before the signal's line of sight."""
+    """Painted stop lines (0.5 m wide) across each approach into the tiles they touch."""
     for junction in junctions:
         for approach in junction["approaches"]:
-            x0, y0, x1, y1 = approach["stop_line"]
-            length = float(np.hypot(x1 - x0, y1 - y0))
-            if length < 1.0:
+            line = stop_line_geometry(approach)
+            if line is None:
                 continue
-            ux, uy = (x1 - x0) / length, (y1 - y0) / length
-            back_x, back_y = -approach["direction"][0] * 0.25, -approach["direction"][1] * 0.25
-            inset = 0.15
-            line = shapely.LineString([(x0 + ux * inset + back_x, y0 + uy * inset + back_y),
-                                       (x1 - ux * inset + back_x, y1 - uy * inset + back_y)])
             for writer in writers.values():
                 if writer.box.intersects(line):
-                    writer.add_marking("Marking_White", MARKING_STYLES["solid"], line, 0.5, None)
+                    writer.add_marking("Marking_White", MARKING_STYLES["solid"], line, STOP_LINE_WIDTH, None)
 
 
 def write_furniture(writers, area, builder, net, ground):

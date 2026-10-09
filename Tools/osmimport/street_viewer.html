@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Third Gear street viewer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  html, body, #map { height: 100%; margin: 0; }
+  .legend { background: rgba(255, 255, 255, 0.92); padding: 6px 10px; font: 12px sans-serif; line-height: 18px; }
+  .legend i { display: inline-block; width: 22px; height: 0; margin-right: 6px; vertical-align: middle; border-top-width: 3px; }
+  .legend b { display: inline-block; width: 10px; height: 10px; margin: 0 12px 0 6px; border-radius: 50%; vertical-align: middle; border: 1px solid #000; }
+  .tags { font: 11px monospace; border-collapse: collapse; }
+  .tags td { padding: 0 6px 0 0; vertical-align: top; }
+  .tags tr.derived td { color: #06c; }
+  .sign-label { background: #c00; color: #fff; border: 0; font: 10px sans-serif; padding: 0 3px; box-shadow: none; }
+  .sign-label::before { display: none; }
+  .survey-label { background: #1565c0; }
+  #gameStatus { position: absolute; top: 36px; left: 60px; z-index: 1000; background: rgba(255,255,255,0.9); font: 12px sans-serif; padding: 3px 8px; white-space: pre; }
+  #status { position: absolute; top: 10px; left: 60px; z-index: 1000; background: rgba(255,255,255,0.9); font: 12px sans-serif; padding: 3px 8px; white-space: pre; }
+  #reload, #scene3d { position: absolute; left: 10px; z-index: 1000; font: 13px sans-serif; padding: 4px 8px; cursor: pointer; }
+  #reload { top: 80px; }
+  #scene3d { top: 112px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<button id="reload" title="Rebuild the layers from the current code (R)">Reload layers</button>
+<button id="scene3d" title="Open a 3D reconstruction of the view (at most 1 km square around its centre)">3D view</button>
+<div id="status">loading…</div>
+<div id="gameStatus"></div>
+<script>
+// Line styles by feature style; dashArray in screen pixels.
+const LINE_STYLES = {
+  centre:           { color: "#ffffff", weight: 1, opacity: 0.7 },
+  carriageway_edge: { color: "#ffd400", weight: 2, dashArray: "6 4" },
+  lane_divider:     { color: "#33ffff", weight: 1.5 },
+  cycle_lane:       { color: "#2f7bff", weight: 3 },
+  cycle_track:      { color: "#2f7bff", weight: 3, dashArray: "5 4" },
+  shared_lane:      { color: "#2f7bff", weight: 2, dashArray: "1 4" },
+  cycleway:         { color: "#2f7bff", weight: 2.5 },
+  footway:          { color: "#dddddd", weight: 1.5, dashArray: "3 3" },
+  crossing_way:     { color: "#ff3fd5", weight: 3 },
+  railway:          { color: "#111111", weight: 3, dashArray: "8 6" },
+  bridge:           { color: "#99bbee", weight: 1.5, fillOpacity: 0.35 },
+  road_area:        { color: "#ff8c00", weight: 1, fillOpacity: 0.25 },
+  water_area:       { color: "#00bfa5", weight: 1, fillColor: "#00bfa5", fillOpacity: 0.4 },
+  waterway:         { color: "#00bfa5", weight: 3 },
+  game_asphalt:     { color: "#000", weight: 0, fillColor: "#30343a", fillOpacity: 0.55 },
+  game_pavers:      { color: "#000", weight: 0, fillColor: "#7a5a46", fillOpacity: 0.55 },
+  game_cobble:      { color: "#000", weight: 0, fillColor: "#6b4a3a", fillOpacity: 0.55 },
+  game_bridge:      { color: "#99bbee", weight: 1, fillColor: "#30343a", fillOpacity: 0.55 },
+  game_pavement:    { color: "#ffffff", weight: 1, fillColor: "#c9c3b8", fillOpacity: 0.45 },
+  game_marking:     { color: "#ffffff", weight: 0, fillColor: "#ffffff", fillOpacity: 1.0 },
+  survey_carriageway: { color: "#ff2d2d", weight: 2, fillColor: "#ff2d2d", fillOpacity: 0.12 },
+  survey_parking:   { color: "#ff9f1a", weight: 1, fillColor: "#ff9f1a", fillOpacity: 0.2 },
+  survey_cycle:     { color: "#c2185b", weight: 1, fillColor: "#e91e63", fillOpacity: 0.35 },
+  survey_footway:   { color: "#9e9e9e", weight: 0.5, fillColor: "#e0e0e0", fillOpacity: 0.15 },
+  survey_green:     { color: "#2e7d32", weight: 0.5, fillColor: "#43a047", fillOpacity: 0.3 },
+  survey_shared:    { color: "#7b1fa2", weight: 1, fillColor: "#ab47bc", fillOpacity: 0.2 },
+  survey_kerb:      { color: "#ffffff", weight: 2 },
+  building:         { color: "#222", weight: 1, fillOpacity: 0.45 },
+};
+const POINT_STYLES = {
+  traffic_signals: { color: "#000", fillColor: "#ff2020", radius: 6 },
+  stop:            { color: "#fff", fillColor: "#ff2020", radius: 6 },
+  give_way:        { color: "#ff2020", fillColor: "#ffffff", radius: 6 },
+  mini_roundabout: { color: "#000", fillColor: "#2f7bff", radius: 5 },
+  crossing:        { color: "#000", fillColor: "#ff3fd5", radius: 5 },
+  street_lamp:     { color: "#665", fillColor: "#fff38a", radius: 3 },
+  bus_stop:        { color: "#000", fillColor: "#22ee22", radius: 5 },
+  game_signal_head: { color: "#fff", fillColor: "#ff7a00", radius: 5 },
+  game_sign:        { color: "#fff", fillColor: "#ff7a00", radius: 4 },
+  game_lamp:        { color: "#000", fillColor: "#ffe08a", radius: 3 },
+  survey_signal:    { color: "#ff2020", fillColor: "#000", radius: 5 },
+  survey_lamp:      { color: "#ffe08a", fillColor: "#000", radius: 3 },
+  survey_sign:      { color: "#fff", fillColor: "#1565c0", radius: 4 },
+  traffic_sign:    { color: "#fff", fillColor: "#cc0000", radius: 4 },
+};
+const LEGEND = [
+  ["line", "carriageway_edge", "carriageway edge (from width or lanes)"],
+  ["line", "lane_divider", "lane divider"],
+  ["line", "cycle_lane", "cycle lane on the road"],
+  ["line", "cycle_track", "cycle track beside the road"],
+  ["line", "cycleway", "separate cycleway"],
+  ["line", "footway", "footway"],
+  ["line", "crossing_way", "crossing"],
+  ["line", "railway", "railway"],
+  ["line", "waterway", "water"],
+  ["point", "traffic_signals", "traffic signals"],
+  ["point", "give_way", "give way"],
+  ["point", "crossing", "crossing node"],
+  ["point", "traffic_sign", "traffic sign"],
+  ["point", "bus_stop", "bus stop"],
+  ["point", "game_signal_head", "game: signal pole, sign"],
+  ["point", "game_lamp", "game: lamp"],
+  ["point", "survey_signal", "survey: signal pole"],
+  ["point", "survey_lamp", "survey: lamp"],
+  ["point", "survey_sign", "survey: sign"],
+];
+
+// Every pane has its own canvas covering the whole map, and a canvas swallows every click on it. A click that hits
+// none of a canvas's own shapes is passed on to whatever lies below it, so the layers underneath stay clickable.
+const canvasOnClick = L.Canvas.prototype._onClick;
+L.Canvas.include({
+  _onClick(event) {
+    if (event.type !== "click" || this._hitsOwnLayer(event)) {
+      canvasOnClick.call(this, event);
+      return;
+    }
+    this._container.style.pointerEvents = "none";
+    const below = document.elementFromPoint(event.clientX, event.clientY);
+    this._container.style.pointerEvents = "";
+    if (below && below.tagName === "CANVAS") {
+      // Only the passed-on click may reach the map: two clicks in quick succession count as a double click (zoom).
+      event.stopPropagation();
+      below.dispatchEvent(new MouseEvent("click", event));
+      return;
+    }
+    canvasOnClick.call(this, event);
+  },
+  _hitsOwnLayer(event) {
+    const point = this._map.mouseEventToLayerPoint(event);
+    for (let order = this._drawFirst; order; order = order.next) {
+      if (order.layer.options.interactive && order.layer._containsPoint(point)) return true;
+    }
+    return false;
+  },
+});
+
+const map = L.map("map", { preferCanvas: true, maxZoom: 23, zoomSnap: 0.5 });
+const aerial = L.tileLayer.wms("https://geodienste.hamburg.de/wms_dop_zeitreihe_unbelaubt", {
+  layers: "dop_zeitreihe_unbelaubt", format: "image/jpeg", maxZoom: 23, tileSize: 512,
+  attribution: "Luftbild © Freie und Hansestadt Hamburg, LGV (dl-de/by-2-0)",
+}).addTo(map);
+const osmMap = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 23, maxNativeZoom: 19, attribution: "© OpenStreetMap contributors",
+});
+const layerControl = L.control.layers({ "Aerial (Hamburg, leaf-off)": aerial, "OpenStreetMap": osmMap }, {},
+                                      { collapsed: false }).addTo(map);
+L.control.scale({ imperial: false, maxWidth: 200 }).addTo(map);
+
+const showSurvey = new URLSearchParams(location.search).get("survey") === "1";
+const groups = {};          // layer name -> L.LayerGroup, kept for the whole session so toggles stay
+const outlineGroup = L.layerGroup().addTo(map);
+layerControl.addOverlay(outlineGroup, "Game regions");
+let pending = null;
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function popupHtml(properties) {
+  const rows = [];
+  for (const [key, value] of Object.entries(properties.derived || {})) {
+    rows.push(`<tr class="derived"><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`);
+  }
+  for (const key of Object.keys(properties.tags || {}).sort()) {
+    rows.push(`<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(properties.tags[key])}</td></tr>`);
+  }
+  let link = "";
+  if (properties.osm_id) {
+    const url = `https://www.openstreetmap.org/${properties.kind === "node" ? "node" : "way"}/${properties.osm_id}`;
+    link = ` <a href="${url}" target="_blank">${properties.osm_id}</a>`;
+  }
+  return `<b>${escapeHtml(properties.kind)}</b>${link}<table class="tags">${rows.join("")}</table>`;
+}
+
+// Stacking: buildings at the bottom, then the game's road surface, the OSM lines (overlay pane, 400), the markings.
+const PANES = { "Buildings": 330, "Game road surface": 350, "Survey: street areas": 360, "Game markings": 420 };
+const paneRenderers = {};
+for (const [name, zIndex] of Object.entries(PANES)) {
+  map.createPane(name).style.zIndex = zIndex;
+  paneRenderers[name] = L.canvas({ pane: name });
+}
+
+function makeLayer(collection, layerName) {
+  const paneOptions = PANES[layerName] ? { pane: layerName, renderer: paneRenderers[layerName] } : {};
+  return L.geoJSON(collection, {
+    ...paneOptions,
+    style: feature => {
+      const style = LINE_STYLES[feature.properties.style] || { color: "#f0f" };
+      return feature.properties.fill ? { ...style, fillColor: feature.properties.fill } : style;
+    },
+    pointToLayer: (feature, latlng) => {
+      const style = POINT_STYLES[feature.properties.style] || { color: "#000", fillColor: "#f0f", radius: 4 };
+      return L.circleMarker(latlng, { ...style, ...paneOptions, weight: 1.5, fillOpacity: 0.95 });
+    },
+    onEachFeature: (feature, layer) => {
+      layer.bindPopup(popupHtml(feature.properties), { maxWidth: 420, maxHeight: 400 });
+      if (feature.properties.label) {  // signs: their sign numbers next to them
+        layer.bindTooltip(feature.properties.label, { permanent: true, direction: "right", className: feature.properties.style === "survey_sign" ? "sign-label survey-label" : "sign-label" });
+      }
+    },
+  });
+}
+
+function groupFor(name) {
+  if (!groups[name]) {
+    groups[name] = L.layerGroup();
+    // The survey reference starts hidden unless the link asks for it (survey=1).
+    if (!name.startsWith("Survey") || showSurvey) groups[name].addTo(map);
+    layerControl.addOverlay(groups[name], name);
+  }
+  return groups[name];
+}
+
+function showOutlines(outlines) {
+  outlineGroup.clearLayers();
+  for (const [name, outline] of Object.entries(outlines)) {
+    L.geoJSON(outline, { style: { color: "#fff", weight: 1.5, fill: false, dashArray: "4 6" }, interactive: false })
+      .bindTooltip(name, { permanent: true, direction: "top" }).addTo(outlineGroup);
+  }
+}
+
+const buildingLegend = L.control({ position: "bottomleft" });
+buildingLegend.onAdd = () => L.DomUtil.create("div", "legend");
+buildingLegend.addTo(map);
+
+function showBuildingLegend(classes) {
+  buildingLegend.getContainer().innerHTML = "<strong>Building class</strong><br>" +
+    Object.entries(classes).map(([name, colour]) =>
+      `<span style="display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:middle;background:${colour};opacity:0.8"></span>${name}`
+    ).join("<br>");
+}
+
+const GAME_LAYERS = ["Game road surface", "Game markings", "Game furniture"];
+let pendingGame = null;
+
+async function loadGameLayers(bbox) {
+  const status = document.getElementById("gameStatus");
+  if (pendingGame) pendingGame.abort();
+  pendingGame = new AbortController();
+  status.textContent = "game streets: generating…";
+  const started = performance.now();
+  let response;
+  try {
+    response = await fetch(`/game.json?bbox=${bbox}`, { cache: "no-store", signal: pendingGame.signal });
+  } catch (error) {
+    if (error.name !== "AbortError") status.textContent = "game streets: server not reachable";
+    return;
+  }
+  if (!response.ok) {
+    status.textContent = "game streets failed:\n" + await response.text();
+    return;
+  }
+  const data = await response.json();
+  for (const name of GAME_LAYERS) groupFor(name).clearLayers();
+  if (data.too_wide) {
+    status.textContent = "game streets: zoom in further";
+    return;
+  }
+  for (const name of Object.keys(data.layers)) groupFor(name).addLayer(makeLayer(data.layers[name], name));
+  status.textContent = `game streets: ${data.generated_tiles} new tiles, ` +
+                       `${((performance.now() - started) / 1000).toFixed(1)} s`;
+}
+
+async function loadLayers() {
+  const status = document.getElementById("status");
+  if (pending) pending.abort();
+  pending = new AbortController();
+  const bbox = map.getBounds().pad(0.2).toBBoxString();
+  status.textContent = "loading layers…";
+  const started = performance.now();
+  let response;
+  try {
+    response = await fetch(`/layers.json?bbox=${bbox}`, { cache: "no-store", signal: pending.signal });
+  } catch (error) {
+    if (error.name !== "AbortError") status.textContent = "server not reachable: " + error;
+    return;
+  }
+  if (!response.ok) {
+    status.textContent = "layer build failed:\n" + await response.text();
+    return;
+  }
+  const data = await response.json();
+  loadGameLayers(bbox);
+  showOutlines(data.outlines);
+  showBuildingLegend(data.building_classes);
+  for (const [name, group] of Object.entries(groups)) {
+    if (!GAME_LAYERS.includes(name)) group.clearLayers();
+  }
+  if (data.too_wide) {
+    status.textContent = "zoom in to see the streets";
+    return;
+  }
+  let count = 0;
+  for (const name of Object.keys(data.layers).sort()) {
+    groupFor(name).addLayer(makeLayer(data.layers[name], name));
+    count += data.layers[name].features.length;
+  }
+  status.textContent = `${count} features in view, loaded in ${Math.round(performance.now() - started)} ms`;
+}
+
+const legend = L.control({ position: "bottomright" });
+legend.onAdd = () => {
+  const box = L.DomUtil.create("div", "legend");
+  box.innerHTML = LEGEND.map(([type, style, text]) => {
+    if (type === "line") {
+      const s = LINE_STYLES[style];
+      return `<i style="border-top: 3px ${s.dashArray ? "dashed" : "solid"} ${s.color}"></i>${text}`;
+    }
+    const s = POINT_STYLES[style];
+    return `<b style="background:${s.fillColor}; border-color:${s.color}"></b>${text}`;
+  }).join("<br>");
+  return box;
+};
+legend.addTo(map);
+
+const startBbox = new URLSearchParams(location.search).get("bbox");
+if (startBbox) {
+  const [west, south, east, north] = startBbox.split(",").map(Number);
+  map.fitBounds([[south, west], [north, east]]);
+} else {
+  map.setView([53.4880, 10.2120], 17);
+}
+map.on("moveend", loadLayers);
+document.getElementById("reload").onclick = loadLayers;
+document.getElementById("scene3d").onclick = () => { location.href = `/3d?bbox=${map.getBounds().toBBoxString()}`; };
+document.addEventListener("keydown", event => { if (event.key === "r" && !event.ctrlKey) loadLayers(); });
+loadLayers();
+</script>
+</body>
+</html>

@@ -17,12 +17,21 @@ import shapely
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from osmimport import buildings, canopy, dem, geo, landcover, osm, paths, roads, terrain, vegetation  # noqa: E402
 from osmimport.mesh import MeshBuilder, drape, ribbon, walls  # noqa: E402
+from osmimport.streets import assumptions  # noqa: E402
 
-MARKING_STYLE = {  # kind -> (width m, dash (on, off) or None)
+MARKING_STYLE = {  # kind -> (width m, dash (on, off) or None); RMS dimensions, see streets/assumptions.py
     "dash_urban": (0.12, (3.0, 6.0)),
-    "dash_rural": (0.12, (6.0, 12.0)),
+    "dash_rural": (0.12, (4.0, 8.0)),
     "solid": (0.12, None),
     "edge": (0.25, None),
+    "guide": (0.12, assumptions.GUIDE_LINE_DASH),
+    "edge_guide": (0.25, assumptions.EDGE_GUIDE_DASH),
+    "cycle_exclusive": (0.25, None),
+    "cycle_advisory": (0.12, assumptions.ADVISORY_CYCLE_LINE_DASH),
+    "cycle_furt": (0.25, assumptions.CYCLE_FURT_DASH),
+    "turn_lane_dash": (0.25, assumptions.TURN_LANE_DASH),
+    "turn_lane_solid": (0.25, None),
+    "hatch": (assumptions.HATCH_STRIPE_WIDTH, None),
 }
 SURFACE_SECTIONS = {"asphalt": "Road_Asphalt", "pavers": "Road_Pavers", "cobble": "Road_Cobble"}
 
