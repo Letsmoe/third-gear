@@ -49,8 +49,12 @@ public:
 	/** Adds the buildings, colliding when bCollision. */
 	void AddBuildings(UE::Geometry::FDynamicMesh3&& Mesh, const TArray<UMaterialInterface*>& Materials, bool bCollision, bool bCookNow);
 
-	/** Adds instances of one plant model (transforms relative to the tile). */
-	void AddPlants(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, int32 CullDistanceCm);
+	/**
+	 * Adds instances of one plant model (transforms relative to the tile). WindMaterials, when not empty, replace the
+	 * model's materials with ones that sway in the wind; the sway stops being evaluated beyond WindDistanceCm.
+	 */
+	void AddPlants(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, int32 CullDistanceCm,
+		const TArray<UMaterialInterface*>& WindMaterials, int32 WindDistanceCm);
 
 	/** Invisible cylinders at the trunks so the car can hit trees: base points (tile-relative) and diameters, cm. */
 	void AddTrunkColliders(const TArray<FVector>& Bases, const TArray<float>& Diameters);

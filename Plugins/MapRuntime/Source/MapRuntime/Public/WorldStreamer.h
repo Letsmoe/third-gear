@@ -106,6 +106,9 @@ private:
 	/** Resolves materials and plant models and measures the models; called once before the first build. */
 	void PrepareAssets();
 
+	/** Loads the swaying materials of one plant model if every slot has one. */
+	void LoadPlantWindMaterials(const FString& ModelKey, const UStaticMesh& PlantMesh);
+
 	/** Loads the street furniture meshes and the sign master material. */
 	void PrepareFurniture();
 
@@ -159,6 +162,9 @@ private:
 
 	UPROPERTY(Transient)
 	TMap<FString, TObjectPtr<UStaticMesh>> LoadedPlantModels;
+
+	/** Per plant model, the wind-swaying material for every slot (Scripts/create_tree_wind_materials.py); empty if absent. */
+	TMap<FString, TArray<TObjectPtr<UMaterialInterface>>> LoadedPlantWindMaterials;
 
 	/** Street furniture meshes by asset name, and the sign materials by graphic name. */
 	UPROPERTY(Transient)
