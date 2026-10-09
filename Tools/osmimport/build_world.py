@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bootstrap"))
 import data_root  # noqa: E402
 from build_area import MARKING_STYLE, SURFACE_SECTIONS, find_start  # noqa: E402
-from osmimport import building_types, buildings, canopy, roofs, dem, furniture, geo, landcover, osm, parking, paths, roads, terrain, vegetation  # noqa: E402
+from osmimport import building_types, buildings, roofs, dem, furniture, geo, landcover, osm, parking, paths, roads, terrain, vegetation  # noqa: E402
 from osmimport import worldtile  # noqa: E402
 
 GRID_CELL = 1.0
@@ -53,7 +53,7 @@ def load_sources(area, geodata, cache_path, reuse):
         with open(cache_path, "rb") as f:
             log("reused cached OSM, DEM, roads and terrain")
             return pickle.load(f)
-    data = osm.load(os.path.join(geodata, "osm", "bergedorf.osm.pbf"), area)
+    data = osm.load(os.path.join(geodata, "osm", area.osm_extract + ".osm.pbf"), area)
     log(f"OSM: {len(data.roads)} roads, {len(data.buildings)} buildings, {len(data.points)} points")
     heights = dem.build_mosaic(area, geodata)
     log(f"DEM {heights.z.shape}")
@@ -69,19 +69,15 @@ def load_sources(area, geodata, cache_path, reuse):
     return result
 
 
-def detect_plants(data, area, geodata, heights, building_union, net, surfaces, ground):
-    """Plant list (vegetation.build) and the canopy height grid used for leaf litter in the land cover."""
+def place_plants(data, area, geodata, net, surfaces, ground, building_union):
+    """Plant list (vegetation.build) from the street tree register and OSM; no surface model, so no detected trees."""
     paths_union = shapely.union_all([surfaces.paved, surfaces.unpaved])
     water_union = shapely.union_all([wb.polygon for wb in surfaces.water]) if surfaces.water else shapely.Polygon()
-    hard_union = shapely.union_all([net.ground, net.pavement, surfaces.paved])
-    canopy_data = canopy.detect(heights, area, geodata,
-                                terrain._rasterize(heights, building_union or shapely.Polygon()),
-                                terrain._rasterize(heights, hard_union), terrain._rasterize(heights, water_union))
     plants, plant_z, counts = vegetation.build(
         data, area, ground, net.ground, net.pavement, paths_union, water_union, building_union,
-        os.path.join(geodata, "raw", "strassenbaeume", "strassenbaeume_bbox.geojson"), canopy_data)
+        os.path.join(geodata, "raw", "strassenbaeume", "strassenbaeume_bbox.geojson"))
     log(f"vegetation: {len(plants)} plants {counts}")
-    return plants, plant_z, (canopy_data.grid if canopy_data is not None else None), counts
+    return plants, plant_z, counts
 
 
 def tile_key(area, x, y):
@@ -89,7 +85,7 @@ def tile_key(area, x, y):
     return int(np.floor((x - area.x_min) / area.tile_size)), int(np.floor((y - area.y_min) / area.tile_size))
 
 
-def write_grid(writer, bounds, ground, net, cover, canopy_grid):
+def write_grid(writer, bounds, ground, net, cover):
     """Terrain and road heights and land cover on the tile's 1 m vertex grid (edges shared with neighbours)."""
     x0, y0, x1, y1 = bounds
     xs = np.arange(x0, x1 + 1e-6, GRID_CELL)
@@ -97,7 +93,7 @@ def write_grid(writer, bounds, ground, net, cover, canopy_grid):
     gx, gy = np.meshgrid(xs, ys)
     terrain_z = ground.sample(gx, gy)
     road_z = net.height.sample(gx, gy)
-    weights = cover.weights(xs, ys, GRID_CELL, canopy_grid)
+    weights = cover.weights(xs, ys, GRID_CELL)
     writer.set_grid(terrain_z, road_z, weights, GRID_CELL)
 
 
@@ -333,7 +329,7 @@ def main():
 
     data, heights, building_union, net, surfaces, ground = load_sources(
         area, geodata, os.path.join(out_dir, "cache.pkl"), args.reuse)
-    plants, plant_z, canopy_grid, plant_counts = detect_plants(data, area, geodata, heights, building_union, net, surfaces, ground)
+    plants, plant_z, plant_counts = place_plants(data, area, geodata, net, surfaces, ground, building_union)
     cover = landcover.LandCover(data.areas)
 
     builder = furniture.FurnitureBuilder(data, net, building_union)
@@ -349,7 +345,7 @@ def main():
     log(f"zebra crossings: {len(builder.zebras)} striped of {zebra_nodes} crossing nodes tagged zebra or marked")
     writers = {(ix, iy): worldtile.TileWriter((x0, y0, x1, y1)) for ix, iy, x0, y0, x1, y1 in area.tiles()}
     for (ix, iy), writer in writers.items():
-        write_grid(writer, (writer.x0, writer.y0, writer.x1, writer.y1), ground, net, cover, canopy_grid)
+        write_grid(writer, (writer.x0, writer.y0, writer.x1, writer.y1), ground, net, cover)
         write_surfaces(writer, net, surfaces)
         write_markings(writer, net, zebra_cutout)
     write_stop_lines(writers, traffic["junctions"])

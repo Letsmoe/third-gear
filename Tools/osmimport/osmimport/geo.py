@@ -26,6 +26,8 @@ class Area:
     y_min: float
     y_max: float
     tile_size: float = 250.0
+    # The OSM extract under geodata/osm/ that covers the area: "bergedorf" (the project box) or "hamburg" (the city).
+    osm_extract: str = "bergedorf"
 
     def utm_bounds(self, margin: float = 0.0):
         """(e_min, n_min, e_max, n_max) of the build extent plus margin."""
@@ -66,6 +68,8 @@ AREAS = {
     "bergedorf_core": Area("bergedorf_core", ORIGIN_E, ORIGIN_N, -1000, 1000, -1000, 1000),
     # Small area for fast iteration.
     "bergedorf_test": Area("bergedorf_test", ORIGIN_E, ORIGIN_N, -250, 250, -250, 250),
+    # All of Hamburg except Neuwerk: UTM E 548-589 km, N 5916-5957 km, rounded out to whole tiles.
+    "hamburg": Area("hamburg", ORIGIN_E, ORIGIN_N, -32500, 8750, -30000, 11250, osm_extract="hamburg"),
 }
 
 
