@@ -370,10 +370,12 @@ class LaneBuilder:
                     if raw is None:
                         continue
                     s, distance = project_on_polyline(raw, stop)
-                    if distance > 6.0:
+                    # The stop point is on the way's centre line and the lane is offset from it: compare against that offset.
+                    mismatch = abs(distance - self._lane_offset(segment.way))
+                    if mismatch > 4.0:
                         continue
-                    if best is None or distance < best[0]:
-                        best = (distance, segment.id, s)
+                    if best is None or mismatch < best[0]:
+                        best = (mismatch, segment.id, s)
                 if best is not None:
                     self.signal_stops[(best[1], approach.travel)].append((best[2], approach_id))
                 approach_id += 1

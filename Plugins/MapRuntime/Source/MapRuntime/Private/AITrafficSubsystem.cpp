@@ -21,6 +21,8 @@ static TAutoConsoleVariable<int32> CVarSpawnAnywhere(TEXT("tg.TrafficSpawnAnywhe
 	TEXT("For staging screenshots: 1 lets cars appear anywhere around the viewer, in view and close by; 2 puts them where the viewer looks, within 55 m of a point 40 m ahead. Normally they only appear out of sight."));
 static TAutoConsoleVariable<int32> CVarHeadlightLights(TEXT("tg.TrafficHeadlights"), 8,
 	TEXT("How many AI cars nearest the viewer get a real headlight at night."));
+static TAutoConsoleVariable<FString> CVarPaintOverride(TEXT("tg.TrafficPaint"), TEXT(""),
+	TEXT("Paints every new AI car in one linear colour, \"r g b\" with values 0 to 1 (checking the paint material); empty for the usual colours."));
 static TAutoConsoleVariable<int32> CVarTrafficCars(TEXT("tg.TrafficCars"), 30, TEXT("How many AI cars the traffic aims for around the viewer."));
 
 namespace
@@ -199,6 +201,12 @@ int32 UAITrafficSubsystem::PickModelIndex()
 
 FLinearColor UAITrafficSubsystem::PickPaint(const FTrafficVehicleModel& Model)
 {
+	TArray<FString> Parts;
+	CVarPaintOverride.GetValueOnGameThread().ParseIntoArray(Parts, TEXT(" "));
+	if (Parts.Num() == 3)
+	{
+		return FLinearColor(FCString::Atof(*Parts[0]), FCString::Atof(*Parts[1]), FCString::Atof(*Parts[2]));
+	}
 	if (Model.bFixedPaint)
 	{
 		return Model.FixedPaint;

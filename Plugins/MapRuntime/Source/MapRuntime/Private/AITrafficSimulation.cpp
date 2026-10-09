@@ -27,6 +27,7 @@ constexpr float LongWaitLogSeconds = 40.f;
 constexpr float SignalWaitLimitSeconds = 130.f;
 constexpr float AgentLookAheadM = 35.f;
 constexpr float AgentCheckRangeM = 50.f;
+constexpr float ClosePassingDistanceM = 6.f;
 constexpr float MaxSubstepSeconds = 0.05f;
 constexpr int32 RouteLanesAhead = 6;
 constexpr int32 RouteLanesBehind = 3;
@@ -323,9 +324,16 @@ bool FAITrafficSimulation::IsOnMyLanes(const FSimCar& Car, const FSimCar& Other)
 		const float MyFront = Car.FrontOverhangM - Car.LaneStart[Slot];
 		for (const FOccupant& Occupant : *Occupants)
 		{
-			if (Occupant.Car == &Other && Occupant.RearS >= MyFront - 0.01f)
+			if (Occupant.Car != &Other)
 			{
-				return true;    // ahead on the lane: car following handles it (a car behind us on a closed loop is not)
+				continue;
+			}
+			// Car following handles a car on my lanes, unless it is behind me along the lane and yet right next to me, as on
+			// a closed loop where the end of the lane meets its start.
+			const bool bBehindButClose = Occupant.RearS < MyFront - 0.01f && FVector2D::Distance(FVector2D(Other.FrontAxleM), FVector2D(Car.FrontAxleM)) < ClosePassingDistanceM;
+			if (!bBehindButClose)
+			{
+				return true;
 			}
 		}
 	}
