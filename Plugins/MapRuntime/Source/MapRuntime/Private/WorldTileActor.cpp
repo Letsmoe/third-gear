@@ -37,6 +37,9 @@ UDynamicMeshComponent* AWorldTileActor::AddMeshComponent(UE::Geometry::FDynamicM
 	}
 	UDynamicMeshComponent* Component = NewObject<UDynamicMeshComponent>(this);
 	Component->SetTangentsType(EDynamicMeshComponentTangentsMode::ExternallyProvided);
+	// The mesh never changes once built. The static draw path caches its draw commands, which is cheaper and is what
+	// Lumen's surface cache captures from; on the dynamic path every tile was missing from Lumen's bounce light.
+	Component->SetMeshDrawPath(EDynamicMeshDrawPath::StaticDraw);
 	Component->SetCastShadow(bCastShadow);
 	Component->GetDynamicMesh()->SetMesh(MoveTemp(Mesh));
 	Component->ConfigureMaterialSet(Materials);
