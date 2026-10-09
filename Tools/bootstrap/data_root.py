@@ -23,6 +23,7 @@ CHECKOUT_LINKS = {
     "Content/Textures": "unreal/Textures",
     "Content/Vegetation": "unreal/Vegetation",
     "Content/Grass": "unreal/Grass",
+    "Content/Leaves": "unreal/Leaves",
     "Content/World": "unreal/World",
     "DerivedDataCache": "ddc",
     "Tools/osmimport/.venv": "venvs/osmimport",

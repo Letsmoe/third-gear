@@ -9,6 +9,7 @@
 #include "AudioTest.h"
 #include "DriveTest.h"
 #include "GameFlow.h"
+#include "LeafTest.h"
 #include "RuleTest.h"
 #include "StreamTest.h"
 #include "TrafficTest.h"
@@ -170,6 +171,12 @@ void ADrivingGameMode::BeginPlay()
 	if (FParse::Value(FCommandLine::Get(), TEXT("StreamTest="), StreamRoute))
 	{
 		GetWorld()->SpawnActor<AStreamTestRunner>();
+	}
+
+	// Patch of fallen leaf cards for looking at the leaf assets (see LeafTest.h).
+	if (FParse::Param(FCommandLine::Get(), TEXT("LeafTest")))
+	{
+		GetWorld()->SpawnActor<ALeafTestPatch>();
 	}
 
 	// Free camera with a parked car to look at (e.g. screenshots of the car model).
