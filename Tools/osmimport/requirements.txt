@@ -1,0 +1,8 @@
+numpy
+scipy
+shapely
+pyproj
+rasterio
+osmium
+mapbox-earcut
+matplotlib

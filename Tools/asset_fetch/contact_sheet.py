@@ -1,4 +1,4 @@
-"""Builds RawAssets/contact_sheet_<category>.png: base colour of every imported texture set with its name underneath.
+"""Builds <data root>/raw_assets/contact_sheet_<category>.png: base colour of every imported texture set with its name underneath.
 
 Set list/categories are read (as data, via ast) from Scripts/import_textures.py.
 Usage: .venv-contact/bin/python -I contact_sheet.py
@@ -7,11 +7,15 @@ import ast
 import glob
 import os
 import re
+import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-RAW = os.path.join(ROOT, "RawAssets")
+sys.path.insert(0, os.path.join(ROOT, "Tools", "bootstrap"))
+import data_root  # noqa: E402
+
+RAW = data_root.raw_assets_dir()
 TILE, PAD, COLS, LABEL_H = 384, 16, 4, 44
 BASECOLOR = {"polyhaven": ["{s}_diff_*", "{s}_diffuse_*"], "ambientcg": ["{s}_*_Color.*"]}
 
