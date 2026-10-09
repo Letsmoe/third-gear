@@ -6,6 +6,7 @@
 #include "CarPawn.generated.h"
 
 class UCameraComponent;
+class UCarAudioComponent;
 class UCarMovementComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
@@ -34,6 +35,7 @@ public:
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 	UCarMovementComponent* GetCarMovement() const;
+	UCarAudioComponent* GetCarAudio() const { return CarAudio; }
 	FCarTelemetry GetTelemetry() const;
 
 	/** Scripted driving (drive test): when enabled, the given input replaces wheel and keyboard. */
@@ -58,6 +60,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TObjectPtr<UTextRenderComponent> Dashboard;
+
+	UPROPERTY(VisibleAnywhere, Category = "Components")
+	TObjectPtr<UCarAudioComponent> CarAudio;
 
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TArray<TObjectPtr<UStaticMeshComponent>> AttachedMeshes;

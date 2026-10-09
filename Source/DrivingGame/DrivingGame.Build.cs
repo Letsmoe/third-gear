@@ -26,6 +26,7 @@ public class DrivingGame : ModuleRules
 			"ChaosVehiclesCore",
 			"MapRuntime",
 			"Isobar",
+			"AudioMixer",
 		});
 	}
 }

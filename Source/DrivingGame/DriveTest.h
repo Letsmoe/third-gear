@@ -25,7 +25,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
-private:
+protected:
 	struct FStep
 	{
 		FString Name;
@@ -34,7 +34,7 @@ private:
 		TFunction<bool(const FCarTelemetry&)> Update;
 	};
 
-	void BuildSteps();
+	virtual void BuildSteps();
 	void AddStep(const FString& Name, TFunction<void()> Start, TFunction<bool(const FCarTelemetry&)> Update);
 	void AddPlace(float XM, float YM, float Yaw, bool bEngineRunning, float SettleSeconds = 1.5f);
 	void AddWait(float Seconds);
