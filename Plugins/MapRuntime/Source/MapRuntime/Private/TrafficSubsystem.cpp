@@ -29,11 +29,11 @@ static TAutoConsoleVariable<int32> CVarFakeHeadlights(TEXT("tg.FakeHeadlights"),
 
 namespace
 {
-constexpr int32 LampLightCount = 16;
+constexpr int32 LampLightCount = 20;
 constexpr int32 LensLightCount = 10;
 constexpr float LampLightRangeCm = 11000.f;
 constexpr float LensLightRangeCm = 7000.f;
-constexpr float LampLumens = 5500.f;
+constexpr float LampLumens = 11000.f;
 constexpr float SlowUpdateSeconds = 0.25f;
 constexpr float SignalUpdateSeconds = 0.1f;
 
@@ -219,7 +219,7 @@ void UTrafficSubsystem::EnsureLightPool()
 		Light->SetIntensityUnits(ELightUnits::Lumens);
 		Light->SetIntensity(LampLumens);
 		Light->SetInnerConeAngle(25.f);
-		Light->SetOuterConeAngle(62.f);
+		Light->SetOuterConeAngle(70.f);
 		Light->SetTemperature(3300.f);
 		Light->SetUseTemperature(true);
 		Light->SetSourceRadius(12.f);
