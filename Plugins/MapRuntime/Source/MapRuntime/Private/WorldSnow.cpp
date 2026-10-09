@@ -477,6 +477,19 @@ void ComputeSnowSurface(const FWorldTileData& Tile, FSnowSamples& Samples)
 	{
 		BoxBlur(Samples, Smoothed);
 	}
+	// Lawn snow is smoothed much further: it hides the ground's small bumps and merges into big flat triangles.
+	TArray<float> SmoothedLawn = Smoothed;
+	for (int32 Pass = 0; Pass < 9; ++Pass)
+	{
+		BoxBlur(Samples, SmoothedLawn);
+	}
+	for (int32 Index = 0; Index < Total; ++Index)
+	{
+		if (Samples.Class[Index] == ESnowClass::Lawn)
+		{
+			Smoothed[Index] = SmoothedLawn[Index];
+		}
+	}
 	for (int32 Y = 0; Y < Samples.CountY; ++Y)
 	{
 		for (int32 X = 0; X < Samples.CountX; ++X)
