@@ -3,6 +3,18 @@
 // edge lines and stop lines all go through this one function. Needs TerrainNoise.ush (DgValueNoise).
 
 /**
+ * Value noise at the given frequency (cycles per metre), on a grid rotated by Angle so octaves don't line up into
+ * squares. Octaves finer than about two pixels fade to their mean, which keeps distant paint from shimmering.
+ */
+float DgWearNoise(float2 Metres, float Frequency, float Angle)
+{
+	float2 rotated = float2(cos(Angle) * Metres.x - sin(Angle) * Metres.y, sin(Angle) * Metres.x + cos(Angle) * Metres.y);
+	float2 q = rotated * Frequency;
+	float cellsPerPixel = max(length(ddx(q)), length(ddy(q)));
+	return lerp(DgValueNoise(q), 0.5, smoothstep(0.35, 0.7, cellsPerPixel));
+}
+
+/**
  * Wear masks of road paint at one pixel.
  * WorldCm   world position in cm. LineUV  the marking's UV, x = metres along the line, y = 0..1 across it.
  * Returns x = dirt, y = chipped away (asphalt shows), z = tyre polish. NormalTilt gets a small bump gradient.
@@ -17,20 +29,22 @@ float3 DgMarkingWearMasks(float2 WorldCm, float2 LineUV, float2 LineDirection, o
 	float lateral = dot(metres, float2(-axis.y, axis.x));
 	float band = abs(frac(lateral / 3.2) - 0.5) * 3.2;  // distance from the lane centre in metres
 	float track = 1.0 - smoothstep(0.15, 0.35, abs(band - 0.8));
-	track *= 0.5 + 0.5 * DgValueNoise(metres * 1.3);
+	track *= 0.5 + 0.5 * DgWearNoise(metres, 1.3, 0.4);
 
-	float patch = DgValueNoise(metres * 0.7) * 0.6 + DgValueNoise(metres * 2.3) * 0.4;
-	float fine = DgValueNoise(metres * 17.0) * 0.55 + DgValueNoise(metres * 43.0) * 0.45;
+	float patch = DgWearNoise(metres, 0.7, 0.9) * 0.6 + DgWearNoise(metres, 2.3, 2.1) * 0.4;
+	float fine = DgWearNoise(metres, 17.0, 0.6) * 0.55 + DgWearNoise(metres, 43.0, 1.7) * 0.45;
 	float edge = saturate(abs(LineUV.y * 2.0 - 1.0));
 	edge = smoothstep(0.55, 1.0, edge + (fine - 0.5) * 0.5);  // ragged edge
 
 	float dirt = saturate((patch - 0.2) * 1.4) * 0.55 + fine * 0.12;
-	float chipNoise = fine * 0.6 + DgValueNoise(metres * 95.0) * 0.4;
-	float chip = smoothstep(0.72 - edge * 0.22 - track * 0.08, 0.80 - edge * 0.22 - track * 0.08, chipNoise);
+	float chipNoise = fine * 0.6 + DgWearNoise(metres, 95.0, 2.6) * 0.4;
+	// The threshold is at least as wide as the noise changes across one pixel, so chip edges stay anti-aliased.
+	float chipWidth = max(0.08, fwidth(chipNoise) * 1.5);
+	float chipStart = 0.72 - edge * 0.22 - track * 0.08;
+	float chip = smoothstep(chipStart, chipStart + chipWidth, chipNoise);
 	chip = saturate(chip + edge * 0.35 * smoothstep(0.35, 0.6, fine));
 
-	float2 bumpSample = metres * 60.0;
-	NormalTilt = float2(DgValueNoise(bumpSample + 7.3) - DgValueNoise(bumpSample - 7.3),
-	                    DgValueNoise(bumpSample.yx + 3.1) - DgValueNoise(bumpSample.yx - 3.1)) * (0.5 + chip * 1.5);
+	NormalTilt = float2(DgWearNoise(metres + 0.12, 60.0, 0.3) - DgWearNoise(metres - 0.12, 60.0, 0.3),
+	                    DgWearNoise(metres + 0.05, 60.0, 1.2) - DgWearNoise(metres - 0.05, 60.0, 1.2)) * (0.5 + chip * 1.5);
 	return float3(dirt, chip, track);
 }
