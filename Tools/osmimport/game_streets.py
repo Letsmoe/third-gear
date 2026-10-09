@@ -5,6 +5,7 @@ roads.build gets slow on big areas (57 s for 1.5 km), so the viewer generates 50
 100 m of context around it, and keeps only what lies inside the tile. Near tile edges this can differ slightly from
 a whole-region build: a junction cut by the context edge sees fewer arms.
 """
+import math
 from dataclasses import dataclass, field
 
 import shapely
@@ -12,7 +13,8 @@ from shapely import ops
 
 from build_area import MARKING_STYLE
 from build_world import STOP_LINE_WIDTH, ZEBRA_BAR_WIDTH, stop_line_geometry, zebra_bars, zebra_carriageway
-from osmimport import furniture, roads, street_layers
+import data_root
+from osmimport import dem, furniture, geo, roads, street_layers
 
 TILE_SIZE = 500.0
 CONTEXT_MARGIN = 100.0
@@ -127,6 +129,31 @@ def generate(data, heights, core_box) -> GameStreets:
             result.markings.append((kind, clipped))
     result.poles = [pole for pole in furniture_poles(builder) if core_box.contains(shapely.Point(pole["x"], pole["y"]))]
     return result
+
+
+def tile_box(column: int, row: int):
+    """The world rectangle of a tile."""
+    return shapely.box(column * TILE_SIZE, row * TILE_SIZE, (column + 1) * TILE_SIZE, (row + 1) * TILE_SIZE)
+
+
+def tiles_touching(box):
+    """(column, row) of every tile touching the world rectangle."""
+    x_min, y_min, x_max, y_max = box.bounds
+    return [(column, row)
+            for column in range(math.floor(x_min / TILE_SIZE), math.floor(x_max / TILE_SIZE) + 1)
+            for row in range(math.floor(y_min / TILE_SIZE), math.floor(y_max / TILE_SIZE) + 1)]
+
+
+def generate_tile(index, column: int, row: int) -> GameStreets:
+    """One tile's streets, from the OSM data and terrain of the tile plus CONTEXT_MARGIN (index: a ViewportIndex)."""
+    core = tile_box(column, row)
+    context = core.buffer(CONTEXT_MARGIN, join_style="mitre")
+    x_min, y_min, x_max, y_max = context.bounds
+    heights = dem.build_mosaic(geo.Area("tile", geo.ORIGIN_E, geo.ORIGIN_N, x_min, x_max, y_min, y_max),
+                               data_root.geodata_dir(), margin=20.0)
+    data = index.subset(context)
+    data.buildings = [(osm_id, tags, footprint) for osm_id, tags, footprint, _ in index.buildings_in(context)]
+    return generate(data, heights, core)
 
 
 def map_layers(streets: GameStreets) -> street_layers.Layers:

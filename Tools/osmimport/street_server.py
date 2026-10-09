@@ -11,7 +11,6 @@ import http.server
 import importlib
 import json
 import os
-import math
 import sys
 import threading
 import traceback
@@ -27,8 +26,8 @@ import build_area  # noqa: E402
 import build_world  # noqa: E402
 import data_root  # noqa: E402
 import game_streets  # noqa: E402
-from build_world import building_footprints  # noqa: E402
-from osmimport import building_types, dem, furniture, geo, osm, roads, street_layers, street_scene  # noqa: E402
+from osmimport import dem, furniture, geo, hh_survey, roads, street_layers, street_scene  # noqa: E402
+from street_index import WHOLE_EXTRACT, ViewportIndex, load_whole_extract  # noqa: E402
 
 PAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "street_viewer.html")
 SCENE_PAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "street_scene.html")
@@ -37,42 +36,10 @@ AERIAL_WMS = ("https://geodienste.hamburg.de/wms_dop_zeitreihe_unbelaubt?SERVICE
 AERIAL_PIXELS = 4096
 # The 3D scene covers at most this square around the viewport centre: roofs and draping take a few seconds per km².
 MAX_SCENE_METRES = 1000.0
-# The world frame of every region (same origin), wide enough to take the whole extract.
-WHOLE_EXTRACT = geo.Area("whole_extract", geo.ORIGIN_E, geo.ORIGIN_N, -100000, 100000, -100000, 100000)
 # Wider viewports are refused: the page asks the user to zoom in instead of drawing tens of thousands of features.
 MAX_VIEWPORT_METRES = 4000.0
 
 _wgs_to_utm = Transformer.from_crs(4326, 25832, always_xy=True)
-
-
-class ViewportIndex:
-    """The loaded OSM data and the typed buildings with a spatial index, to cut out the part inside a viewport."""
-
-    def __init__(self, data: osm.OsmData):
-        self.data = data
-        footprints = list(building_footprints(data))
-        typer = building_types.BuildingTyper(footprints, data.roads, data.footways, data.areas)
-        self.buildings = [(osm_id, tags, footprint, typer.classify(index))
-                          for index, (osm_id, tags, footprint) in enumerate(footprints)]
-        self.building_tree = shapely.STRtree([footprint for _, _, footprint in footprints])
-        self.way_lists = {"roads": data.roads, "footways": data.footways, "railways": data.railways}
-        self.way_trees = {name: shapely.STRtree([shapely.LineString(way.xy) for way in ways])
-                          for name, ways in self.way_lists.items()}
-        self.area_tree = shapely.STRtree([geometry for _, _, geometry in data.areas])
-        self.point_tree = shapely.STRtree([shapely.Point(point.x, point.y) for point in data.points])
-
-    def subset(self, box) -> osm.OsmData:
-        """The roads, paths, railways, areas and points touching the world rectangle."""
-        subset = osm.OsmData()
-        for name, ways in self.way_lists.items():
-            setattr(subset, name, [ways[index] for index in self.way_trees[name].query(box)])
-        subset.areas = [self.data.areas[index] for index in self.area_tree.query(box)]
-        subset.points = [self.data.points[index] for index in self.point_tree.query(box)]
-        return subset
-
-    def buildings_in(self, box) -> list:
-        """The typed buildings touching the world rectangle."""
-        return [self.buildings[index] for index in self.building_tree.query(box)]
 
 
 # The modules that make the game's streets, in the order they are reloaded when one of them changed.
@@ -104,32 +71,21 @@ class GameStreetCache:
         self.stamp = stamp
 
     def _tile(self, column: int, row: int):
-        """One tile's streets, generated from the OSM data and terrain around it."""
+        """One tile's streets, generated on first use."""
         key = (column, row)
         if key not in self.tiles:
-            size = game_streets.TILE_SIZE
-            core = shapely.box(column * size, row * size, (column + 1) * size, (row + 1) * size)
-            context = core.buffer(game_streets.CONTEXT_MARGIN, join_style="mitre")
-            x_min, y_min, x_max, y_max = context.bounds
-            heights = dem.build_mosaic(geo.Area("tile", geo.ORIGIN_E, geo.ORIGIN_N, x_min, x_max, y_min, y_max),
-                                       data_root.geodata_dir(), margin=20.0)
-            data = self.index.subset(context)
-            data.buildings = [(osm_id, tags, footprint) for osm_id, tags, footprint, _ in self.index.buildings_in(context)]
-            self.tiles[key] = game_streets.generate(data, heights, core)
+            self.tiles[key] = game_streets.generate_tile(self.index, column, row)
         return self.tiles[key]
 
     def streets_in(self, box):
         """The game's streets of every tile touching the box, and how many tiles had to be generated."""
         with self.lock:
             self._reload_if_changed()
-            size = game_streets.TILE_SIZE
-            x_min, y_min, x_max, y_max = box.bounds
             result = game_streets.GameStreets()
             generated = 0
-            for column in range(math.floor(x_min / size), math.floor(x_max / size) + 1):
-                for row in range(math.floor(y_min / size), math.floor(y_max / size) + 1):
-                    generated += (column, row) not in self.tiles
-                    result.extend(self._tile(column, row))
+            for column, row in game_streets.tiles_touching(box):
+                generated += (column, row) not in self.tiles
+                result.extend(self._tile(column, row))
             return result, generated
 
 
@@ -169,6 +125,7 @@ class StreetViewerHandler(http.server.BaseHTTPRequestHandler):
     """Serves the page and the layer data; the spatial index is set on the class by main()."""
     index = None
     game_cache = None
+    survey = None
 
     def do_GET(self):
         """The page at /, the layers in a viewport as GeoJSON at /layers.json?bbox=west,south,east,north."""
@@ -202,6 +159,8 @@ class StreetViewerHandler(http.server.BaseHTTPRequestHandler):
                 body["too_wide"] = True
             else:
                 layers = module.build(self.index.subset(box), self.index.buildings_in(box))
+                if self.survey is not None:
+                    module.add_survey(layers, self.survey, box)
                 body["layers"] = module.to_geojson(layers, WHOLE_EXTRACT)
         except Exception:
             self.respond(500, "text/plain; charset=utf-8", traceback.format_exc().encode())
@@ -277,8 +236,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=8988)
     args = parser.parse_args()
-    data = osm.load(os.path.join(data_root.geodata_dir(), "osm", "bergedorf.osm.pbf"), WHOLE_EXTRACT, margin=0.0)
-    StreetViewerHandler.index = ViewportIndex(data)
+    StreetViewerHandler.index = load_whole_extract()
+    StreetViewerHandler.survey = hh_survey.load(data_root.geodata_dir(), WHOLE_EXTRACT)
     StreetViewerHandler.game_cache = GameStreetCache(StreetViewerHandler.index)
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), StreetViewerHandler)
     print(f"Street viewer at http://127.0.0.1:{args.port}/", flush=True)

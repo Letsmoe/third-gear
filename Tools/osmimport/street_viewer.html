@@ -15,6 +15,7 @@
   .tags tr.derived td { color: #06c; }
   .sign-label { background: #c00; color: #fff; border: 0; font: 10px sans-serif; padding: 0 3px; box-shadow: none; }
   .sign-label::before { display: none; }
+  .survey-label { background: #1565c0; }
   #gameStatus { position: absolute; top: 36px; left: 60px; z-index: 1000; background: rgba(255,255,255,0.9); font: 12px sans-serif; padding: 3px 8px; white-space: pre; }
   #status { position: absolute; top: 10px; left: 60px; z-index: 1000; background: rgba(255,255,255,0.9); font: 12px sans-serif; padding: 3px 8px; white-space: pre; }
   #reload, #scene3d { position: absolute; left: 10px; z-index: 1000; font: 13px sans-serif; padding: 4px 8px; cursor: pointer; }
@@ -51,6 +52,13 @@ const LINE_STYLES = {
   game_bridge:      { color: "#99bbee", weight: 1, fillColor: "#30343a", fillOpacity: 0.55 },
   game_pavement:    { color: "#ffffff", weight: 1, fillColor: "#c9c3b8", fillOpacity: 0.45 },
   game_marking:     { color: "#ffffff", weight: 0, fillColor: "#ffffff", fillOpacity: 1.0 },
+  survey_carriageway: { color: "#ff2d2d", weight: 2, fillColor: "#ff2d2d", fillOpacity: 0.12 },
+  survey_parking:   { color: "#ff9f1a", weight: 1, fillColor: "#ff9f1a", fillOpacity: 0.2 },
+  survey_cycle:     { color: "#c2185b", weight: 1, fillColor: "#e91e63", fillOpacity: 0.35 },
+  survey_footway:   { color: "#9e9e9e", weight: 0.5, fillColor: "#e0e0e0", fillOpacity: 0.15 },
+  survey_green:     { color: "#2e7d32", weight: 0.5, fillColor: "#43a047", fillOpacity: 0.3 },
+  survey_shared:    { color: "#7b1fa2", weight: 1, fillColor: "#ab47bc", fillOpacity: 0.2 },
+  survey_kerb:      { color: "#ffffff", weight: 2 },
   building:         { color: "#222", weight: 1, fillOpacity: 0.45 },
 };
 const POINT_STYLES = {
@@ -64,6 +72,9 @@ const POINT_STYLES = {
   game_signal_head: { color: "#fff", fillColor: "#ff7a00", radius: 5 },
   game_sign:        { color: "#fff", fillColor: "#ff7a00", radius: 4 },
   game_lamp:        { color: "#000", fillColor: "#ffe08a", radius: 3 },
+  survey_signal:    { color: "#ff2020", fillColor: "#000", radius: 5 },
+  survey_lamp:      { color: "#ffe08a", fillColor: "#000", radius: 3 },
+  survey_sign:      { color: "#fff", fillColor: "#1565c0", radius: 4 },
   traffic_sign:    { color: "#fff", fillColor: "#cc0000", radius: 4 },
 };
 const LEGEND = [
@@ -83,6 +94,9 @@ const LEGEND = [
   ["point", "bus_stop", "bus stop"],
   ["point", "game_signal_head", "game: signal pole, sign"],
   ["point", "game_lamp", "game: lamp"],
+  ["point", "survey_signal", "survey: signal pole"],
+  ["point", "survey_lamp", "survey: lamp"],
+  ["point", "survey_sign", "survey: sign"],
 ];
 
 const map = L.map("map", { preferCanvas: true, maxZoom: 23, zoomSnap: 0.5 });
@@ -97,6 +111,7 @@ const layerControl = L.control.layers({ "Aerial (Hamburg, leaf-off)": aerial, "O
                                       { collapsed: false }).addTo(map);
 L.control.scale({ imperial: false, maxWidth: 200 }).addTo(map);
 
+const showSurvey = new URLSearchParams(location.search).get("survey") === "1";
 const groups = {};          // layer name -> L.LayerGroup, kept for the whole session so toggles stay
 const outlineGroup = L.layerGroup().addTo(map);
 layerControl.addOverlay(outlineGroup, "Game regions");
@@ -123,7 +138,7 @@ function popupHtml(properties) {
 }
 
 // Stacking: buildings at the bottom, then the game's road surface, the OSM lines (overlay pane, 400), the markings.
-const PANES = { "Buildings": 330, "Game road surface": 350, "Game markings": 420 };
+const PANES = { "Buildings": 330, "Game road surface": 350, "Survey: street areas": 360, "Game markings": 420 };
 const paneRenderers = {};
 for (const [name, zIndex] of Object.entries(PANES)) {
   map.createPane(name).style.zIndex = zIndex;
@@ -145,7 +160,7 @@ function makeLayer(collection, layerName) {
     onEachFeature: (feature, layer) => {
       layer.bindPopup(popupHtml(feature.properties), { maxWidth: 420, maxHeight: 400 });
       if (feature.properties.label) {  // signs: their sign numbers next to them
-        layer.bindTooltip(feature.properties.label, { permanent: true, direction: "right", className: "sign-label" });
+        layer.bindTooltip(feature.properties.label, { permanent: true, direction: "right", className: feature.properties.style === "survey_sign" ? "sign-label survey-label" : "sign-label" });
       }
     },
   });
@@ -153,7 +168,9 @@ function makeLayer(collection, layerName) {
 
 function groupFor(name) {
   if (!groups[name]) {
-    groups[name] = L.layerGroup().addTo(map);
+    groups[name] = L.layerGroup();
+    // The survey reference starts hidden unless the link asks for it (survey=1).
+    if (!name.startsWith("Survey") || showSurvey) groups[name].addTo(map);
     layerControl.addOverlay(groups[name], name);
   }
   return groups[name];

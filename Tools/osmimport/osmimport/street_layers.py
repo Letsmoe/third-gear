@@ -208,6 +208,28 @@ def add_road_area(layers: Layers, osm_id: int, tags: dict, geometry):
     layers.add("Road areas", geometry, "road_area", _properties("area", osm_id, tags))
 
 
+SURVEY_AREA_STYLES = {"carriageway": "survey_carriageway", "parking": "survey_parking", "cycle": "survey_cycle",
+                      "footway": "survey_footway", "green": "survey_green", "shared": "survey_shared"}
+
+
+def add_survey(layers: Layers, survey, box):
+    """Hamburg's surveyed street space in the box (hh_survey.Survey): areas by use, kerbs, lamps, signal poles and
+    signs, as reference layers to compare our streets with."""
+    for group, usage, surface, polygon in survey.areas_in(box):
+        properties = {"kind": f"survey: {usage}", "osm_id": "", "tags": {}, "derived": {"surface": surface}}
+        layers.add("Survey: street areas", polygon, SURVEY_AREA_STYLES[group], properties)
+    for kerb in survey.kerbs_in(box):
+        layers.add("Survey: kerbs", kerb, "survey_kerb", {"kind": "survey: kerb", "osm_id": "", "tags": {},
+                                                          "derived": {}})
+    for kind, x, y in survey.points_in(box, {"lamp", "signal"}):
+        layers.add("Survey: lamps and signals", shapely.Point(x, y), f"survey_{kind}",
+                   {"kind": f"survey: {kind}", "osm_id": "", "tags": {}, "derived": {}})
+    for number, x, y, azimuth, pole in survey.signs_in(box):
+        layers.add("Survey: signs", shapely.Point(x, y), "survey_sign",
+                   {"kind": f"survey: sign {number}", "osm_id": "", "tags": {},
+                    "derived": {"facing_azimuth_deg": azimuth, "pole": pole}, "label": number})
+
+
 def _bit_names(value: int, names: dict) -> str:
     """The names of the bits set in value, comma separated, or "none"."""
     set_names = [name for bit, name in names.items() if value & bit]
