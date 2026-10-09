@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Async/Future.h"
+#include "UObject/GCObject.h"
 
 class AActor;
 class UInstancedStaticMeshComponent;
@@ -34,8 +35,9 @@ struct FGrassTileSource
  * The world is cut into square cells; cells near the viewer get instanced tufts, computed on worker threads from the
  * tiles' land cover and heights, and cells that fall out of range are removed again. Near the edge of its radius each
  * tuft shrinks away in the material, so nothing pops. Owned by AWorldStreamer, which feeds it tile data.
+ * Not a UObject, so it reports its meshes, materials and components to the garbage collector itself.
  */
-class FGrassField
+class FGrassField : public FGCObject
 {
 public:
 	/** Finds the tiles overlapping a world rectangle; tiles without data are left out. */
@@ -52,6 +54,10 @@ public:
 
 	/** Removes everything. */
 	void Clear();
+
+	/** Keeps the tuft meshes, their materials and the cell components alive while the field uses them. */
+	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
+	virtual FString GetReferencerName() const override;
 
 private:
 	/** Which land cover weight a kind grows on. */
