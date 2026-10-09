@@ -12,7 +12,11 @@ import unreal
 
 LIGHTING_LABELS = {"Sun", "SkyAtmosphere", "SkyLight", "HeightFog", "PostProcess", "Clouds"}
 SUN_LUX = 75000.0
-DAY_EV100 = 13.0
+DAY_EV100 = 12.5
+# Local exposure contrast (1 = off); see set_local_exposure.
+LOCAL_SHADOW_CONTRAST = 0.5
+LOCAL_HIGHLIGHT_CONTRAST = 0.7
+WHITE_TEMPERATURE = 7000.0
 
 
 def setup(actor_subsystem, sun_pitch=-38.0, sun_yaw=-40.0):
@@ -52,7 +56,29 @@ def setup(actor_subsystem, sun_pitch=-38.0, sun_yaw=-40.0):
     settings.set_editor_property("auto_exposure_bias", 0.0)
     settings.set_editor_property("override_motion_blur_amount", True)
     settings.set_editor_property("motion_blur_amount", 0.0)
+    set_local_exposure(settings)
     ppv.set_editor_property("settings", settings)
+
+
+def set_local_exposure(settings):
+    """Compresses the contrast between sun and shade the way the eye does.
+
+    With exposure locked for sunlit surfaces, a street in shade gets an eighth of the light and renders nearly black,
+    while the eye (and a phone camera's tone curve) sees it as clearly lit. Local exposure brightens large shaded
+    regions and tames large bright ones but keeps the detail inside them.
+    """
+    values = {
+        "local_exposure_method": unreal.LocalExposureMethod.BILATERAL,
+        "local_exposure_shadow_contrast_scale": LOCAL_SHADOW_CONTRAST,
+        "local_exposure_highlight_contrast_scale": LOCAL_HIGHLIGHT_CONTRAST,
+        "local_exposure_detail_strength": 1.0,
+        "local_exposure_blurred_luminance_blend": 0.6,
+        # Shade is lit by the blue sky; the eye adapts to it, so balance slightly warmer than daylight.
+        "white_temp": WHITE_TEMPERATURE,
+    }
+    for name, value in values.items():
+        settings.set_editor_property("override_" + name, True)
+        settings.set_editor_property(name, value)
 
 
 def replace_in_current_level(actor_subsystem):
