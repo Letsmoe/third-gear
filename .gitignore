@@ -23,6 +23,7 @@ Tools/**/.venv
 /Content/CitySampleVehicles
 /Content/Textures
 /Content/Vegetation
+/Content/Grass
 /Content/World
 
 # Plugin build output

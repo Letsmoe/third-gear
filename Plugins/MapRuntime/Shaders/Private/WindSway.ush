@@ -97,3 +97,31 @@ float3 DgTreeWind(float3 worldPosition, float3 localPosition, float3 cameraPosit
 	offset.z -= dot(trunk, trunk) / max(worldHeightCm, 1.0) * bendShape * 0.5;
 	return offset * fade;
 }
+
+// Sway of a grass tuft in world-space centimetres, relative to the tuft's own position, plus the shrinking that makes
+// tufts vanish with distance (a tuft's random number decides how far out it survives, so density thins out).
+//   tuftHeightCm       height of this tuft as placed in the world
+//   fadeStartCm, fadeEndCm  camera distance range over which tufts disappear
+float3 DgGrassWind(float3 worldPosition, float3 tuftPosition, float3 cameraPosition, float seconds, float instanceRandom,
+	float windSpeed, float2 windDirection, float tuftHeightCm, float fadeStartCm, float fadeEndCm)
+{
+	const float TwoPi = 6.2831853;
+	float3 fromRoot = worldPosition - tuftPosition;
+	float heightFraction = saturate(fromRoot.z / max(tuftHeightCm, 1.0));
+	float survival = 1.0 - smoothstep(fadeStartCm, fadeEndCm, distance(tuftPosition, cameraPosition));
+	float scale = saturate((survival - instanceRandom * 0.9) * 4.0);
+
+	float localSpeed = DgWindLocalSpeed(tuftPosition.xy, windDirection, windSpeed, seconds);
+	float load = (localSpeed * localSpeed) / 100.0;
+	float2 acrossWind = float2(-windDirection.y, windDirection.x);
+	// Waves run through a meadow along the wind: a swell about 4 m long every second or so.
+	float wavePhase = dot(tuftPosition.xy, windDirection) * (TwoPi / 420.0) - TwoPi * 0.9 * seconds;
+	float wave = 0.5 + 0.5 * sin(wavePhase + sin(dot(tuftPosition.xy, acrossWind) * 0.004) * 2.0);
+	float flutter = sin(TwoPi * (1.3 + instanceRandom) * 2.1 * seconds + instanceRandom * 40.0);
+	// Lean with the wind (about 30 % of the height at 10 m/s), swell and flutter on top, growing with height squared.
+	float bend = heightFraction * heightFraction * tuftHeightCm * load * (0.25 + 0.2 * wave + 0.05 * flutter + 0.02);
+	float sideways = heightFraction * heightFraction * tuftHeightCm * load * 0.06 * sin(wavePhase * 1.7 + instanceRandom * 20.0);
+	float2 sway = windDirection * bend + acrossWind * sideways;
+	float3 offset = float3(sway, -dot(sway, sway) / max(tuftHeightCm, 1.0) * 0.5);
+	return (fromRoot + offset) * scale - fromRoot;
+}

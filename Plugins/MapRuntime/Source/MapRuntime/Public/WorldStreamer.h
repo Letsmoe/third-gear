@@ -9,6 +9,7 @@ class UMaterialInterface;
 class UStaticMesh;
 class UTexture;
 struct FWorldStreamerShared;
+class FGrassField;
 struct FFurnitureMeshes;
 struct FWorldTileBuild;
 
@@ -149,6 +150,9 @@ private:
 
 	UMaterialInterface* FindMaterial(const FString& Section);
 
+	/** Keeps the 3D grass around the viewer up to date (GrassField.h); -NoGrass turns it off. */
+	void UpdateGrass(const FVector& Location);
+
 	TArray<FTileState> Tiles;
 	FString WorldDir;
 	TSharedPtr<class FJsonObject> Start;
@@ -175,6 +179,8 @@ private:
 
 	/** Finished builds being spawned, nearest first. */
 	TArray<TSharedPtr<struct FTileSpawnJob>> SpawnJobs;
+	TSharedPtr<FGrassField> Grass;
+	bool bGrassFailed = false;
 	float SecondsSinceUpdate = 0.f;
 	int32 BuildsInFlight = 0;
 	bool bIndexLoaded = false;
