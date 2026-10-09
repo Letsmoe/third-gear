@@ -84,10 +84,13 @@ struct FDgWinRoom
 	float PictureX;
 	float PictureY;
 	float DoorOnLeft;
+	float AtlasColumn;     // tile of the back wall photo in the room atlas
+	float AtlasRow;
+	float AtlasFlip;
 };
 
 /** Builds the room of a window: size, colours, furniture and the lamp, all from the seed. */
-FDgWinRoom DgWinMakeRoom(uint Seed, float StoreyHeight, float WindowCentre, float FrontDepth)
+FDgWinRoom DgWinMakeRoom(uint Seed, float StoreyHeight, float WindowCentre, float FrontDepth, float AtlasStrength)
 {
 	FDgWinRoom room;
 	float widthChoice = DgWinRand(Seed, 1u);
@@ -117,6 +120,10 @@ FDgWinRoom DgWinMakeRoom(uint Seed, float StoreyHeight, float WindowCentre, floa
 	room.PictureX = lerp(0.3, 0.7, DgWinRand(Seed, 17u));
 	room.PictureY = lerp(1.2, 1.7, DgWinRand(Seed, 18u));
 	room.DoorOnLeft = step(0.5, DgWinRand(Seed, 19u));
+	float atlasTile = floor(DgWinRand(Seed, 18u + 40u) * 11.99);
+	room.AtlasColumn = fmod(atlasTile, 4.0);
+	room.AtlasRow = floor(atlasTile / 4.0);
+	room.AtlasFlip = step(0.5, DgWinRand(Seed, 19u + 40u));
 
 	// Lamp: a pendant under the ceiling near the middle of the room, mostly warm; the colour decides the mood.
 	float lampChoice = DgWinRand(Seed, 20u);
@@ -177,6 +184,18 @@ FDgWinRoom DgWinMakeRoom(uint Seed, float StoreyHeight, float WindowCentre, floa
 		room.BoxCLow = room.BoxBLow;
 		room.BoxCHigh = room.BoxBLow;
 	}
+	if (AtlasStrength > 0.5)
+	{
+		// The photographed back wall brings its own furniture; keep only the table and the armchair in the room.
+		room.BoxALow = float3(1e5, 1e5, 1e5);
+		room.BoxAHigh = float3(1e5, 1e5, 1e5) + 1.0;
+		if (room.SecondKind == 1.0)
+		{
+			room.SecondKind = 2.0;
+			room.BoxBLow = float3(secondXZ.x - 0.4, floorY, secondXZ.y - 0.4);
+			room.BoxBHigh = float3(secondXZ.x + 0.4, floorY + 0.8, secondXZ.y + 0.4);
+		}
+	}
 	return room;
 }
 
@@ -235,8 +254,8 @@ float3 DgWinWallAlbedo(FDgWinRoom Room, float2 Position, float Footprint, float 
  * Albedo and normal of whatever the ray from the pane meets first inside the room, with the hit position.
  * Alpha > 0 in Emission marks a lit lampshade or screen the caller shows at full brightness.
  */
-float3 DgWinTraceRoom(FDgWinRoom Room, float3 Origin, float3 Direction, float Footprint, out float3 HitPosition,
-	out float3 HitNormal, out float Glow)
+float3 DgWinTraceRoom(FDgWinRoom Room, float3 Origin, float3 Direction, float Footprint, Texture2D Atlas,
+	SamplerState AtlasSampler, float AtlasStrength, out float3 HitPosition, out float3 HitNormal, out float Glow)
 {
 	Glow = 0.0;
 	float distanceBox = 1e9;
@@ -335,7 +354,17 @@ float3 DgWinTraceRoom(FDgWinRoom Room, float3 Origin, float3 Direction, float Fo
 	float2 position = isBack ? float2(hit.x, hit.y) : float2(hit.z, hit.y);
 	float isAccent = isBack ? Room.AccentWall : 0.0;
 	float3 wall = DgWinWallAlbedo(Room, position, footprint, isAccent);
-	if (isBack)
+	if (isBack && AtlasStrength > 0.0)
+	{
+		// The wall is a photograph of a furnished wall, stretched over the room's back wall.
+		float wallWidth = Room.High.x - Room.Low.x;
+		float2 tileUv = float2((hit.x - Room.Low.x) / wallWidth, 1.0 - (hit.y - Room.Low.y) / (Room.High.y - Room.Low.y));
+		tileUv.x = lerp(tileUv.x, 1.0 - tileUv.x, Room.AtlasFlip);
+		float2 atlasUv = (float2(Room.AtlasColumn, Room.AtlasRow) + clamp(tileUv, 0.012, 0.988)) / float2(4.0, 3.0);
+		float level = clamp(log2(max(footprint, 1e-4) / (wallWidth / 512.0)), 0.0, 4.0);
+		wall = lerp(wall, Atlas.SampleLevel(AtlasSampler, atlasUv, level).rgb * 1.2, AtlasStrength);
+	}
+	else if (isBack)
 	{
 		// A picture on the back wall.
 		float2 pictureCentre = float2(lerp(Room.Low.x, Room.High.x, Room.PictureX), Room.PictureY);
@@ -391,6 +420,19 @@ float DgWinPleats(float Across, float Seedling, float Pleat, float Amplitude, fl
 }
 
 /**
+ * Lace of a net curtain: 1 on the plain veil, dipping where the pattern's lozenges are. Position is metres across and
+ * up from the hem; the pattern only exists within 25 cm of the hem and fades out when a pixel covers its detail.
+ */
+float DgWinLace(float2 Position, float MetresPerPixel)
+{
+	float band = 1.0 - smoothstep(0.12, 0.25, Position.y);
+	float2 cell = frac(float2(Position.x, Position.y) / 0.06) - 0.5;
+	float lozenge = smoothstep(0.32, 0.18, abs(cell.x) + abs(cell.y));
+	float visible = saturate(1.0 - MetresPerPixel / 0.02);
+	return 1.0 - 0.45 * lozenge * band * visible;
+}
+
+/**
  * The window dressing at a point of the curtain plane. Across is the metres from the window's centre, Down the metres
  * from the window's top. Returns the cover (0 clear, 1 opaque) and sets the albedo and the share of lamp light that
  * shines through it. Kinds: none, net (Store), cafe curtain, net with drapes, drapes, roller blind, venetian blind.
@@ -407,15 +449,16 @@ float DgWinCurtain(uint Seed, float Across, float Down, float WindowWidth, float
 	float pleat = lerp(0.07, 0.13, DgWinRand(Seed, 51u));
 	float seedling = DgWinRand(Seed, 52u) * 20.0;
 
-	if (pick < 0.10)
+	// Nets (Store, Scheibengardine, with or without drapes) are most of Germany's windows; blinds are the rest.
+	if (pick < 0.06)
 	{
 		return 0.0;
 	}
-	bool hasNet = pick < 0.34 || (pick >= 0.46 && pick < 0.60);
-	bool hasCafe = pick >= 0.34 && pick < 0.46;
-	bool hasDrapes = pick >= 0.46 && pick < 0.68;
-	bool isRoller = pick >= 0.68 && pick < 0.86;
-	bool isVenetian = pick >= 0.86;
+	bool hasNet = pick < 0.38 || (pick >= 0.56 && pick < 0.70);
+	bool hasCafe = pick >= 0.38 && pick < 0.56;
+	bool hasDrapes = pick >= 0.56 && pick < 0.76;
+	bool isRoller = pick >= 0.76 && pick < 0.90;
+	bool isVenetian = pick >= 0.90;
 
 	if (hasNet)
 	{
@@ -424,10 +467,12 @@ float DgWinCurtain(uint Seed, float Across, float Down, float WindowWidth, float
 		float pleats = DgWinPleats(Across, seedling, pleat, 0.45, MetresPerPixel);
 		float header = (1.0 - smoothstep(0.0, 0.1, Down - 0.06)) * 0.08;
 		float hangs = step(Down, hem) * step(-0.02, Down);
-		float netOpacity = lerp(0.55, 0.85, DgWinRand(Seed, 54u));
-		cover = inside * hangs * saturate(netOpacity * lerp(1.0, 1.25, 1.0 - pleats) + header);
-		Albedo = float3(0.78, 0.78, 0.74) * lerp(0.55, 1.0, pleats);
-		Transmission = 0.55;
+		float netOpacity = lerp(0.6, 0.9, DgWinRand(Seed, 54u));
+		// A band of lace lozenges along the hem, a sheer plain veil above it.
+		float lace = DgWinLace(float2(Across, hem - Down), MetresPerPixel);
+		cover = inside * hangs * saturate(netOpacity * lerp(1.0, 1.25, 1.0 - pleats) * lace + header);
+		Albedo = float3(0.9, 0.9, 0.86) * lerp(0.7, 1.0, pleats);
+		Transmission = 0.85;
 	}
 	if (hasCafe)
 	{
@@ -435,9 +480,9 @@ float DgWinCurtain(uint Seed, float Across, float Down, float WindowWidth, float
 		float rod = WindowHeight * lerp(0.28, 0.5, DgWinRand(Seed, 55u));
 		float pleats = DgWinPleats(Across, seedling, pleat * 0.8, 0.5, MetresPerPixel);
 		float scallop = rod + 0.03 * smoothstep(0.0, 1.0, abs(frac(Across / 0.12) - 0.5) * 2.0);
-		cover = inside * step(scallop, Down) * step(Down, WindowHeight + 0.02) * 0.9;
-		Albedo = float3(0.78, 0.77, 0.72) * lerp(0.5, 1.0, pleats);
-		Transmission = 0.5;
+		cover = inside * step(scallop, Down) * step(Down, WindowHeight + 0.02) * 0.92 * DgWinLace(float2(Across, WindowHeight - Down), MetresPerPixel);
+		Albedo = float3(0.9, 0.89, 0.85) * lerp(0.65, 1.0, pleats);
+		Transmission = 0.8;
 	}
 	if (hasDrapes)
 	{
@@ -450,7 +495,7 @@ float DgWinCurtain(uint Seed, float Across, float Down, float WindowWidth, float
 		float drapeCover = panelCover * step(-0.15, Down) * 0.97;
 		float3 drapeColour = DgWinDrapePalette[int(DgWinRand(Seed, 58u) * 7.99)] * lerp(0.35, 1.0, pleats);
 		Albedo = lerp(Albedo, drapeColour, step(0.5, drapeCover));
-		Transmission = lerp(Transmission, 0.22, step(0.5, drapeCover));
+		Transmission = lerp(Transmission, 0.45, step(0.5, drapeCover));
 		cover = max(cover, drapeCover);
 	}
 	if (isRoller)
@@ -461,7 +506,7 @@ float DgWinCurtain(uint Seed, float Across, float Down, float WindowWidth, float
 		float3 blindColour = lerp(float3(0.75, 0.74, 0.68), DgWinWallPalette[int(DgWinRand(Seed, 61u) * 7.99)] * 1.2, step(0.6, DgWinRand(Seed, 62u)));
 		cover = inside * step(Down, drop) * step(-0.05, Down);
 		Albedo = blindColour * lerp(1.0, 0.7, bar) * (0.95 + 0.05 * DgValueNoise(float2(Across * 30.0, Down * 2.0)));
-		Transmission = 0.18;
+		Transmission = 0.3;
 	}
 	if (isVenetian)
 	{
@@ -473,7 +518,7 @@ float DgWinCurtain(uint Seed, float Across, float Down, float WindowWidth, float
 		cover = inside * step(Down, drop) * step(-0.05, Down) * (1.0 - gap);
 		float3 slatColour = lerp(float3(0.72, 0.71, 0.66), float3(0.35, 0.25, 0.14), step(0.7, DgWinRand(Seed, 64u)));
 		Albedo = slatColour * lerp(1.0, 0.5 + 0.5 * smoothstep(0.0, 0.8, slat), visible);
-		Transmission = 0.15;
+		Transmission = 0.25;
 	}
 	return cover;
 }
@@ -491,6 +536,25 @@ struct FDgWindowGlass
 };
 
 /**
+ * Doors and stairwell windows: frosted or patterned glass with the stairwell's light behind it. By day it is a dull
+ * milky grey, at night a share of stairwells have their light on and glow a cool or warm white.
+ */
+FDgWindowGlass DgWinStairwell(float2 Pane, uint Seed, float Night, float Hour, float Daylight, float DayRadiance,
+	float LampRadiance, float LitShare)
+{
+	FDgWindowGlass result;
+	float stairLit = step(DgWinRand(Seed, 100u), 0.35 + 0.4 * LitShare) * Night;
+	float3 stairColour = lerp(float3(1.0, 0.72, 0.45), float3(0.85, 0.9, 1.0), step(0.6, DgWinRand(Seed, 101u)));
+	float patch = 0.85 + 0.15 * DgValueNoise(Pane * 7.0);
+	result.Emissive = (DayRadiance * Daylight * 0.12 * float3(0.8, 0.8, 0.78) + LampRadiance * 0.55 * stairLit * stairColour) * patch;
+	// Frosted glass scatters what falls on it: a pale diffuse surface with a soft sheen.
+	result.Diffuse = float3(0.42, 0.44, 0.44) * (0.9 + 0.1 * DgValueNoise(Pane * 40.0));
+	result.Roughness = 0.38;
+	result.NormalTilt = float2(0.0, 0.0);
+	return result;
+}
+
+/**
  * Everything a window pane shows. Pane is (u, v) in metres on the pane (v up); ViewLocal points from the eye into the
  * building in the pane frame (z > 0); Seed identifies the window; MetresPerPixel is the pane's size on screen.
  * Night, Hour (local, 0..24), Daylight (illuminance relative to the calibration day) and Wetness are the weather.
@@ -500,27 +564,36 @@ struct FDgWindowGlass
 FDgWindowGlass DgWindowGlass(float2 Pane, float3 ViewLocal, uint Seed, float MetresPerPixel, float Night, float Hour,
 	float Daylight, float Wetness, float StoreyHeight, float WindowCentre, float WindowWidth, float WindowBottom,
 	float WindowTop, float Age, float Dirt, float DayRadiance, float LampRadiance, float LitShare, float CurtainShare,
-	float FrontDepth)
+	float FrontDepth, Texture2D Atlas, SamplerState AtlasSampler, float AtlasStrength, float Frosted, float CurtainDayRadiance)
 {
 	FDgWindowGlass result;
 	float3 direction = normalize(float3(ViewLocal.xy, max(ViewLocal.z, 0.04)));
 	float3 origin = float3(Pane, 0.0);
 	float windowHeight = WindowTop - WindowBottom;
+	if (Frosted > 0.5)
+	{
+		return DgWinStairwell(Pane, Seed, Night, Hour, Daylight, DayRadiance, LampRadiance, LitShare);
+	}
 
 	// Glass waviness: smooth tilt in a few centimetres per metre, stronger in old glass and gone at distance.
 	float2 wavePosition = Pane * 2.1 + float2(DgWinRand(Seed, 70u), DgWinRand(Seed, 71u)) * 40.0;
 	float waveAmount = lerp(0.004, 0.045, Age) * saturate((0.3 - MetresPerPixel) / 0.2);
 	float2 tilt = float2(DgValueNoise(wavePosition) - 0.5, DgValueNoise(wavePosition + 17.3) - 0.5) * 2.0 * waveAmount;
+	// Every sash and the fanlight hang a little differently, which breaks the mirror into panes at different angles.
+	float sashColumn = floor((Pane.x - (WindowCentre - WindowWidth * 0.5)) / (WindowWidth * 0.5));
+	float sashRow = step(WindowTop - 0.45, Pane.y);
+	float sashSeed = DgWinHash(Seed + uint(int(sashColumn) + 8) * 31u + uint(sashRow) * 977u);
+	tilt += (float2(DgWinRand(sashSeed, 1u), DgWinRand(sashSeed, 2u)) - 0.5) * lerp(0.006, 0.03, Age);
 	tilt += float2(DgValueNoise(wavePosition * 3.1 + 5.0) - 0.5, DgValueNoise(wavePosition * 3.1 + 11.0) - 0.5) * waveAmount * 0.5;
 	result.NormalTilt = tilt;
 
 	// The room.
-	FDgWinRoom room = DgWinMakeRoom(Seed, StoreyHeight, WindowCentre, FrontDepth);
+	FDgWinRoom room = DgWinMakeRoom(Seed, StoreyHeight, WindowCentre, FrontDepth, AtlasStrength);
 	float3 hitPosition;
 	float3 hitNormal;
 	float glow;
 	// Parallax of the glass itself: the curtain plane is a few centimetres behind it.
-	float3 albedo = DgWinTraceRoom(room, origin + direction * (FrontDepth / direction.z), direction, MetresPerPixel, hitPosition, hitNormal, glow);
+	float3 albedo = DgWinTraceRoom(room, origin + direction * (FrontDepth / direction.z), direction, MetresPerPixel, Atlas, AtlasSampler, AtlasStrength, hitPosition, hitNormal, glow);
 
 	// Is the lamp on? Each window has its own switching-on time in the evening, its own time to bed (most go dark
 	// after 23:00, a few stay on), and some are lit around breakfast. Daylight dulls the effect: only with dusk.
@@ -540,6 +613,9 @@ FDgWindowGlass DgWindowGlass(float2 Pane, float3 ViewLocal, uint Seed, float Met
 	float shade = (hitNormal.y < -0.5) ? exp(-lampDistance * lampDistance * 14.0) : 0.0;
 	roomRadiance += lit * LampRadiance * room.LampColour * room.LampStrength * (shade * 2.5 + glow * 0.6);
 	roomRadiance *= 0.9;
+	// Far away the room's detail is below a pixel and only shimmers: fade to its average colour.
+	float3 averageRoom = (DayRadiance * Daylight * 0.2 * float3(0.62, 0.55, 0.45) + LampRadiance * lit * room.LampColour * room.LampStrength * 0.3);
+	roomRadiance = lerp(roomRadiance, averageRoom, smoothstep(0.03, 0.08, MetresPerPixel));
 
 	// Window dressing, 5 cm behind the glass.
 	float curtainDepth = 0.05;
@@ -552,8 +628,11 @@ FDgWindowGlass DgWindowGlass(float2 Pane, float3 ViewLocal, uint Seed, float Met
 	cover *= step(DgWinRand(Seed, 49u), CurtainShare);
 
 	// Lit curtains glow: the lamp shines through net and drapes, never fully.
-	float3 backlight = lit * LampRadiance * room.LampColour * room.LampStrength * 0.55 * curtainTransmission * curtainAlbedo;
-	result.Emissive = roomRadiance * (1.0 - cover) + backlight * cover;
+	float3 backlight = lit * LampRadiance * room.LampColour * room.LampStrength * 0.8 * curtainTransmission * curtainAlbedo;
+	// By day a curtain behind the glass is lit by the sky coming in through it, which the walls' reveal shades off the
+	// scene lighting: add that light as emission.
+	float3 skyLit = curtainAlbedo * CurtainDayRadiance * Daylight;
+	result.Emissive = roomRadiance * (1.0 - cover) + (backlight + skyLit) * cover;
 	result.Diffuse = curtainAlbedo * cover;
 
 	// Dirt and rain film on the glass: dust gathers in the lower corners and rain washes streaks from the top.

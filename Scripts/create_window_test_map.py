@@ -109,7 +109,9 @@ def build_row(actor_subsystem, style, bays, storeys, origin_cm, yaw, door_bay=No
             location = at(bay * MODULE_CM, storey * storey_cm)
             place(actor_subsystem, piece(wall), location, yaw, materials)
             if is_door:
-                place(actor_subsystem, piece("Door_Glazed" if style == "block" else "Door"), location, yaw, materials)
+                # Door leaves and fanlights get frosted stairwell glass, not a room.
+                door_materials = dict(materials, Glass=unreal.load_asset(f"{WINDOWS}/MI_WindowGlass_Door"))
+                place(actor_subsystem, piece("Door_Glazed" if style == "block" else "Door"), location, yaw, door_materials)
                 continue
             place(actor_subsystem, piece("Window"), location, yaw, materials)
             place(actor_subsystem, piece("Sill"), location, yaw, materials)

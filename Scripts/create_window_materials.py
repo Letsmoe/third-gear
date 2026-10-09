@@ -13,6 +13,7 @@ import unreal
 
 FOLDER = "/Game/World/Windows"
 WEATHER_COLLECTION = "/Game/World/MPC_Weather"
+ATLAS = "/Game/World/Windows/T_RoomAtlas"  # Scripts/import_room_atlas.py
 NOISE_INCLUDE = "/Plugin/MapRuntime/Private/TerrainNoise.ush"
 WINDOW_INCLUDE = "/Plugin/MapRuntime/Private/WindowInterior.ush"
 
@@ -41,7 +42,7 @@ float2 paneY = ddy(pane);
 float metresPerPixel = max(length(paneX), length(paneY));
 FDgWindowGlass glass = DgWindowGlass(pane, viewLocal, seed, metresPerPixel, Night, TimeOfDay, Illuminance, Wetness,
 	StoreyHeight, WindowCentre, WindowWidth, WindowBottom, WindowTop, Age, Dirt, DayRadiance, LampRadiance, LitShare,
-	CurtainShare, FrontDepth);
+	CurtainShare, FrontDepth, RoomAtlas, RoomAtlasSampler, AtlasStrength, Frosted, CurtainDayRadiance);
 DiffuseOut = glass.Diffuse;
 RoughOut = glass.Roughness;
 NormalOut = normalize(float3(glass.NormalTilt, 1.0));
@@ -125,8 +126,8 @@ def build_glass():
     names = ["UV", "WorldPosition", "CameraVector", "AxisX", "AxisY", "AxisZ", "Night", "TimeOfDay", "Illuminance",
              "Wetness"]
     parameters = {"StoreyHeight": 3.25, "WindowCentre": 1.0, "WindowWidth": 1.0, "WindowBottom": 0.85,
-                  "WindowTop": 2.75, "Age": 0.5, "Dirt": 0.5, "DayRadiance": 55.0, "LampRadiance": 2.2,
-                  "LitShare": 0.55, "CurtainShare": 0.85, "FrontDepth": 0.22}
+                  "WindowTop": 2.75, "Age": 0.5, "Dirt": 0.5, "RoomAtlas": None, "DayRadiance": 45.0, "LampRadiance": 3.6,
+                  "LitShare": 0.55, "CurtainShare": 0.9, "FrontDepth": 0.22, "AtlasStrength": 1.0, "Frosted": 0.0, "CurtainDayRadiance": 1800.0}
     custom = expr(material, unreal.MaterialExpressionCustom, -700, 0, code=GLASS_HLSL, description="WindowGlass",
                   output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3,
                   inputs=[custom_input(n) for n in names + list(parameters)])
@@ -147,13 +148,19 @@ def build_glass():
                     collection=collection, parameter_name=collection_name)
         link(node, "", custom, input_name)
     for row, (name, default) in enumerate(parameters.items()):
+        if name == "RoomAtlas":
+            continue
         link(scalar(material, name, default, -1500, 1600 + row * 100), "", custom, name)
+    atlas = unreal.load_asset(ATLAS) if eal.does_asset_exist(ATLAS) else unreal.load_asset("/Engine/EngineResources/WhiteSquareTexture")
+    atlas_node = expr(material, unreal.MaterialExpressionTextureObjectParameter, -1500, 3000, parameter_name="RoomAtlas",
+                      texture=atlas, sampler_type=unreal.MaterialSamplerType.SAMPLERTYPE_COLOR)
+    link(atlas_node, "", custom, "RoomAtlas")
 
     mel.connect_material_property(custom, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.connect_material_property(custom, "DiffuseOut", unreal.MaterialProperty.MP_BASE_COLOR)
     mel.connect_material_property(custom, "RoughOut", unreal.MaterialProperty.MP_ROUGHNESS)
     mel.connect_material_property(custom, "NormalOut", unreal.MaterialProperty.MP_NORMAL)
-    mel.connect_material_property(expr(material, unreal.MaterialExpressionConstant, -300, 300, r=0.5), "",
+    mel.connect_material_property(expr(material, unreal.MaterialExpressionConstant, -300, 300, r=1.0), "",
                                   unreal.MaterialProperty.MP_SPECULAR)
     mel.recompile_material(material)
     eal.save_loaded_asset(material)
@@ -220,6 +227,7 @@ def main():
     # Old timber casements: wavy glass, much dirt, curtains on most. PVC: flat glass, tidy. Aluminium: shop and office.
     build_instance(glass, "MI_WindowGlass_Timber", {"Age": 0.9, "Dirt": 0.45})
     build_instance(glass, "MI_WindowGlass_PVC", {"Age": 0.1, "Dirt": 0.3})
+    build_instance(glass, "MI_WindowGlass_Door", {"Frosted": 1.0, "Age": 0.3})
     build_instance(glass, "MI_WindowGlass_Aluminium", {"Age": 0.0, "Dirt": 0.2, "CurtainShare": 0.55, "LitShare": 0.7})
     build_instance(frame, "MI_WindowFrame_Timber", {"Dirt": 0.5, "BaseRoughness": 0.45}, {"Paint": (0.74, 0.74, 0.70, 1)})
     build_instance(frame, "MI_WindowFrame_PVC", {"Dirt": 0.25, "BaseRoughness": 0.3}, {"Paint": (0.80, 0.81, 0.80, 1)})
