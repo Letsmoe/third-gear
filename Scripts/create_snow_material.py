@@ -53,7 +53,7 @@ float trodden = footway * saturate((edge - 0.25) / 0.3) * saturate(0.35 + 1.1 * 
 float fade_fine = saturate(1.0 - pixel_cm / 1.2);
 float fade_grain = saturate(1.0 - pixel_cm / 0.5);
 float fade_ripple = saturate(1.0 - pixel_cm / 6.0);
-#define SNOW_H(q) (0.35 * DgValueNoise((q) * 14.0) * fade_fine + 0.18 * DgValueNoise((q) * 38.0) * fade_grain + 1.8 * DgValueNoise(float2((q).x * 2.0 + (q).y * 0.4, (q).y * 7.0)) * fade_ripple + 3.0 * DgValueNoise((q) / 1.7))
+#define SNOW_H(q) (0.35 * DgValueNoise((q) * 14.0) * fade_fine + 0.18 * DgValueNoise((q) * 38.0) * fade_grain + 0.5 * DgValueNoise(float2((q).x * 1.5 + (q).y * 0.5, (q).y * 4.0)) * fade_ripple + 3.0 * DgValueNoise((q) / 1.7))
 float h = SNOW_H(p);
 float step_m = 0.02;
 float dhx = (SNOW_H(p + float2(step_m, 0)) - h) / (step_m * 100.0);

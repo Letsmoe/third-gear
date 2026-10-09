@@ -425,7 +425,7 @@ float WallDriftDepth(float Distance, const FVector2f& Outward)
 		return 0.f;
 	}
 	const float Lee = FMath::SmoothStep(-0.3f, 0.8f, FVector2f::DotProduct(Outward, SnowWindDirection));
-	return (0.55f * Lee + 0.04f) * FMath::Exp(-Distance / 1.5f);
+	return (0.35f * Lee + 0.04f) * FMath::Exp(-Distance / 1.5f);
 }
 
 /** The highest ground height among a sample and its eight neighbours that carry ground. */
@@ -504,7 +504,7 @@ void ComputeSnowSurface(const FWorldTileData& Tile, FSnowSamples& Samples)
 		Samples.Depth[Index] = FMath::Min(Depth, SnowMaximumDepth);
 		Samples.Surface[Index] = Samples.Ground[Index] + Samples.Depth[Index];
 		const bool bNoSnow = Class == ESnowClass::None || Class == ESnowClass::Water;
-		Samples.bSkip[Index] = bNoSnow || Samples.WallDistance[Index] < -0.8f;
+		Samples.bSkip[Index] = bNoSnow || Samples.WallDistance[Index] < -2.5f;
 	}
 }
 
