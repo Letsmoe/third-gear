@@ -305,6 +305,30 @@ automatically when its manifest's `detail` matches (skip with `-nohorizon`).
      `ReverseButtonIndex`, `*ButtonIndex`. Check in-game with `-WheelDebug` (log prints the same numbering) and the
      dashboard (gear, rpm); turning right must steer right, and at speed the wheel must pull back to centre.
 
+## Sound
+- **Car sound** is synthesised, not sampled: `FCarSoundDsp` (`CarSoundDsp.*`, plain C++) renders the cabin of a 1.4 TSI:
+  firing orders (crank half-orders 0.5..32) as a phase-locked additive series with load dependent slope and a cabin transfer
+  function (boom 92/185 Hz, low pass), combustion and intake noise, turbo whistle and blow-off, burble on the overrun,
+  injector ticks, idle wander, rev limiter fuel cut, starter and compression pulses while cranking, stall shudder; tyre roar
+  (asphalt, cobbles and pavers with their own impulse textures, wet hiss), squeal from the slip, wind from the air speed
+  (weather wind included) and one-shots (gear clunk, handbrake ratchet, kerb thump, indicator relay). `FCarSoundMapper`
+  (`CarSoundMapper.*`) turns `FCarTelemetry` into its inputs and detects the one-shot moments. `UCarSynthComponent` runs it
+  on the audio thread (a SynthComponent rather than a MetaSound: no binary graph, and the offline test renders the same code).
+- `UCarAudioComponent` (on `ACarPawn`, only for the player-controlled car, inert with `-nosound`) owns the synth and the
+  ambience: looping beds (`/Game/Audio/Loops`: town day/night, birds, wind in trees, rain on roof, glass and road in light
+  and heavy variants) with volumes from `UWeatherVisualsSubsystem` (rain, wind, gusts, wetness), the sun height and the car
+  speed, and thunder (`/Game/Audio/OneShots`) played from the weather's `OnLightning` after distance / 343 m/s, picked and
+  low-passed by distance. The road surface comes from a downward trace and `FindWorldSurfaceName` (MapRuntime), which reads
+  the material of the hit triangle of the generated ground. `SetIndicatorActive()` is the hook for the indicator stalk.
+  Volumes follow `UDrivingPreferences` (Engine for the synth, Ambience for the beds and thunder, Master via the app).
+- **Generated sounds**: `Tools/audiogen/run_audiogen.sh` (prompts in `prompts.py`, Stable Audio Open through ComfyUI under the
+  gpu lock, then `postprocess.py` makes seamless loops and levelled one-shots in `/mnt/storage/third-gear/audio`), then
+  `Scripts/import_audio.py` (headless) imports them to `Content/Audio` (a data root link, not in git).
+- **Checking without ears**: `Scripts/audio_test.sh [out_dir]` runs scripted scenes (`AudioTest.*`, on the drive test runner)
+  headless and renders the synth offline to `car*.wav` stems with a telemetry CSV; `Tools/audiogen/analyze.py` gives levels per
+  scene, spectrograms, firing order tracking, click and clipping checks. `Scripts/audio_mix_test.sh` records the real mixer
+  (synth, beds, thunder) with SDL's dummy driver, in real time. `-AudioProbe="x,y;..."` reports the ground material at points.
+
 ## Asset rules
 - Everything must be **photorealistic** (scanned/photo-based); no stylized or low-poly assets.
 - Surfaces use height maps for parallax occlusion mapping (default) or Nanite displacement (close-up cobblestones, kerbs).

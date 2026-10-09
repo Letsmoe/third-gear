@@ -6,6 +6,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "CarPawn.h"
+#include "AudioTest.h"
 #include "DriveTest.h"
 #include "GameFlow.h"
 #include "RuleTest.h"
@@ -135,6 +136,12 @@ void ADrivingGameMode::BeginPlay()
 	if (FParse::Param(FCommandLine::Get(), TEXT("DriveTest")) && !UseFreeCamera())
 	{
 		GetWorld()->SpawnActor<ADriveTestRunner>();
+	}
+
+	// Scripted drive for the audio recordings (see Scripts/audio_test.sh).
+	if (FParse::Param(FCommandLine::Get(), TEXT("AudioTest")) && !UseFreeCamera())
+	{
+		GetWorld()->SpawnActor<AAudioTestRunner>();
 	}
 
 	// Rule checker test on the real signals and roads of the region (see Scripts/rule_test.sh).

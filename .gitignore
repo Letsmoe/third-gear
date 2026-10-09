@@ -19,6 +19,7 @@ __pycache__/
 /External
 /DerivedDataCache
 Tools/**/.venv
+/Content/Audio
 /Content/CitySampleVehicles
 /Content/Textures
 /Content/Vegetation

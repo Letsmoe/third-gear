@@ -2,6 +2,7 @@
 
 #include "Animation/AnimInstance.h"
 #include "Camera/CameraComponent.h"
+#include "CarAudioComponent.h"
 #include "CarMovementComponent.h"
 #include "CarSettings.h"
 #include "Components/InputComponent.h"
@@ -111,6 +112,8 @@ ACarPawn::ACarPawn(const FObjectInitializer& ObjectInitializer)
 		RuleMessage->SetTextMaterial(TextMaterial);
 	}
 	RuleChecker = CreateDefaultSubobject<UTrafficRuleComponent>(TEXT("RuleChecker"));
+
+	CarAudio = CreateDefaultSubobject<UCarAudioComponent>(TEXT("CarAudio"));
 
 	AutoPossessPlayer = EAutoReceiveInput::Disabled;
 	bUseControllerRotationYaw = false;
