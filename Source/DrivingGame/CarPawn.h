@@ -8,6 +8,7 @@
 
 class UCameraComponent;
 class UCarAudioComponent;
+class UCarRadioComponent;
 class UCarLightsComponent;
 class UInstrumentClusterComponent;
 class UCarMirrorsComponent;
@@ -40,6 +41,10 @@ public:
 
 	UCarMovementComponent* GetCarMovement() const;
 	UCarAudioComponent* GetCarAudio() const { return CarAudio; }
+	UCarRadioComponent* GetCarRadio() const { return Radio; }
+
+	/** Whether the ignition is on (the radio and lights run on it, with or without the engine). */
+	bool IsIgnitionOn() const { return bIgnitionOn; }
 	UCarLightsComponent* GetCarLights() const { return Lights; }
 	FCarTelemetry GetTelemetry() const;
 
@@ -81,6 +86,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TObjectPtr<UCarLightsComponent> Lights;
+
+	UPROPERTY(VisibleAnywhere, Category = "Components")
+	TObjectPtr<UCarRadioComponent> Radio;
 
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TObjectPtr<UInstrumentClusterComponent> Cluster;

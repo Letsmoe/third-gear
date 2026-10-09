@@ -381,6 +381,12 @@ rides a camera over the lanes and prints violations by AI cars, collisions betwe
   low-passed by distance. The road surface comes from a downward trace and `FindWorldSurfaceName` (MapRuntime), which reads
   the material of the hit triangle of the generated ground. `SetIndicatorActive()` is the hook for the indicator stalk.
   Volumes follow `UDrivingPreferences` (Engine for the synth, Ambience for the beds and thunder, Master via the app).
+- **Radio** (`CarRadioComponent.*`, on `ACarPawn`): live Hamburg stations from their internet streams (list in
+  `[/Script/DrivingGame.RadioSettings]`, DefaultGame.ini). `FRadioStreamer` (`RadioStream.*`) runs `ffmpeg` (decoding) and
+  `curl` (ICY song titles) as child processes on a worker thread, into a ring buffer that `URadioSynthComponent` plays as
+  car speakers (110 Hz to 12 kHz); the station and song show top right (`SRadioOverlay`). Plays with the ignition on.
+  Keys P on and off, `.` and `,` next and previous station; wheel buttons on the menu's wheel page; `Radio` volume in the
+  audio page. `-RadioStation=<n>` forces a station for tests, `-ShotUI` puts Slate widgets into screenshots.
 - **Generated sounds**: `Tools/audiogen/run_audiogen.sh` (prompts in `prompts.py`, Stable Audio Open through ComfyUI under the
   gpu lock, then `postprocess.py` makes seamless loops and levelled one-shots in `/mnt/storage/third-gear/audio`), then
   `Scripts/import_audio.py` (headless) imports them to `Content/Audio` (a data root link, not in git).

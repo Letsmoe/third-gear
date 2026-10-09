@@ -8,6 +8,7 @@
 #include "InstrumentCluster.h"
 #include "CarMirrors.h"
 #include "CarMovementComponent.h"
+#include "CarRadioComponent.h"
 #include "CarSettings.h"
 #include "Components/InputComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -103,6 +104,7 @@ ACarPawn::ACarPawn(const FObjectInitializer& ObjectInitializer)
 	RuleChecker = CreateDefaultSubobject<UTrafficRuleComponent>(TEXT("RuleChecker"));
 
 	CarAudio = CreateDefaultSubobject<UCarAudioComponent>(TEXT("CarAudio"));
+	Radio = CreateDefaultSubobject<UCarRadioComponent>(TEXT("Radio"));
 	Mirrors = CreateDefaultSubobject<UCarMirrorsComponent>(TEXT("Mirrors"));
 	Lights = CreateDefaultSubobject<UCarLightsComponent>(TEXT("Lights"));
 	Cluster = CreateDefaultSubobject<UInstrumentClusterComponent>(TEXT("Cluster"));
@@ -175,6 +177,9 @@ void ACarPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 	BindPressed(EKeys::Z, [this]() { Lights->ToggleIndicator(ECarIndicator::Left); });
 	BindPressed(EKeys::X, [this]() { Lights->ToggleIndicator(ECarIndicator::Right); });
 	BindPressed(EKeys::V, [this]() { Lights->ToggleIndicator(ECarIndicator::Hazard); });
+	BindPressed(EKeys::P, [this]() { Radio->ToggleRadio(); });
+	BindPressed(EKeys::Period, [this]() { Radio->NextStation(); });
+	BindPressed(EKeys::Comma, [this]() { Radio->PreviousStation(); });
 	const FKey GearKeys[] = {EKeys::N, EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six};
 	for (int32 Gear = 0; Gear < UE_ARRAY_COUNT(GearKeys); ++Gear)
 	{
@@ -302,6 +307,18 @@ FCarDriverInput ACarPawn::GatherInput(float DeltaSeconds)
 			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->HazardButtonIndex))
 			{
 				Lights->ToggleIndicator(ECarIndicator::Hazard);
+			}
+			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->RadioToggleButtonIndex))
+			{
+				Radio->ToggleRadio();
+			}
+			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->RadioNextButtonIndex))
+			{
+				Radio->NextStation();
+			}
+			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->RadioPreviousButtonIndex))
+			{
+				Radio->PreviousStation();
 			}
 			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->RecenterViewButtonIndex))
 			{

@@ -382,6 +382,9 @@ void FMenuPages::AddWheelButtonRows(FMenuPage& Page)
 	AddWheelButtonAssign(Page, TEXT("Indicator left"), TEXT("Starts and stops the left indicator. It cancels itself after the turn."), &UWheelInputSettings::IndicatorLeftButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Indicator right"), TEXT("Starts and stops the right indicator. It cancels itself after the turn."), &UWheelInputSettings::IndicatorRightButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Hazard lights"), TEXT("Switches the hazard warning lights on and off."), &UWheelInputSettings::HazardButtonIndex);
+	AddWheelButtonAssign(Page, TEXT("Radio on and off"), TEXT("Switches the car radio on and off."), &UWheelInputSettings::RadioToggleButtonIndex);
+	AddWheelButtonAssign(Page, TEXT("Next station"), TEXT("Tunes the next radio station."), &UWheelInputSettings::RadioNextButtonIndex);
+	AddWheelButtonAssign(Page, TEXT("Previous station"), TEXT("Tunes the previous radio station."), &UWheelInputSettings::RadioPreviousButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Open menu"), TEXT("Pauses the game and opens the menu. Holding the D-pad up for a second does the same."), &UWheelInputSettings::MenuButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Menu confirm"), TEXT("Chooses the selected entry in the menu. D-pad right does this without a button."), &UWheelInputSettings::MenuConfirmButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Menu back"), TEXT("Goes back one page. D-pad left on an entry does this without a button."), &UWheelInputSettings::MenuBackButtonIndex);
@@ -512,6 +515,7 @@ FMenuPage FMenuPages::BuildAudioPage()
 	AddVolume(TEXT("Master volume"), TEXT("Everything you hear."), &UDrivingPreferences::MasterVolume);
 	AddVolume(TEXT("Engine"), TEXT("Engine, gearbox and tyres, relative to the master volume."), &UDrivingPreferences::EngineVolume);
 	AddVolume(TEXT("Ambience"), TEXT("Wind, rain, birds and traffic, relative to the master volume."), &UDrivingPreferences::AmbienceVolume);
+	AddVolume(TEXT("Radio"), TEXT("The car radio, relative to the master volume."), &UDrivingPreferences::RadioVolume);
 	AddBackRow(Page);
 	return Page;
 }
