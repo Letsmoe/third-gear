@@ -46,6 +46,26 @@ float above = saturate((h - 0.5) / 0.05);
 return float2(inner, saturate(outer - inner)) * above;
 """
 
+# Wet surfaces from the weather (/Game/World/MPC_Weather). Ground gets fully wet, walls only damp. Standing water
+# collects in a low-frequency noise mask on level ground once the wetness is high. x = wetness, y = puddle.
+WET_MASK_HLSL = """
+float up = saturate((NormalZ - 0.7) / 0.25);
+float wet = Wetness * lerp(0.35, 1.0, up);
+float2 p = WorldPos.xy / 100.0;
+float n = DgValueNoise(p / 3.0) * 0.65 + DgValueNoise(p / 0.9 + 7.1) * 0.35;
+// Puddles fill the lowest noise values: about 15 % of level ground when Puddles is 1.
+float puddle = saturate((Puddles * 0.32 - n) / 0.04) * up;
+// The film isn't even: higher spots and coarse patches dry first.
+float film = lerp(0.65, 1.0, DgValueNoise(p / 1.7 + 3.3));
+return float2(wet * film, puddle);
+"""
+# Water fills the pores: albedo drops by about 40 %, puddles a little more.
+WET_COLOR_HLSL = "return Color * lerp(1.0, 0.6, Wet.x) * lerp(1.0, 0.8, Wet.y);"
+# A water film is glossy; never make an already glossier surface (window glass) rougher.
+WET_ROUGHNESS_HLSL = "return min(Roughness, lerp(lerp(Roughness, 0.25, Wet.x), 0.03, Wet.y));"
+WET_NORMAL_HLSL = "return normalize(lerp(Normal, float3(0, 0, 1), Wet.y));"
+WEATHER_COLLECTION = "/Game/World/MPC_Weather"
+
 # Terrain layers (vertex colour weights from Tools/osmimport/osmimport/landcover.py): name -> (texture set, tile m, tint)
 TERRAIN_MASTER = f"{FOLDER}/M_TerrainMaster"
 TERRAIN_LAYERS = {
@@ -149,6 +169,44 @@ def parallax_uv(material, uv, default_height):
     return switch
 
 
+def add_wetness(m, color, rough, normal):
+    """Darkens and glosses the surface with the weather's wetness and adds puddles; returns new colour, roughness,
+    normal. Without the weather collection (not created yet) the inputs pass through unchanged."""
+    collection = unreal.load_asset(WEATHER_COLLECTION) if eal.does_asset_exist(WEATHER_COLLECTION) else None
+    if collection is None:
+        unreal.log_warning(f"create_materials: {WEATHER_COLLECTION} missing, no wet surfaces")
+        return color, rough, normal
+    wetness = expr(m, unreal.MaterialExpressionCollectionParameter, 100, 600, collection=collection,
+                   parameter_name="Wetness")
+    puddles = expr(m, unreal.MaterialExpressionCollectionParameter, 100, 700, collection=collection,
+                   parameter_name="Puddles")
+    world = expr(m, unreal.MaterialExpressionWorldPosition, 100, 800)
+    vertex_normal = expr(m, unreal.MaterialExpressionVertexNormalWS, 100, 900)
+    normal_z = expr(m, unreal.MaterialExpressionComponentMask, 250, 900, r=False, g=False, b=True, a=False)
+    link(vertex_normal, "", normal_z, "")
+    mask = expr(m, unreal.MaterialExpressionCustom, 400, 700, code=WET_MASK_HLSL,
+                output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT2, description="WetMask",
+                inputs=[custom_input("Wetness"), custom_input("Puddles"), custom_input("WorldPos"),
+                        custom_input("NormalZ")])
+    mask.set_editor_property("include_file_paths", [TERRAIN_INCLUDE])
+    link(wetness, "", mask, "Wetness")
+    link(puddles, "", mask, "Puddles")
+    link(world, "", mask, "WorldPos")
+    link(normal_z, "", mask, "NormalZ")
+
+    def stage(code, input_name, source, output_type, y):
+        node = expr(m, unreal.MaterialExpressionCustom, 650, y, code=code, output_type=output_type,
+                    inputs=[custom_input(input_name), custom_input("Wet")])
+        link(source, "", node, input_name)
+        link(mask, "", node, "Wet")
+        return node
+
+    wet_color = stage(WET_COLOR_HLSL, "Color", color, unreal.CustomMaterialOutputType.CMOT_FLOAT3, -400)
+    wet_rough = stage(WET_ROUGHNESS_HLSL, "Roughness", rough, unreal.CustomMaterialOutputType.CMOT_FLOAT1, 200)
+    wet_normal = stage(WET_NORMAL_HLSL, "Normal", normal, unreal.CustomMaterialOutputType.CMOT_FLOAT3, -100)
+    return wet_color, wet_rough, wet_normal
+
+
 def build_master():
     if eal.does_asset_exist(MASTER):
         m = unreal.load_asset(MASTER)
@@ -234,6 +292,7 @@ def build_master():
     out_color = switch(with_glass, tinted, -150, -400)
     out_rough = switch(rough_glass, rough_scaled, -150, 200)
     out_normal = switch(normal_windows, normal, -150, -100)
+    out_color, out_rough, out_normal = add_wetness(m, out_color, out_rough, out_normal)
     mel.connect_material_property(out_color, "", unreal.MaterialProperty.MP_BASE_COLOR)
     mel.connect_material_property(out_rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
     mel.connect_material_property(out_normal, "", unreal.MaterialProperty.MP_NORMAL)

@@ -39,9 +39,9 @@ public:
 	void TriggerThunder(float DistanceMeters);
 
 	/**
-	 * A lightning flash at a world location (UWeatherVisualsSubsystem's OnLightning delegate): thunder follows after
-	 * the distance at the speed of sound, louder for a stronger strike. Once a flash source is bound the component
-	 * stops inventing strikes of its own.
+	 * A lightning flash at a world location (bound to UWeatherVisualsSubsystem::OnLightning): thunder follows after
+	 * the distance at the speed of sound, louder for a stronger strike. Once bound, the component stops inventing
+	 * strikes of its own.
 	 */
 	void HandleLightning(const FVector& WorldLocation, float Strength);
 
@@ -98,6 +98,8 @@ private:
 	void CreateAmbienceLayers();
 	FAmbienceLayer& AddLayer(const FString& AssetName, float MaximumVolume, float LowPassHz);
 	void ApplyPreferences();
+	/** Plays thunder for the weather visuals' lightning flashes, so sound follows what is seen. */
+	void BindLightning();
 
 	FWeatherNow SampleWeather();
 	void UpdateSurface(float DeltaTime);
@@ -119,6 +121,7 @@ private:
 	TArray<FPendingThunder> PendingThunder;
 	FCarSoundMapper Mapper;
 	FDelegateHandle PreferencesHandle;
+	FDelegateHandle LightningHandle;
 
 	bool bAudioAvailable = false;
 	bool bIndicatorActive = false;

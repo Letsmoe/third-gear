@@ -27,6 +27,8 @@ public class DrivingGame : ModuleRules
 			"MapRuntime",
 			"Isobar",
 			"AudioMixer",
+			"GeometryCore",
+			"GeometryFramework",
 		});
 	}
 }

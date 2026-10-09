@@ -124,6 +124,13 @@ void UCarAudioComponent::BeginPlay()
 void UCarAudioComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	UDrivingPreferences::OnChanged().Remove(PreferencesHandle);
+	if (LightningHandle.IsValid())
+	{
+		if (UWeatherVisualsSubsystem* Visuals = GetWorld() ? GetWorld()->GetSubsystem<UWeatherVisualsSubsystem>() : nullptr)
+		{
+			Visuals->OnLightning.Remove(LightningHandle);
+		}
+	}
 	if (!CaptureStems.IsEmpty())
 	{
 		WriteCapture();
@@ -215,6 +222,17 @@ void UCarAudioComponent::CreateAmbienceLayers()
 	AddLayer(TEXT("rain_glass_heavy"), 0.50f, 7000.f);
 	AddLayer(TEXT("rain_road_light"), 0.20f, 2200.f);
 	AddLayer(TEXT("rain_road_heavy"), 0.45f, 2200.f);
+}
+
+void UCarAudioComponent::BindLightning()
+{
+	UWeatherVisualsSubsystem* Visuals = GetWorld() ? GetWorld()->GetSubsystem<UWeatherVisualsSubsystem>() : nullptr;
+	if (!Visuals)
+	{
+		return;
+	}
+	LightningHandle = Visuals->OnLightning.AddUObject(this, &UCarAudioComponent::HandleLightning);
+	bLightningFromWeather = true;
 }
 
 void UCarAudioComponent::ApplyPreferences()
@@ -554,6 +572,7 @@ void UCarAudioComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		CreateCarSynth();
 		CreateAmbienceLayers();
 		ApplyPreferences();
+		BindLightning();
 	}
 
 	WeatherSampleCountdown -= DeltaTime;

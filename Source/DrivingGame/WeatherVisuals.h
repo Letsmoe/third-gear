@@ -6,10 +6,14 @@
 #include "WeatherVisuals.generated.h"
 
 class ADirectionalLight;
+class ARainEffect;
 class APostProcessVolume;
 class UExponentialHeightFogComponent;
 class UMaterialParameterCollection;
 class USkyAtmosphereComponent;
+
+/** A lightning strike: where it hit (world cm) and how strong it is, 0 to 1. Thunder follows at the speed of sound. */
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnLightningStrike, const FVector& /*WorldLocation*/, float /*Strength*/);
 
 /** The weather as the renderer shows it, smoothed so nothing jumps when the weather steps. */
 USTRUCT()
@@ -65,6 +69,9 @@ public:
 	/** How wet the roads are, 0 to 1: rises in rain and dries slowly afterwards. */
 	float GetWetness() const { return Wetness; }
 
+	/** Broadcast at every lightning flash. */
+	FOnLightningStrike OnLightning;
+
 private:
 	/** Finds the sun, atmosphere, fog and post process volume of the level. */
 	void FindLevelActors();
@@ -84,10 +91,24 @@ private:
 	/** How much direct sun gets through the clouds right now, 0 to 1. */
 	float SunTransmission() const;
 
+	/** Spawns the rain streaks and the light that lightning flashes with. */
+	void SpawnEffects();
+
+	/** Starts strikes at a rate that grows with the thunder activity, and updates the flash light. */
+	void UpdateLightning(float DeltaTime);
+
+	/** Brightness of the current flash, 0 to 1: a few pulses over a third of a second. */
+	float FlashLevel() const;
+
 	TWeakObjectPtr<ADirectionalLight> Sun;
 	TWeakObjectPtr<USkyAtmosphereComponent> Atmosphere;
 	TWeakObjectPtr<UExponentialHeightFogComponent> Fog;
 	TWeakObjectPtr<APostProcessVolume> PostProcess;
+	TWeakObjectPtr<ARainEffect> Rain;
+	TWeakObjectPtr<ADirectionalLight> FlashLight;
+	double SecondsSinceStrike = 1000.0;
+	float StrikeStrength = 0.f;
+	FRandomStream LightningRandom{2207};
 
 	UPROPERTY()
 	TObjectPtr<UMaterialParameterCollection> Parameters;
