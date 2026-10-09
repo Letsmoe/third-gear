@@ -81,3 +81,27 @@ float DgFacadeBrightness(float BuildingTint, float TintMin, float TintMax, float
 	float Patchy = lerp(0.93, 1.06, DgValueNoise(Metres / 4.7 + 3.1)) * lerp(0.97, 1.03, DgValueNoise(Metres / 1.3 + 8.4));
 	return lerp(TintMin, TintMax, BuildingTint) * Patchy;
 }
+
+/**
+ * Fine trowel or float texture for smooth render, from rotated noise octaves that fade out under minification: a low
+ * amplitude tilt for the normal (Tilt) and a roughness offset. Strength 0 gives nothing. Needs MarkingWear.ush (DgWearNoise).
+ */
+void DgFacadeFineGrain(float2 Metres, float Strength, out float2 Tilt, out float RoughnessOffset)
+{
+	Tilt = 0;
+	RoughnessOffset = 0;
+	if (Strength <= 0.0)
+	{
+		return;
+	}
+	float Step = 0.004;
+	float Fine = DgWearNoise(Metres, 150.0, 0.3) * 0.5 + DgWearNoise(Metres, 61.0, 1.1) * 0.5;
+	float FineX = DgWearNoise(Metres + float2(Step, 0), 150.0, 0.3) * 0.5 + DgWearNoise(Metres + float2(Step, 0), 61.0, 1.1) * 0.5;
+	float FineY = DgWearNoise(Metres + float2(0, Step), 150.0, 0.3) * 0.5 + DgWearNoise(Metres + float2(0, Step), 61.0, 1.1) * 0.5;
+	// Float strokes: broad, slightly curved ridges at about 8 per metre.
+	float Stroke = DgWearNoise(Metres * float2(1.0, 0.45), 9.0, 0.7);
+	float StrokeX = DgWearNoise((Metres + float2(0.01, 0)) * float2(1.0, 0.45), 9.0, 0.7);
+	float StrokeY = DgWearNoise((Metres + float2(0, 0.01)) * float2(1.0, 0.45), 9.0, 0.7);
+	Tilt = (float2(FineX - Fine, FineY - Fine) / Step * 0.012 + float2(StrokeX - Stroke, StrokeY - Stroke) / 0.01 * 0.012) * Strength;
+	RoughnessOffset = ((Fine - 0.5) * 0.12 + (Stroke - 0.5) * 0.1) * Strength;
+}

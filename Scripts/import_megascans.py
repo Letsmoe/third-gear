@@ -104,6 +104,31 @@ def import_set(folder):
     return failed
 
 
+def import_weathering_atlas():
+    """Imports the derived grime atlas and moss tile (Tools/buildingkit/build_weathering_atlas.py) into
+    /Game/Megascans/Textures/Weathering. The atlas is a linear mask, the moss tile colour with alpha."""
+    folder = os.path.join(data_root.data_root(), "facade_weathering")
+    for name, srgb, compression in (("weathering_atlas", False, CS.TC_MASKS), ("weathering_moss", True, CS.TC_DEFAULT)):
+        path = os.path.join(folder, name + ".png")
+        if not os.path.exists(path):
+            unreal.log_warning(f"[import_megascans] {path} missing, run Tools/buildingkit/build_weathering_atlas.py")
+            continue
+        task = unreal.AssetImportTask()
+        task.set_editor_property("filename", path)
+        task.set_editor_property("destination_path", f"{DEST_ROOT}/Weathering")
+        task.set_editor_property("destination_name", f"T_{name}")
+        task.set_editor_property("automated", True)
+        task.set_editor_property("replace_existing", True)
+        task.set_editor_property("replace_existing_settings", True)
+        task.set_editor_property("save", True)
+        unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+        texture = unreal.EditorAssetLibrary.load_asset(f"{DEST_ROOT}/Weathering/T_{name}")
+        texture.set_editor_property("compression_settings", compression)
+        texture.set_editor_property("srgb", srgb)
+        texture.set_editor_property("lod_group", TG.TEXTUREGROUP_WORLD)
+        unreal.EditorAssetLibrary.save_loaded_asset(texture)
+
+
 def main():
     only = next((a.split("=", 1)[1].split(",") for a in sys.argv[1:] if a.startswith("-only=")), None)
     group = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("-group=")), None)
@@ -116,6 +141,8 @@ def main():
             continue
         unreal.log(f"[import_megascans] {folder}")
         failures.extend((folder, name) for name in import_set(folder))
+    if not only and group in (None, "weathering"):
+        import_weathering_atlas()
     unreal.log(f"[import_megascans] done, {len(failures)} failures {failures}")
 
 

@@ -170,7 +170,8 @@ def facades_done():
 
 
 def facades_run():
-    """Imports the Megascans from the data root's raw assets (Fab content, downloaded by hand) and builds the facade materials."""
+    """Imports the Megascans from the data root's raw assets (Fab content, downloaded by hand), packs the grime atlas and builds the facade materials."""
+    run([data_root.venv_python("osmimport"), "-I", "Tools/buildingkit/build_weathering_atlas.py"])
     run_editor_script("import_megascans.py")
     run_editor_script("create_facade_materials.py")
 
