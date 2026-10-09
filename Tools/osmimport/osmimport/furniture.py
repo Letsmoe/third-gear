@@ -46,6 +46,18 @@ LAMP_SPACING = 36.0
 TOWN_STREETS = {"primary", "secondary", "tertiary", "unclassified", "residential", "living_street",
                 "primary_link", "secondary_link", "tertiary_link"}
 LAMP_OSM_MIN_GAP = 14.0
+# A generated lamp keeps this far from every other lamp, so parallel carriageways and slip lanes share one row.
+LAMP_MIN_GAP = 0.6 * LAMP_SPACING
+# A pedestrian crossing light this close to a vehicle signal belongs to that junction's signals.
+CROSSING_SIGNAL_ABSORB_DISTANCE = 35.0
+# Half width of the cycleway strip poles keep clear of, around the OSM centre line.
+CYCLEWAY_CLEAR_HALF_WIDTH = 1.2
+# How far a pole may be moved off the road surface and cycleways before it is dropped.
+POLE_PUSH_LIMIT = 6.0
+# Signal poles may also stand across a slip lane and a few metres before the stop line, because the road surface
+# has no traffic islands yet where the real ones stand.
+SIGNAL_POLE_PUSH_LIMIT = 12.0
+SIGNAL_POLE_SETBACKS = (0.0, 3.0, 6.0, 9.0, 12.0)
 SIGN_DISTANCE_FROM_JUNCTION = 9.0
 PARALLEL_DOT = 0.82
 
@@ -187,6 +199,8 @@ class FurnitureBuilder:
         self.graph = RoadGraph(ways, net.widths, building_union)
         self.ground = net.ground
         shapely.prepare(self.ground)
+        self.blocked = shapely.union(self.ground, self._cycleway_strips(data))
+        shapely.prepare(self.blocked)
         self.junctions = []
         self.signs = []
         self.lamps = []
@@ -198,14 +212,27 @@ class FurnitureBuilder:
 
     # ------------------------------------------------------------ geometry helpers
 
-    def push_off_road(self, x, y, direction_right, clearance=KERB_CLEARANCE, limit=6.0):
-        """Moves a point along direction_right until it is outside the road surface plus clearance."""
-        point = shapely.Point(x, y)
+    @staticmethod
+    def _cycleway_strips(data):
+        """The strips of the separately mapped cycleways (and cycle-designated paths) that poles keep clear of."""
+        lines = [shapely.LineString(way.xy) for way in data.footways
+                 if way.tags.get("highway") == "cycleway" or way.tags.get("bicycle") == "designated"]
+        if not lines:
+            return shapely.Polygon()
+        return shapely.union_all(shapely.buffer(lines, CYCLEWAY_CLEAR_HALF_WIDTH, cap_style="flat"))
+
+    def push_off_road(self, x, y, direction_right, clearance=KERB_CLEARANCE, limit=POLE_PUSH_LIMIT):
+        """Moves a point along direction_right until it is clear of the road surface and the cycleways, plus
+        clearance. Returns None when there is no free spot within limit (inside a big junction, say)."""
+        def blocked(moved):
+            target = shapely.Point(x + direction_right[0] * moved, y + direction_right[1] * moved)
+            return self.blocked.contains(target) or self.blocked.distance(target) < clearance
+
         moved = 0.0
-        while self.ground.contains(point) and moved < limit:
+        while blocked(moved):
             moved += 0.25
-            point = shapely.Point(x + direction_right[0] * moved, y + direction_right[1] * moved)
-        moved += clearance
+            if moved > limit:
+                return None
         return x + direction_right[0] * moved, y + direction_right[1] * moved
 
     def inside_building(self, x, y):
@@ -289,6 +316,8 @@ class FurnitureBuilder:
             return None
         if way.tags.get("highway") in {"service", "track"}:
             return None
+        if way.tags.get("highway", "").endswith("_link"):
+            return None  # slip lanes mostly turn free and give way; OSM maps a signal on them when there is one
         crossing_width = max([self.graph.widths[w.id] for w, _ in self.graph.at_node[node] if w.id != way.id],
                              default=6.0)
         setback = max(STOP_LINE_MIN_SETBACK, crossing_width / 2 + 2.0)
@@ -314,11 +343,25 @@ class FurnitureBuilder:
                 phases.append([approach])
         return len(phases)
 
+    def _signal_nodes(self):
+        """Nodes that place a stop line: highway=traffic_signals, and pedestrian crossing lights that stand alone.
+
+        A crossing light within CROSSING_SIGNAL_ABSORB_DISTANCE of a vehicle signal is the pedestrian signal of that
+        junction: it shows red to walkers while the junction's own signals stop the cars, so it adds no poles."""
+        vehicle = [p for p in self.data.points if p.tags.get("highway") == "traffic_signals"]
+        crossings = [p for p in self.data.points
+                     if p.tags.get("highway") == "crossing" and p.tags.get("crossing") == "traffic_signals"]
+        if not vehicle:
+            return crossings
+        vehicle_tree = STRtree([shapely.Point(p.x, p.y) for p in vehicle])
+        standalone = [p for p in crossings
+                      if len(vehicle_tree.query(shapely.Point(p.x, p.y), predicate="dwithin",
+                                                distance=CROSSING_SIGNAL_ABSORB_DISTANCE)) == 0]
+        return vehicle + standalone
+
     def build_junctions(self):
         """Clusters signal nodes into junctions and creates their approaches."""
-        signal_nodes = [p for p in self.data.points if p.tags.get("highway") == "traffic_signals"
-                        or (p.tags.get("highway") == "crossing" and p.tags.get("crossing") == "traffic_signals")]
-        explicit, junction_signals = self._explicit_approaches(signal_nodes)
+        explicit, junction_signals = self._explicit_approaches(self._signal_nodes())
 
         # Merge junction nodes of one big junction (dual carriageways, slip roads).
         parent = {}
@@ -458,23 +501,32 @@ class FurnitureBuilder:
         return phases
 
     def head_poles(self, approach, junction_id, approach_id):
-        """Pole positions carrying the signal heads of an approach: always right of the lane, left too on wide roads."""
+        """Pole positions carrying the signal heads of an approach: right of the lane, and left too on wide one-way
+        roads when there is room beside the stop line."""
         poles = []
-        position = np.array(approach.stop_xy)
-        direction = approach.direction
-        right = _right(direction)
-        half_width = approach.width / 2
-        px, py = position[0] + right[0] * half_width, position[1] + right[1] * half_width
-        px, py = self.push_off_road(px, py, right)
-        poles.append({"x": px, "y": py, "side": "right"})
-        wide_one_way = approach.oneway and approach.lanes >= 2
-        if wide_one_way:
-            lx, ly = position[0] - right[0] * half_width, position[1] - right[1] * half_width
-            lx, ly = self.push_off_road(lx, ly, (-right[0], -right[1]))
-            poles.append({"x": lx, "y": ly, "side": "left"})
-        yaw = math.degrees(math.atan2(direction[1], direction[0]))
+        right = _right(approach.direction)
+        placed = self._signal_pole_spot(approach, right, SIGNAL_POLE_SETBACKS, SIGNAL_POLE_PUSH_LIMIT)
+        if placed is not None:
+            poles.append({"x": placed[0], "y": placed[1], "side": "right"})
+        if approach.oneway and approach.lanes >= 2:
+            placed = self._signal_pole_spot(approach, (-right[0], -right[1]), (0.0,), POLE_PUSH_LIMIT)
+            if placed is not None:
+                poles.append({"x": placed[0], "y": placed[1], "side": "left"})
+        yaw = math.degrees(math.atan2(approach.direction[1], approach.direction[0]))
         return [{**p, "yaw": yaw, "approach": approach_id, "junction": junction_id} for p in poles
                 if not self.inside_building(p["x"], p["y"])]
+
+    def _signal_pole_spot(self, approach, outward, setbacks, limit):
+        """The first free spot beside the carriageway edge in the outward direction, trying the stop line first and
+        then points further back against the travel direction; None when all are on the road or a cycleway."""
+        half_width = approach.width / 2
+        for setback in setbacks:
+            x = approach.stop_xy[0] - approach.direction[0] * setback + outward[0] * half_width
+            y = approach.stop_xy[1] - approach.direction[1] * setback + outward[1] * half_width
+            placed = self.push_off_road(x, y, outward, limit=limit)
+            if placed is not None:
+                return placed
+        return None
 
     def stop_line(self, approach):
         """End points of the stop line: from the lane centre line (two-way) or left edge (one-way) to the right edge."""
@@ -497,9 +549,10 @@ class FurnitureBuilder:
         position, direction = self.graph.point_and_direction(way, s, travel)
         right = _right(direction)
         half = self.graph.widths[way.id] / 2 + extra_offset
-        x, y = position[0] + right[0] * half, position[1] + right[1] * half
-        x, y = self.push_off_road(x, y, right)
-        self.add_sign(x, y, math.degrees(math.atan2(direction[1], direction[0])), names)
+        placed = self.push_off_road(position[0] + right[0] * half, position[1] + right[1] * half, right)
+        if placed is None:
+            return
+        self.add_sign(placed[0], placed[1], math.degrees(math.atan2(direction[1], direction[0])), names)
 
     @staticmethod
     def speed_sign_name(speed):
@@ -711,12 +764,16 @@ class FurnitureBuilder:
             right = _right(direction)
             side = -1 if (both_sides and k % 2 == 1) else 1
             normal = (right[0] * side, right[1] * side)
-            x = position[0] + normal[0] * width / 2
-            y = position[1] + normal[1] * width / 2
-            x, y = self.push_off_road(x, y, normal, clearance=0.6)
+            placed = self.push_off_road(position[0] + normal[0] * width / 2, position[1] + normal[1] * width / 2,
+                                        normal, clearance=0.6)
+            if placed is None:
+                continue
+            x, y = placed
             if self.inside_building(x, y):
                 continue
             if osm_points is not None and osm_points.distance(shapely.Point(x, y)) < LAMP_OSM_MIN_GAP:
+                continue
+            if any(math.hypot(lamp["x"] - x, lamp["y"] - y) < LAMP_MIN_GAP for lamp in self.lamps):
                 continue
             yaw = math.degrees(math.atan2(-normal[1], -normal[0]))
             self.lamps.append({"x": float(x), "y": float(y), "yaw": yaw, "source": "lit"})

@@ -32,6 +32,11 @@ MARKED_CLASSES = {"motorway", "motorway_link", "trunk", "trunk_link", "primary",
 COBBLE_SURFACES = {"sett", "cobblestone", "unhewn_cobblestone", "cobblestone:flattened"}
 PAVER_SURFACES = {"paving_stones", "paving_stones:30", "concrete:plates", "grass_paver"}
 
+# Most lanes a road of each class plausibly has in one direction (one-way) or in total (two-way); more is a tagging
+# error such as lanes=12 on a two-lane approach.
+MAX_LANES = {"motorway": 4, "trunk": 4, "primary": 4, "secondary": 3, "tertiary": 3}
+MAX_LANES_OTHER = 2
+
 KERB_HEIGHT = 0.12
 PAVEMENT_WIDTH = 2.5
 FILLET_RADIUS = 4.0
@@ -52,13 +57,37 @@ def is_oneway(tags) -> bool:
         or tags.get("highway") in {"motorway", "motorway_link"}
 
 
+def _turn_lane_count(tags):
+    """Number of lanes the turn:lanes tags describe (both directions on a two-way road), or None."""
+    if is_oneway(tags):
+        keys = ["turn:lanes"]
+    else:
+        keys = ["turn:lanes:forward", "turn:lanes:backward"]
+    counts = [len(tags[key].split("|")) for key in keys if tags.get(key)]
+    if len(counts) != len(keys):
+        return None
+    return sum(counts)
+
+
+def tagged_lanes(tags):
+    """Lane count from the tags, or None: turn:lanes wins over lanes when both are there (it lists every lane, so
+    it is rarely wrong), and counts above what the road class plausibly has are capped."""
+    lanes = _turn_lane_count(tags) or _float(tags.get("lanes"))
+    if not lanes:
+        return None
+    base_class = str(tags.get("highway", "")).removesuffix("_link")
+    per_direction = MAX_LANES.get(base_class, MAX_LANES_OTHER)
+    limit = per_direction if is_oneway(tags) else 2 * per_direction
+    return max(1, min(int(lanes), limit))
+
+
 def road_width(tags) -> float:
     width = _float(tags.get("width"))
     if width and 2.0 <= width <= 30.0:
         return width
     lane_width, lanes_two_way, lanes_one_way = CLASS_DEFAULTS.get(tags.get("highway"), (2.75, 2, 1))
     oneway = is_oneway(tags)
-    lanes = _float(tags.get("lanes"))
+    lanes = tagged_lanes(tags)
     if not lanes:
         lanes = lanes_one_way if oneway else lanes_two_way
     width = lanes * lane_width
@@ -70,9 +99,9 @@ def road_width(tags) -> float:
 
 
 def road_lanes(tags) -> int:
-    lanes = _float(tags.get("lanes"))
+    lanes = tagged_lanes(tags)
     if lanes:
-        return int(lanes)
+        return lanes
     _, two_way, one_way = CLASS_DEFAULTS.get(tags.get("highway"), (2.75, 2, 1))
     return one_way if is_oneway(tags) else two_way
 
@@ -130,9 +159,11 @@ def build(osm: OsmData, dem: HeightGrid, buildings_union=None) -> RoadNetwork:
         strips[w.id] = shapely.buffer(shapely.LineString(w.xy), widths[w.id] / 2, cap_style="round", join_style="round",
                                       quad_segs=4)
     ground = shapely.union_all(list(strips.values()))
-    # Fillet concave corners (kerb radii at junctions) without growing the outline elsewhere.
-    ground = ground.buffer(FILLET_RADIUS, quad_segs=4).buffer(-FILLET_RADIUS, quad_segs=4).union(ground)
-    ground = shapely.make_valid(ground)
+    junction_zones = _junction_zones(ground_ways, widths)
+    # Fillet concave corners (kerb radii at junctions) without growing the outline elsewhere. Only inside junctions:
+    # along the road the same closing would pave over medians and islands narrower than twice the radius.
+    closed = ground.buffer(FILLET_RADIUS, quad_segs=4).buffer(-FILLET_RADIUS, quad_segs=4)
+    ground = shapely.make_valid(ground.union(closed.difference(ground).intersection(junction_zones)))
 
     by_kind = defaultdict(list)
     for w in sorted(ground_ways, key=lambda w: CLASS_RANK.get(w.tags.get("highway"), 0), reverse=True):
@@ -161,18 +192,6 @@ def build(osm: OsmData, dem: HeightGrid, buildings_union=None) -> RoadNetwork:
 
     # --- pavements along urban roads ---
     pavement = _pavements(ground_ways, widths, ground, buildings_union, osm)
-
-    degree = node_degrees(ground_ways)
-    node_xy = {}
-    for w in ground_ways:
-        for nid, xy in zip(w.node_ids, w.xy):
-            node_xy[nid] = xy
-    zones = []
-    for nid, deg in degree.items():
-        if deg >= 3:
-            r = max((widths[w.id] for w in ground_ways if nid in w.node_ids), default=6.0) * 0.6 + 3.0
-            zones.append(shapely.Point(node_xy[nid]).buffer(r, quad_segs=6))
-    junction_zones = shapely.union_all(zones) if zones else shapely.Polygon()
 
     net = RoadNetwork(ways=ways, widths=widths, surfaces=surfaces, ground=ground, bridges=bridges, pavement=pavement,
                       height=height, junction_zones=junction_zones)
@@ -240,6 +259,21 @@ def _pavements(ground_ways, widths, ground, buildings_union, osm: OsmData):
     # Drop slivers.
     pavement = shapely.make_valid(pavement.buffer(-0.3).buffer(0.3))
     return pavement
+
+
+def _junction_zones(ground_ways, widths):
+    """Discs around every junction node (three or more road ends), sized by the widest road there."""
+    degree = node_degrees(ground_ways)
+    node_xy = {}
+    for w in ground_ways:
+        for nid, xy in zip(w.node_ids, w.xy):
+            node_xy[nid] = xy
+    zones = []
+    for nid, deg in degree.items():
+        if deg >= 3:
+            r = max((widths[w.id] for w in ground_ways if nid in w.node_ids), default=6.0) * 0.6 + 3.0
+            zones.append(shapely.Point(node_xy[nid]).buffer(r, quad_segs=6))
+    return shapely.union_all(zones) if zones else shapely.Polygon()
 
 
 def build_markings(ground_ways, widths, junction_zones, ground):
