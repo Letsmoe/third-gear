@@ -47,6 +47,12 @@ add_library(Clipper2 STATIC ${Clipper2Sources})
 target_include_directories(Clipper2 SYSTEM PUBLIC ${clipper2_SOURCE_DIR}/CPP/Clipper2Lib/include)
 
 set(WorldBuilderWarnings -Wall -Wextra)
+# The command-line build runs where it is compiled, so it may use every instruction the machine has (the filters and
+# rasters vectorise); a build for other machines or for the game's plugin turns this off.
+option(WORLD_BUILDER_NATIVE "Optimise for the building machine's CPU" ON)
+if(WORLD_BUILDER_NATIVE)
+	add_compile_options(-march=native)
+endif()
 
 # One part's library from Source/<Folder>, linked to the libraries after the folder.
 function(world_builder_library Name Folder)

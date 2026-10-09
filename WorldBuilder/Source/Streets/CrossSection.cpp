@@ -1,6 +1,7 @@
 #include "CrossSection.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "Assumptions.h"
 #include "OsmTags.h"
@@ -9,12 +10,24 @@ namespace WorldBuilder
 {
 double FCrossSection::Width() const
 {
+	// Python 3.12 and later add floats with Neumaier compensation in sum(); the widths must come out digit for digit,
+	// because they are rounded to decimals in traffic.json.
 	double Total = 0.0;
+	double Compensation = 0.0;
 	for (const FStrip& Strip : Strips)
 	{
-		Total += Strip.Width;
+		const double Sum = Total + Strip.Width;
+		if (std::abs(Total) >= std::abs(Strip.Width))
+		{
+			Compensation += (Total - Sum) + Strip.Width;
+		}
+		else
+		{
+			Compensation += (Strip.Width - Sum) + Total;
+		}
+		Total = Sum;
 	}
-	return Total;
+	return Total + Compensation;
 }
 
 std::vector<FStrip> FCrossSection::TravelLanes() const

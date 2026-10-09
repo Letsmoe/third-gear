@@ -304,38 +304,50 @@ FRoadSurfaces::FRoadSurfaces(const FStreetModel& Model, const FTerrainGrid& Terr
 							 unsigned Threads)
 	: BuildingPieces(&Buildings)
 {
-	// Each way's carriageway from its segments, sorted into the material sets.
-	std::unordered_map<int64_t, FPolygons> WaySurfaces;
+	// Each way's carriageway from its segments (built side by side), sorted into the material sets.
+	std::unordered_map<int64_t, std::vector<const FSegmentLayout*>> LayoutsOfWay;
 	for (const FSegmentLayout& Layout : Model.Lines.Layouts)
 	{
-		const FPolygons Surface = SegmentSurface(Model.Lines, Layout);
-		FPolygons& Target = WaySurfaces[Layout.Segment->Way->Id];
-		Target.insert(Target.end(), Surface.begin(), Surface.end());
+		LayoutsOfWay[Layout.Segment->Way->Id].push_back(&Layout);
 	}
+	const std::vector<FStreetWay>& Ways = *Model.GroundWays;
+	std::vector<FPolygons> WaySurfaces(Ways.size());
+	ParallelFor(Ways.size(), Threads, [&](size_t Index) {
+		const auto Layouts = LayoutsOfWay.find(Ways[Index].Id);
+		if (Layouts == LayoutsOfWay.end())
+		{
+			return;
+		}
+		FPolygons Pieces;
+		for (const FSegmentLayout* Layout : Layouts->second)
+		{
+			const FPolygons Surface = SegmentSurface(Model.Lines, *Layout);
+			Pieces.insert(Pieces.end(), Surface.begin(), Surface.end());
+		}
+		WaySurfaces[Index] = UnionOf(Pieces);
+	});
 	FPolygonSet Carriageways;
-	for (const FStreetWay& Way : *Model.GroundWays)
+	for (size_t Index = 0; Index < Ways.size(); ++Index)
 	{
-		auto Surface = WaySurfaces.find(Way.Id);
-		if (Surface == WaySurfaces.end())
+		if (WaySurfaces[Index].empty())
 		{
 			continue;
 		}
-		const FPolygons Merged = UnionOf(Surface->second);
-		const std::string Kind = SurfaceKind(Way.Tags);
+		const std::string Kind = SurfaceKind(Ways[Index].Tags);
 		if (Kind == "pavers")
 		{
-			PaverPieces.Add(Merged);
+			PaverPieces.Add(WaySurfaces[Index]);
 		}
 		else if (Kind == "cobble")
 		{
-			CobblePieces.Add(Merged);
+			CobblePieces.Add(WaySurfaces[Index]);
 		}
 		else
 		{
-			AsphaltPieces.Add(Merged);
+			AsphaltPieces.Add(WaySurfaces[Index]);
 		}
-		Carriageways.Add(Merged);
-		GroundPieces.Add(Merged);
+		Carriageways.Add(WaySurfaces[Index]);
+		GroundPieces.Add(std::move(WaySurfaces[Index]));
 	}
 	for (const FGore& Gore : Model.Lines.Gores)
 	{

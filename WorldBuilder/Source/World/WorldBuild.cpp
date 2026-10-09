@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <thread>
 #include <vector>
 
@@ -403,28 +404,38 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	const FTerrainGrid Terrain((Geodata / "raw" / "terrain_5m.grid").string());
 	Inputs.Terrain = &Terrain;
 	Inputs.Extent = {Region.XMin, Region.YMin, Region.XMax, Region.YMax};
-	const FLandCover Cover(Inputs.Osm.Areas);
-	Inputs.Cover = &Cover;
+	const unsigned Threads = Options.Threads > 0 ? Options.Threads : std::max(1u, std::thread::hardware_concurrency());
+	const FOsmData& Osm = Inputs.Osm;
+
+	// The sources only need the OSM data, so they are prepared side by side; the road surfaces wait for the streets.
 	const FBox TerrainExtent{Region.XMin - TerrainMargin, Region.YMin - TerrainMargin, Region.XMax + TerrainMargin,
 							 Region.YMax + TerrainMargin};
-	const FWaterBodies Water = BuildWaterBodies(Inputs.Osm, Terrain, TerrainExtent);
-	Inputs.Water = &Water;
-	Log(std::to_string(Water.Levels.size()) + " water bodies");
-	const FPathSurfaces Paths(Inputs.Osm);
-	Inputs.Paths = &Paths;
-	const FPolygonSet Buildings = BuildingFootprints(Inputs.Osm.Buildings);
+	auto StreetsTask = std::async(std::launch::async, [&] { return BuildStreetModel(Osm); });
+	auto BuildingsTask = std::async(std::launch::async, [&] { return BuildingFootprints(Osm.Buildings); });
+	auto WaterTask = std::async(std::launch::async, [&] { return BuildWaterBodies(Osm, Terrain, TerrainExtent); });
+	auto CoverTask = std::async(std::launch::async, [&] { return FLandCover(Osm.Areas); });
+	auto PathsTask = std::async(std::launch::async, [&] { return FPathSurfaces(Osm); });
+	const std::string TreeTable = (Geodata / "raw" / "strassenbaeume" / "street_trees.tsv").string();
+	auto VegetationTask = std::async(std::launch::async, [&] { return FVegetationSources(Osm, ReadStreetTrees(TreeTable)); });
+
+	const FPolygonSet Buildings = BuildingsTask.get();
 	Inputs.Buildings = &Buildings;
-	const unsigned Threads = Options.Threads > 0 ? Options.Threads : std::max(1u, std::thread::hardware_concurrency());
-	const FStreetModel Streets = BuildStreetModel(Inputs.Osm);
+	const FStreetModel Streets = StreetsTask.get();
 	Log("street model: " + std::to_string(Streets.Lines.Layouts.size()) + " segments, "
 		+ std::to_string(Streets.Markings.size()) + " painted lines");
 	const FRoadSurfaces Roads(Streets, Terrain, Buildings, Threads);
 	Inputs.Roads = &Roads;
 	Log("road surfaces: " + std::to_string(Roads.Ground().Size()) + " pieces, " + std::to_string(Roads.Markings().size())
 		+ " marking lines");
-	const FVegetationSources Vegetation(Inputs.Osm, ReadStreetTrees((Geodata / "raw" / "strassenbaeume" / "street_trees.tsv").string()));
+	const FWaterBodies Water = WaterTask.get();
+	Inputs.Water = &Water;
+	const FLandCover Cover = CoverTask.get();
+	Inputs.Cover = &Cover;
+	const FPathSurfaces Paths = PathsTask.get();
+	Inputs.Paths = &Paths;
+	const FVegetationSources Vegetation = VegetationTask.get();
 	Inputs.Vegetation = &Vegetation;
-	Log("sources indexed");
+	Log(std::to_string(Water.Levels.size()) + " water bodies; sources indexed");
 
 	const std::vector<FTileBounds> Tiles = Region.Tiles();
 	BuildTiles(Tiles, Inputs, OutputDirectory, Threads);

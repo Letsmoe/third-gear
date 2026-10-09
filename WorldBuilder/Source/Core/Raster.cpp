@@ -245,7 +245,82 @@ FMask RasterizePolygons(const FGridFrame& Frame, const FPolygons& Polygons, bool
 	return Mask;
 }
 
-void GaussianFilter(std::vector<double>& Values, int Columns, int Rows, double Sigma)
+namespace
+{
+/** Below this sigma the recursive filter is less accurate than the direct kernel, which is cheap there anyway. */
+constexpr double RecursiveGaussianMinimumSigma = 1.5;
+
+/** The coefficients of Young and van Vliet's recursive Gaussian (1995): B and b1..b3 divided by b0. */
+struct FRecursiveGaussian
+{
+	double Gain;
+	double Feedback[3];
+	/** Samples mirrored past each end before filtering, so the edges behave like scipy's "reflect". */
+	int Padding;
+};
+
+FRecursiveGaussian RecursiveCoefficients(double Sigma)
+{
+	const double Q = Sigma >= 2.5 ? 0.98711 * Sigma - 0.96330 : 3.97156 - 4.14554 * std::sqrt(1.0 - 0.26891 * Sigma);
+	const double B0 = 1.57825 + 2.44413 * Q + 1.4281 * Q * Q + 0.422205 * Q * Q * Q;
+	const double B1 = 2.44413 * Q + 2.85619 * Q * Q + 1.26661 * Q * Q * Q;
+	const double B2 = -(1.4281 * Q * Q + 1.26661 * Q * Q * Q);
+	const double B3 = 0.422205 * Q * Q * Q;
+	return {1.0 - (B1 + B2 + B3) / B0, {B1 / B0, B2 / B0, B3 / B0}, static_cast<int>(std::ceil(4.0 * Sigma))};
+}
+
+/**
+ * Filters rows of values (each Count long, Stride apart in memory, Lanes of them side by side and contiguous) along
+ * their length: a forward and a backward pass over the mirrored-padded rows, all lanes at once so the loops
+ * vectorise.
+ */
+void RecursiveFilterLines(double* Values, int Count, size_t Stride, int Lanes, const FRecursiveGaussian& Filter,
+						  std::vector<double>& Work)
+{
+	const int Padded = Count + 2 * Filter.Padding;
+	Work.assign(static_cast<size_t>(Padded) * Lanes, 0.0);
+	for (int Index = 0; Index < Padded; ++Index)
+	{
+		const double* Source = Values + ReflectIndex(Index - Filter.Padding, Count) * Stride;
+		std::copy(Source, Source + Lanes, Work.data() + static_cast<size_t>(Index) * Lanes);
+	}
+	const double Gain = Filter.Gain;
+	const double F1 = Filter.Feedback[0];
+	const double F2 = Filter.Feedback[1];
+	const double F3 = Filter.Feedback[2];
+	auto Line = [&](int Index) { return Work.data() + static_cast<size_t>(Index) * Lanes; };
+	// The first three samples start from the steady state of a constant input (their own value).
+	for (int Index = 3; Index < Padded; ++Index)
+	{
+		double* Out = Line(Index);
+		const double* Previous1 = Line(Index - 1);
+		const double* Previous2 = Line(Index - 2);
+		const double* Previous3 = Line(Index - 3);
+		for (int Lane = 0; Lane < Lanes; ++Lane)
+		{
+			Out[Lane] = Gain * Out[Lane] + F1 * Previous1[Lane] + F2 * Previous2[Lane] + F3 * Previous3[Lane];
+		}
+	}
+	for (int Index = Padded - 4; Index >= 0; --Index)
+	{
+		double* Out = Line(Index);
+		const double* Next1 = Line(Index + 1);
+		const double* Next2 = Line(Index + 2);
+		const double* Next3 = Line(Index + 3);
+		for (int Lane = 0; Lane < Lanes; ++Lane)
+		{
+			Out[Lane] = Gain * Out[Lane] + F1 * Next1[Lane] + F2 * Next2[Lane] + F3 * Next3[Lane];
+		}
+	}
+	for (int Index = 0; Index < Count; ++Index)
+	{
+		const double* Source = Line(Index + Filter.Padding);
+		std::copy(Source, Source + Lanes, Values + Index * Stride);
+	}
+}
+
+/** The direct, truncated kernel of scipy, for small sigmas. */
+void DirectGaussianFilter(std::vector<double>& Values, int Columns, int Rows, double Sigma)
 {
 	const std::vector<double> Kernel = GaussianKernel(Sigma);
 	const int Radius = static_cast<int>(Kernel.size() / 2);
@@ -270,6 +345,38 @@ void GaussianFilter(std::vector<double>& Values, int Columns, int Rows, double S
 		}
 	}
 	Values.swap(Result);
+}
+
+/** Transposes a row-major grid. */
+std::vector<double> Transposed(const std::vector<double>& Values, int Columns, int Rows)
+{
+	std::vector<double> Result(Values.size());
+	for (int Row = 0; Row < Rows; ++Row)
+	{
+		for (int Column = 0; Column < Columns; ++Column)
+		{
+			Result[static_cast<size_t>(Column) * Rows + Row] = Values[static_cast<size_t>(Row) * Columns + Column];
+		}
+	}
+	return Result;
+}
+}
+
+void GaussianFilter(std::vector<double>& Values, int Columns, int Rows, double Sigma)
+{
+	if (Sigma < RecursiveGaussianMinimumSigma)
+	{
+		DirectGaussianFilter(Values, Columns, Rows, Sigma);
+		return;
+	}
+	const FRecursiveGaussian Filter = RecursiveCoefficients(Sigma);
+	std::vector<double> Work;
+	// Down the columns: rows are the steps, all columns filtered side by side.
+	RecursiveFilterLines(Values.data(), Rows, static_cast<size_t>(Columns), Columns, Filter, Work);
+	// Along the rows the same way, on the transposed grid.
+	std::vector<double> Flipped = Transposed(Values, Columns, Rows);
+	RecursiveFilterLines(Flipped.data(), Columns, static_cast<size_t>(Rows), Rows, Filter, Work);
+	Values = Transposed(Flipped, Rows, Columns);
 }
 
 FDistanceField DistanceToFeatures(const FMask& IsFeature, int Columns, int Rows, double CellSize)
