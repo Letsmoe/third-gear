@@ -121,6 +121,16 @@ public:
 	/** Speed measured from the actor's movement, km/h. */
 	float GetSpeedKmh() const { return SpeedKmh; }
 
+	/**
+	 * Uses a speed the vehicle's own simulation knows instead of measuring the actor's movement. A kinematic car that is
+	 * moved once per frame would otherwise read wrong whenever this component ticks at another rate than the car moves.
+	 */
+	void SetExternalSpeedKmh(float Kmh)
+	{
+		bUseExternalSpeed = true;
+		ExternalSpeedKmh = Kmh;
+	}
+
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
@@ -138,6 +148,8 @@ private:
 	FVector PreviousLocation = FVector::ZeroVector;
 	bool bHasPreviousLocation = false;
 	float SpeedKmh = 0.f;
+	bool bUseExternalSpeed = false;
+	float ExternalSpeedKmh = 0.f;
 
 	// Signal tracking
 	int32 TrackedApproach = INDEX_NONE;

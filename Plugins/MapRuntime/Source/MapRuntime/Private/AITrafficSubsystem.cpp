@@ -18,7 +18,7 @@
 DEFINE_LOG_CATEGORY_STATIC(LogAITraffic, Log, All);
 
 static TAutoConsoleVariable<int32> CVarSpawnAnywhere(TEXT("tg.TrafficSpawnAnywhere"), 0,
-	TEXT("1 lets cars appear in view and close to the viewer (staging screenshots); normally they only appear out of sight."));
+	TEXT("For staging screenshots: 1 lets cars appear anywhere around the viewer, in view and close by; 2 puts them in front of the viewer, 20 to 140 m away. Normally they only appear out of sight."));
 static TAutoConsoleVariable<int32> CVarHeadlightLights(TEXT("tg.TrafficHeadlights"), 8,
 	TEXT("How many AI cars nearest the viewer get a real headlight at night."));
 static TAutoConsoleVariable<int32> CVarTrafficCars(TEXT("tg.TrafficCars"), 30, TEXT("How many AI cars the traffic aims for around the viewer."));
@@ -240,13 +240,20 @@ bool UAITrafficSubsystem::TrySpawnOne(const FVector& ViewerCm, const FVector2D& 
 		const float S = Random.FRandRange(6.f, Lane.Length() - 12.f);
 		const FVector Position = Lanes.PositionAt(Lane, S);
 		const float Distance = float(FVector2D::Distance(FVector2D(Position), Viewer));
-		const bool bAnywhere = CVarSpawnAnywhere.GetValueOnGameThread() != 0;
-		if (Distance < (bAnywhere ? 25.f : MinimumSpawnDistanceM) || Distance > MaximumSpawnDistanceM)
+		const int32 StagingMode = CVarSpawnAnywhere.GetValueOnGameThread();
+		const bool bAnywhere = StagingMode != 0;
+		const float MaximumDistance = StagingMode == 2 ? 140.f : MaximumSpawnDistanceM;
+		if (Distance < (bAnywhere ? 20.f : MinimumSpawnDistanceM) || Distance > MaximumDistance)
 		{
 			continue;
 		}
 		const FVector2D Direction = (FVector2D(Position) - Viewer) / Distance;
-		if (!bAnywhere && FVector2D::DotProduct(Direction, ViewerForward) > ViewConeCosine && Distance < VisibleSpawnDistanceM)
+		const float InFront = float(FVector2D::DotProduct(Direction, ViewerForward));
+		if (StagingMode == 2 && InFront < 0.6f)
+		{
+			continue;
+		}
+		if (!bAnywhere && InFront > ViewConeCosine && Distance < VisibleSpawnDistanceM)
 		{
 			continue;
 		}
@@ -384,6 +391,7 @@ void UAITrafficSubsystem::UpdateActors()
 		const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(float(Car.Heading.Y), float(Car.Heading.X)));
 		Actor->ApplyPose(Middle, FRotator(FMath::RadiansToDegrees(Car.PitchRadians), Yaw, 0.f), Car.SteerRadians, Car.WheelRollRadians);
 		Actor->SetLights(Car.bBrakeLight, bHeadlights, Car.TurnSignal, bBlinkOn);
+		Actor->GetRuleChecker()->SetExternalSpeedKmh(Car.SpeedMs * 3.6f);
 		if (Car.SecondsAlive > RuleCheckDelaySeconds)
 		{
 			Actor->EnableRuleChecking();
@@ -490,9 +498,12 @@ FAITrafficViolationTotals UAITrafficSubsystem::GetViolationTotals() const
 	return Totals;
 }
 
-void UAITrafficSubsystem::Tick(float DeltaTime)
+void UAITrafficSubsystem::Tick(float TickDeltaTime)
 {
-	Super::Tick(DeltaTime);
+	Super::Tick(TickDeltaTime);
+	// The world's own delta, the one every actor component gets: the tick argument of a subsystem can differ from it
+	// when the engine fixes up a long frame, and the rule checker measures speed against the component's delta.
+	const float DeltaTime = GetWorld()->GetDeltaSeconds();
 	if (!bStartTried)
 	{
 		TryStart();
