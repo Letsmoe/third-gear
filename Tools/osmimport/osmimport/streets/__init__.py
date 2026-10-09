@@ -16,4 +16,11 @@ Modules:
 * assumptions.py: the tables of widths and counts the rules fall back on.
 * cross_section.py: a road's cross-section, its strips (travel lanes, cycle lanes, bus lanes, margins) from left to
   right, and so its carriageway width.
+* lines.py: the kerbs and painted lines of a cross-section, named so they can be followed into the next road, and
+  which of them are painted.
+* polyline.py: offsets, cuts and curves on numpy polylines.
+* network.py: ways cut at junctions into segments, and what lies at each segment end.
+* layout.py: each segment's lines along it, with the tapers between roads and where lines start and stop.
+* junctions.py: junction mouths and the guide lines through junctions.
+* road_lines.py: builds all of the above for a set of ways.
 """
