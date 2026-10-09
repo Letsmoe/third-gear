@@ -11,7 +11,9 @@ import http.server
 import importlib
 import json
 import os
+import math
 import sys
+import threading
 import traceback
 import urllib.parse
 import urllib.request
@@ -21,9 +23,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import shapely  # noqa: E402
 from pyproj import Transformer  # noqa: E402
 
+import build_area  # noqa: E402
+import build_world  # noqa: E402
 import data_root  # noqa: E402
+import game_streets  # noqa: E402
 from build_world import building_footprints  # noqa: E402
-from osmimport import building_types, dem, geo, osm, street_layers, street_scene  # noqa: E402
+from osmimport import building_types, dem, furniture, geo, osm, roads, street_layers, street_scene  # noqa: E402
 
 PAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "street_viewer.html")
 SCENE_PAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "street_scene.html")
@@ -70,6 +75,64 @@ class ViewportIndex:
         return [self.buildings[index] for index in self.building_tree.query(box)]
 
 
+# The modules that make the game's streets, in the order they are reloaded when one of them changed.
+GAME_MODULES = [roads, furniture, build_area, build_world, game_streets]
+
+
+class GameStreetCache:
+    """The game's streets in TILE_SIZE tiles, generated on first view and kept until the generator code changes."""
+
+    def __init__(self, index: "ViewportIndex"):
+        self.index = index
+        self.tiles = {}
+        self.lock = threading.Lock()
+        self.stamp = self._source_stamp()
+
+    @staticmethod
+    def _source_stamp():
+        """Modification times of the generator modules."""
+        return tuple(os.path.getmtime(module.__file__) for module in GAME_MODULES)
+
+    def _reload_if_changed(self):
+        """Reloads the generator modules and drops the cached tiles when their code changed on disk."""
+        stamp = self._source_stamp()
+        if stamp == self.stamp:
+            return
+        for module in GAME_MODULES:
+            importlib.reload(module)
+        self.tiles.clear()
+        self.stamp = stamp
+
+    def _tile(self, column: int, row: int):
+        """One tile's streets, generated from the OSM data and terrain around it."""
+        key = (column, row)
+        if key not in self.tiles:
+            size = game_streets.TILE_SIZE
+            core = shapely.box(column * size, row * size, (column + 1) * size, (row + 1) * size)
+            context = core.buffer(game_streets.CONTEXT_MARGIN, join_style="mitre")
+            x_min, y_min, x_max, y_max = context.bounds
+            heights = dem.build_mosaic(geo.Area("tile", geo.ORIGIN_E, geo.ORIGIN_N, x_min, x_max, y_min, y_max),
+                                       data_root.geodata_dir(), margin=20.0)
+            data = self.index.subset(context)
+            data.buildings = [(osm_id, tags, footprint) for osm_id, tags, footprint, _ in self.index.buildings_in(context)]
+            self.tiles[key] = game_streets.generate(data, heights, core)
+        return self.tiles[key]
+
+    def streets_in(self, box):
+        """The game's streets of every tile touching the box, and how many tiles had to be generated."""
+        with self.lock:
+            self._reload_if_changed()
+            size = game_streets.TILE_SIZE
+            x_min, y_min, x_max, y_max = box.bounds
+            result = game_streets.GameStreets()
+            generated = 0
+            for column in range(math.floor(x_min / size), math.floor(x_max / size) + 1):
+                for row in range(math.floor(y_min / size), math.floor(y_max / size) + 1):
+                    generated += (column, row) not in self.tiles
+                    result.extend(self._tile(column, row))
+            return result, generated
+
+
 def viewport_box(query: dict):
     """The world rectangle of the bbox=west,south,east,north query parameter (longitude, latitude)."""
     west, south, east, north = (float(value) for value in query["bbox"][0].split(","))
@@ -80,8 +143,12 @@ def viewport_box(query: dict):
 
 
 def scene_box(query: dict):
-    """The world rectangle of the 3D scene: the viewport, cut to MAX_SCENE_METRES around its centre."""
-    x_min, y_min, x_max, y_max = viewport_box(query).bounds
+    """The world rectangle of the 3D scene (world=… in metres or bbox=… in degrees), cut to MAX_SCENE_METRES around
+    its centre."""
+    if "world" in query:
+        x_min, y_min, x_max, y_max = world_box_query(query).bounds
+    else:
+        x_min, y_min, x_max, y_max = viewport_box(query).bounds
     centre_x, centre_y = (x_min + x_max) / 2, (y_min + y_max) / 2
     half_x = min(x_max - x_min, MAX_SCENE_METRES) / 2
     half_y = min(y_max - y_min, MAX_SCENE_METRES) / 2
@@ -101,6 +168,7 @@ def region_outlines(module) -> dict:
 class StreetViewerHandler(http.server.BaseHTTPRequestHandler):
     """Serves the page and the layer data; the spatial index is set on the class by main()."""
     index = None
+    game_cache = None
 
     def do_GET(self):
         """The page at /, the layers in a viewport as GeoJSON at /layers.json?bbox=west,south,east,north."""
@@ -110,6 +178,8 @@ class StreetViewerHandler(http.server.BaseHTTPRequestHandler):
                 self.respond(200, "text/html; charset=utf-8", page.read())
         elif url.path == "/layers.json":
             self.respond_layers(urllib.parse.parse_qs(url.query))
+        elif url.path == "/game.json":
+            self.respond_game(urllib.parse.parse_qs(url.query))
         elif url.path == "/3d":
             with open(SCENE_PAGE_PATH, "rb") as page:
                 self.respond(200, "text/html; charset=utf-8", page.read())
@@ -138,6 +208,22 @@ class StreetViewerHandler(http.server.BaseHTTPRequestHandler):
             return
         self.respond(200, "application/json", json.dumps(body).encode())
 
+    def respond_game(self, query: dict):
+        """The game's generated streets in the viewport as GeoJSON layers, or the error."""
+        try:
+            module = importlib.reload(street_layers)
+            box = viewport_box(query)
+            x_min, y_min, x_max, y_max = box.bounds
+            body = {"layers": {}, "too_wide": max(x_max - x_min, y_max - y_min) > MAX_VIEWPORT_METRES / 2,
+                    "generated_tiles": 0}
+            if not body["too_wide"]:
+                streets, body["generated_tiles"] = self.game_cache.streets_in(box)
+                body["layers"] = module.to_geojson(game_streets.map_layers(streets), WHOLE_EXTRACT)
+        except Exception:
+            self.respond(500, "text/plain; charset=utf-8", traceback.format_exc().encode())
+            return
+        self.respond(200, "application/json", json.dumps(body).encode())
+
     def respond_scene(self, query: dict):
         """Builds the 3D scene of the viewport with the current street_scene code, or sends the error."""
         try:
@@ -147,8 +233,10 @@ class StreetViewerHandler(http.server.BaseHTTPRequestHandler):
             x_min, y_min, x_max, y_max = box.bounds
             scene_area = geo.Area("scene", geo.ORIGIN_E, geo.ORIGIN_N, x_min, x_max, y_min, y_max)
             heights = dem.build_mosaic(scene_area, data_root.geodata_dir(), margin=20.0)
-            body = module.build(self.index.subset(box), self.index.buildings_in(box), heights, box)
+            streets, _ = self.game_cache.streets_in(box)
+            body = module.build(self.index.subset(box), self.index.buildings_in(box), streets, heights, box)
             body["building_classes"] = layers_module.BUILDING_CLASS_COLOURS
+            body["lonlat_bounds"] = list(layers_module.world_to_lonlat(WHOLE_EXTRACT, box).bounds)
         except Exception:
             self.respond(500, "text/plain; charset=utf-8", traceback.format_exc().encode())
             return
@@ -191,6 +279,7 @@ def main():
     args = parser.parse_args()
     data = osm.load(os.path.join(data_root.geodata_dir(), "osm", "bergedorf.osm.pbf"), WHOLE_EXTRACT, margin=0.0)
     StreetViewerHandler.index = ViewportIndex(data)
+    StreetViewerHandler.game_cache = GameStreetCache(StreetViewerHandler.index)
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), StreetViewerHandler)
     print(f"Street viewer at http://127.0.0.1:{args.port}/", flush=True)
     server.serve_forever()

@@ -215,22 +215,33 @@ def poi_ground_height(x, y, net, ground, on_pavement):
     return float(ground.sample(x, y))
 
 
+STOP_LINE_WIDTH = 0.5
+
+
+def stop_line_geometry(approach):
+    """Centre line of the painted stop line (Haltlinie) of a signal approach, just before the signal's line of sight,
+    or None when the approach is too narrow for one."""
+    x0, y0, x1, y1 = approach["stop_line"]
+    length = float(np.hypot(x1 - x0, y1 - y0))
+    if length < 1.0:
+        return None
+    ux, uy = (x1 - x0) / length, (y1 - y0) / length
+    back_x, back_y = -approach["direction"][0] * 0.25, -approach["direction"][1] * 0.25
+    inset = 0.15
+    return shapely.LineString([(x0 + ux * inset + back_x, y0 + uy * inset + back_y),
+                               (x1 - ux * inset + back_x, y1 - uy * inset + back_y)])
+
+
 def write_stop_lines(writers, junctions):
-    """Painted stop lines (Haltlinie, 0.5 m wide) across each approach, just before the signal's line of sight."""
+    """Painted stop lines (0.5 m wide) across each approach into the tiles they touch."""
     for junction in junctions:
         for approach in junction["approaches"]:
-            x0, y0, x1, y1 = approach["stop_line"]
-            length = float(np.hypot(x1 - x0, y1 - y0))
-            if length < 1.0:
+            line = stop_line_geometry(approach)
+            if line is None:
                 continue
-            ux, uy = (x1 - x0) / length, (y1 - y0) / length
-            back_x, back_y = -approach["direction"][0] * 0.25, -approach["direction"][1] * 0.25
-            inset = 0.15
-            line = shapely.LineString([(x0 + ux * inset + back_x, y0 + uy * inset + back_y),
-                                       (x1 - ux * inset + back_x, y1 - uy * inset + back_y)])
             for writer in writers.values():
                 if writer.box.intersects(line):
-                    writer.add_marking("Marking_White", MARKING_STYLES["solid"], line, 0.5, None)
+                    writer.add_marking("Marking_White", MARKING_STYLES["solid"], line, STOP_LINE_WIDTH, None)
 
 
 def write_furniture(writers, area, builder, net, ground):

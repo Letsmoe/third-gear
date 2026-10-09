@@ -1,4 +1,5 @@
-"""A simple 3D reconstruction of a rectangle for the street viewer: terrain, street surfaces, buildings and poles.
+"""A simple 3D reconstruction of a rectangle for the street viewer: terrain, the game's road surfaces, markings and
+furniture, the cycleways, footways, railways and water from OSM, and the typed buildings.
 
 Everything is in world metres (x east, y south, z up). The viewer page maps that to three.js as (x, z, y), which keeps
 the handedness. Meshes go out as base64 float32 triangle lists (non-indexed, so every face shades flat) with a colour
@@ -16,13 +17,12 @@ from .dem import HeightGrid
 
 TERRAIN_CELLS = 256
 SEGMENT_LENGTH = 2.0
+DRAPE_CELL = 3.0
 ROOF_OVERHANG = 0.3
 PITCHED_ROOFS = {"gabled", "hipped", "half_hipped", "mansard", "gambrel", "pyramidal"}
-MARKING_WIDTH = 0.12
 CYCLE_LANE_WIDTH = 1.5
 CYCLEWAY_WIDTH = 2.0
 FOOTWAY_WIDTH = 1.8
-CROSSING_WIDTH = 3.0
 RAILWAY_WIDTH = 2.8
 
 # Surface layers in drawing order: (name, colour, lift above the terrain in metres). Later layers lie on top.
@@ -30,13 +30,14 @@ SURFACE_LAYERS = [
     ("water", "#1d6b64", 0.03),
     ("footway", "#b9b4aa", 0.04),
     ("railway", "#5a4a3c", 0.05),
-    ("carriageway", "#3c3d40", 0.06),
+    ("pavement", "#a7a39b", 0.05),
+    ("asphalt", "#3c3d40", 0.06),
+    ("pavers", "#6e6259", 0.06),
+    ("cobble", "#5d5148", 0.06),
     ("cycleway", "#2f6fdc", 0.08),
-    ("crossing", "#e8e8e8", 0.09),
     ("marking", "#f5f5f0", 0.10),
 ]
-POLE_KINDS = {"traffic_signals": 3.6, "street_lamp": 6.0, "traffic_sign": 2.5, "stop": 2.5, "give_way": 2.5,
-              "bus_stop": 2.6}
+POLE_HEIGHTS = {"signal_head": 3.4, "sign": 2.5, "lamp": 6.5}
 
 
 @dataclass
@@ -83,11 +84,25 @@ def _polygons(geometry):
     return [part for part in getattr(geometry, "geoms", []) if isinstance(part, shapely.Polygon)]
 
 
+def grid_pieces(geometry, cell: float):
+    """The geometry cut along a square grid of the given cell size, so no triangle of it spans more than one cell."""
+    if geometry.is_empty:
+        return []
+    x_min, y_min, x_max, y_max = geometry.bounds
+    xs = np.arange(np.floor(x_min / cell) * cell, x_max, cell)
+    ys = np.arange(np.floor(y_min / cell) * cell, y_max, cell)
+    grid_x, grid_y = np.meshgrid(xs, ys)
+    cells = shapely.box(grid_x.ravel(), grid_y.ravel(), grid_x.ravel() + cell, grid_y.ravel() + cell)
+    touching = shapely.STRtree(cells).query(geometry, predicate="intersects")
+    pieces = shapely.intersection(cells[touching], geometry)
+    return [polygon for piece in pieces for polygon in _polygons(piece)]
+
+
 def draped_triangles(geometry, heights: HeightGrid, lift: float) -> np.ndarray:
-    """(n, 3, 3) triangles of a plan area laid on the terrain: edges are cut into SEGMENT_LENGTH pieces and every
-    vertex takes the terrain height plus lift. Large interior triangles stay flat between their corners."""
+    """(n, 3, 3) triangles of a plan area laid on the terrain: the area is cut into DRAPE_CELL squares and every
+    vertex takes the terrain height plus lift, so the surface follows the ground instead of cutting through it."""
     triangles = []
-    for polygon in _polygons(shapely.segmentize(geometry, SEGMENT_LENGTH)):
+    for polygon in grid_pieces(geometry, DRAPE_CELL):
         plan = triangulate_polygon(polygon)
         if len(plan) == 0:
             continue
@@ -137,17 +152,18 @@ def _strip(line, width: float):
     return shapely.buffer(line, width / 2, cap_style="flat")
 
 
-def street_shapes(data) -> StreetShapes:
-    """The plan areas of carriageways, lane lines, cycle lanes, cycleways, footways, crossings and railways."""
+def street_shapes(data, streets) -> StreetShapes:
+    """The plan areas of the game's roads and markings, and of the cycle lanes, cycleways, footways,
+    railways and water from OSM."""
     shapes = StreetShapes()
+    _add_game_shapes(shapes, streets)
     for way in data.roads:
         _add_road_shapes(shapes, way)
     for way in data.footways:
         line = shapely.LineString(way.xy)
         on_bridge = street_layers.is_bridge(way.tags)
-        if way.tags.get("footway") == "crossing" or way.tags.get("cycleway") == "crossing":
-            shapes.add("crossing", line, _strip(line, CROSSING_WIDTH), on_bridge)
-        elif way.tags.get("highway") == "cycleway" or way.tags.get("bicycle") == "designated":
+        # Crossing ways stay footways: the game paints its own zebra bars over the road, which lies on top.
+        if way.tags.get("highway") == "cycleway" or way.tags.get("bicycle") == "designated":
             shapes.add("cycleway", line, _strip(line, CYCLEWAY_WIDTH), on_bridge)
         else:
             shapes.add("footway", line, _strip(line, FOOTWAY_WIDTH), on_bridge)
@@ -171,15 +187,10 @@ def _add_water_shapes(shapes: StreetShapes, data):
 
 
 def _add_road_shapes(shapes: StreetShapes, way):
-    """Carriageway, lane lines and cycle lanes of one road, as street_layers draws them on the map."""
+    """The cycle lanes tagged on one road (the carriageway and its markings come from the game's own generator)."""
     centre = shapely.LineString(way.xy)
     width = roads.road_width(way.tags)
     on_bridge = street_layers.is_bridge(way.tags)
-    shapes.add("carriageway", centre, shapely.buffer(centre, width / 2, cap_style="round"), on_bridge)
-    for offset in street_layers.lane_divider_offsets(way.tags, width):
-        side = "right" if offset > 0 else "left"
-        divider = street_layers.side_offset(centre, abs(offset), side)
-        shapes.add("marking", divider, _strip(divider, MARKING_WIDTH), on_bridge)
     for side, value in street_layers.cycleway_sides(way.tags).items():
         if value not in {"lane", "opposite_lane"}:
             continue
@@ -187,9 +198,21 @@ def _add_road_shapes(shapes: StreetShapes, way):
         shapes.add("cycleway", lane, _strip(lane, CYCLE_LANE_WIDTH), on_bridge)
 
 
-def street_mesh(data, heights: HeightGrid, clip_box) -> MeshBuilder:
+def _add_game_shapes(shapes: StreetShapes, streets):
+    """The game's road surfaces, bridge decks, pavements and painted markings."""
+    for kind, polygon in streets.surfaces:
+        shapes.add(kind, None, polygon, False)
+    for line, polygon in streets.bridges:
+        shapes.add("asphalt", line, polygon, True)
+    if streets.pavement is not None:
+        shapes.add("pavement", None, streets.pavement, False)
+    for _, polygon in streets.markings:
+        shapes.add("marking", None, polygon, False)
+
+
+def street_mesh(data, streets, heights: HeightGrid, clip_box) -> MeshBuilder:
     """Draped street surfaces inside the clip box, each layer unioned so overlaps don't flicker."""
-    shapes = street_shapes(data)
+    shapes = street_shapes(data, streets)
     mesh = MeshBuilder()
     for layer, colour, lift in SURFACE_LAYERS:
         outlines = shapes.areas.get(layer)
@@ -229,17 +252,24 @@ def _roof_triangles(footprint, building_type, eave_z: float) -> np.ndarray:
     return np.concatenate([plan, np.full(plan.shape[:-1] + (1,), eave_z)], axis=-1)
 
 
-def building_mesh(buildings, heights: HeightGrid) -> MeshBuilder:
-    """Walls up to the typed eave height on the lowest ground under the footprint, and the roofs, coloured by class."""
+def building_mesh(buildings, heights: HeightGrid):
+    """Walls up to the typed eave height on the lowest ground under the footprint, and the roofs, coloured by class.
+    Returns the mesh and, per building in mesh order, its triangle count and the pop-up the map shows for it."""
     mesh = MeshBuilder()
-    for _, _, footprint, building_type in buildings:
+    info = []
+    for osm_id, tags, footprint, building_type in buildings:
         colour = street_layers.BUILDING_CLASS_COLOURS[building_types.CLASS_NAMES[building_type.class_id]]
         ring = np.asarray(footprint.exterior.coords)
         base = float(np.min(heights.sample(ring[:, 0], ring[:, 1])))
         eave_z = base + building_type.eave_height
-        mesh.add(_wall_triangles(footprint, base - 0.5, eave_z), colour)
-        mesh.add(_roof_triangles(footprint, building_type, eave_z), _darker(colour))
-    return mesh
+        walls = _wall_triangles(footprint, base - 0.5, eave_z)
+        roof = _roof_triangles(footprint, building_type, eave_z)
+        mesh.add(walls, colour)
+        mesh.add(roof, _darker(colour))
+        popup = street_layers.Layers()
+        street_layers.add_building(popup, osm_id, tags, footprint, building_type)
+        info.append({"triangles": len(walls) + len(roof), "properties": popup.by_name["Buildings"][0][2]})
+    return mesh, info
 
 
 def _darker(colour: str) -> str:
@@ -248,16 +278,15 @@ def _darker(colour: str) -> str:
     return "#" + "".join(f"{channel:02x}" for channel in channels)
 
 
-def poles(data, heights: HeightGrid, clip_box) -> list:
-    """Signals, lamps, signs and bus stops as {kind, x, y, z, height} for the page to draw as poles."""
+def poles(streets, heights: HeightGrid, clip_box) -> list:
+    """The game's signal heads, signs and lamps as {kind, x, y, z, height, label} for the page to draw as poles."""
     result = []
-    for point in data.points:
-        kind = "traffic_sign" if "traffic_sign" in point.tags else point.tags.get("highway")
-        if kind not in POLE_KINDS or not clip_box.contains(shapely.Point(point.x, point.y)):
+    for pole in streets.poles:
+        if not clip_box.contains(shapely.Point(pole["x"], pole["y"])):
             continue
-        z = float(heights.sample(point.x, point.y))
-        result.append({"kind": kind, "x": round(point.x, 2), "y": round(point.y, 2), "z": round(z, 2),
-                       "height": POLE_KINDS[kind]})
+        z = float(heights.sample(pole["x"], pole["y"]))
+        result.append({"kind": pole["kind"], "x": round(pole["x"], 2), "y": round(pole["y"], 2), "z": round(z, 2),
+                       "height": POLE_HEIGHTS[pole["kind"]], "label": pole["label"]})
     return result
 
 
@@ -272,11 +301,13 @@ def terrain(heights: HeightGrid, clip_box) -> dict:
             "heights": _base64(z.astype(np.float32))}
 
 
-def build(data, buildings, heights: HeightGrid, clip_box) -> dict:
-    """The whole scene for the viewer page."""
+def build(data, buildings, streets, heights: HeightGrid, clip_box) -> dict:
+    """The whole scene for the viewer page; streets is the game's generated street geometry (game_streets.py)."""
+    buildings_mesh, building_info = building_mesh(buildings, heights)
     return {
         "terrain": terrain(heights, clip_box),
-        "streets": street_mesh(data, heights, clip_box).encode(),
-        "buildings": building_mesh(buildings, heights).encode(),
-        "poles": poles(data, heights, clip_box),
+        "streets": street_mesh(data, streets, heights, clip_box).encode(),
+        "buildings": buildings_mesh.encode(),
+        "building_info": building_info,
+        "poles": poles(streets, heights, clip_box),
     }

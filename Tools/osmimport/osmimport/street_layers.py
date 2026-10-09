@@ -255,7 +255,7 @@ def build(data: OsmData, buildings=()) -> Layers:
     return layers
 
 
-def _world_to_lonlat(area: Area, geometry):
+def world_to_lonlat(area: Area, geometry):
     """The geometry converted from world metres to WGS84 longitude and latitude."""
     def convert(coordinates):
         east = coordinates[:, 0] + area.origin_e
@@ -273,7 +273,7 @@ def to_geojson(layers: Layers, area: Area) -> dict:
     for name, features in layers.by_name.items():
         collection = []
         for geometry, style, properties in features:
-            lonlat = _world_to_lonlat(area, geometry)
+            lonlat = world_to_lonlat(area, geometry)
             collection.append({"type": "Feature", "geometry": shapely.geometry.mapping(lonlat),
                                "properties": properties | {"style": style}})
         result[name] = {"type": "FeatureCollection", "features": collection}
@@ -283,4 +283,4 @@ def to_geojson(layers: Layers, area: Area) -> dict:
 def region_outline(area: Area) -> dict:
     """The region's build extent as a GeoJSON polygon in longitude and latitude."""
     box = shapely.box(area.x_min, area.y_min, area.x_max, area.y_max)
-    return shapely.geometry.mapping(_world_to_lonlat(area, box))
+    return shapely.geometry.mapping(world_to_lonlat(area, box))
