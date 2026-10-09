@@ -319,12 +319,13 @@ private:
 
 		const FString Odometer = FString::Printf(TEXT("%s km"), *FText::AsNumber(FMath::FloorToInt(State.OdometerKm)).ToString());
 		Text(Odometer, FVector2f(CentreX, Top + 0.5f * Unit), 0.045f * Unit, Text1 * 0.85f, EAnchor::Centre, "Regular");
-		Text(FString::Printf(TEXT("%.1f km"), State.TripKm), FVector2f(CentreX, Top + 0.555f * Unit), 0.04f * Unit, Text1 * 0.6f, EAnchor::Centre, "Regular");
-		if (!State.Message.IsEmpty())
+		if (State.Message.IsEmpty())
 		{
-			Panel(FVector2f(TopLeft.X + 0.02f * Unit, Top + 0.43f * Unit), FVector2f(PanelSize.X - 0.04f * Unit, 0.06f * Unit), FLinearColor(0.35f, 0.18f, 0.f) * State.Backlight);
-			Text(State.Message, FVector2f(CentreX, Top + 0.46f * Unit), 0.04f * Unit, FLinearColor(1.f, 0.8f, 0.4f) * State.Backlight, EAnchor::Centre);
+			Text(FString::Printf(TEXT("%.1f km"), State.TripKm), FVector2f(CentreX, Top + 0.555f * Unit), 0.04f * Unit, Text1 * 0.6f, EAnchor::Centre, "Regular");
+			return;
 		}
+		Panel(FVector2f(TopLeft.X + 0.02f * Unit, Top + 0.53f * Unit), FVector2f(PanelSize.X - 0.04f * Unit, 0.056f * Unit), FLinearColor(0.35f, 0.18f, 0.f) * State.Backlight);
+		Text(State.Message, FVector2f(CentreX, Top + 0.558f * Unit), 0.034f * Unit, FLinearColor(1.f, 0.8f, 0.4f) * State.Backlight, EAnchor::Centre);
 	}
 
 	void LampArrow(const FVector2f& Centre, bool bPointsLeft, const FLinearColor& Color)
