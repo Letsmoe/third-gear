@@ -82,6 +82,28 @@ float drift = DgValueNoise(p / 1.1 + 9.7) * 0.7 + DgValueNoise(p / 0.25 + 1.3) *
 float leaves = saturate((Leaves * LeafKeep * 0.7 - drift + 0.05) / 0.08) * up * (1.0 - snow);
 return float2(snow, leaves);
 """
+# The ground's snow uses the scans only for grain: SNOW_TONE_HLSL brings their brightness to a physical albedo and adds
+# soft undulation. Scan (mean linear brightness, target albedo) per set; snow_02 is a dull grey scan (0.38), fresh snow
+# is 0.8-0.9, trodden snow on footways is greyer, gritted road snow stays dark.
+SNOW_TONE = {"Snow/snow_02": (0.38, 0.86), "Snow/snow_01": (0.48, 0.74), "Snow/asphalt_snow": (0.216, 0.26)}
+SNOW_TONE_HLSL = """
+float2 p = WorldPos.xy / 100.0;
+// Same tone and macro variation as the layer mesh (create_snow_material.py), so the layer's fade-out is invisible.
+float3 relative = max(Scan, 0.001) / Mean;
+float macro = lerp(0.93, 1.03, DgValueNoise(p / 5.0 + 11.0));
+float3 Colour = min(Target * float3(0.975, 0.99, 1.0) * pow(relative, 0.6) * macro, 0.93);
+// Soft undulation on top of the scanned grain: a tangent-space tilt from the gradient of two low-frequency noises.
+float2 q = p / 1.7;
+float step_size = 0.05;
+float h = DgValueNoise(q) * 1.0 + DgValueNoise(p / 0.45 + 3.0) * 0.35;
+float hx = DgValueNoise(q + float2(step_size, 0)) + DgValueNoise((p + float2(step_size, 0) * 1.7) / 0.45 + 3.0) * 0.35;
+float hy = DgValueNoise(q + float2(0, step_size)) + DgValueNoise((p + float2(0, step_size) * 1.7) / 0.45 + 3.0) * 0.35;
+float2 tilt = float2(hx - h, hy - h) / step_size * 0.035;
+NormalOut = normalize(float3(ScanNormal.xy + tilt, max(ScanNormal.z, 0.2)));
+// Snow is a very rough, matte surface whatever the scan says.
+RoughOut = lerp(ScanRough, 1.0, 0.55);
+return Colour;
+"""
 # Untrodden snow by default (lawns, roofs); footways get trodden snow and roads gritted asphalt (SEASON_SNOW_SETS).
 SNOW_SET = "Snow/snow_02"
 SEASON_SNOW_SETS = {"Road_": "Snow/asphalt_snow", "Bridge_": "Snow/asphalt_snow", "Pavement": "Snow/snow_01",
@@ -202,6 +224,13 @@ def custom_input(name):
     return ci
 
 
+def custom_output(name, kind):
+    co = unreal.CustomOutput()
+    co.set_editor_property("output_name", name)
+    co.set_editor_property("output_type", kind)
+    return co
+
+
 def scalar(material, name, default, x, y):
     return expr(material, unreal.MaterialExpressionScalarParameter, x, y, parameter_name=name, default_value=default)
 
@@ -263,6 +292,24 @@ def season_samples(m, set_path, tile_cm, x, y, parameter_prefix=None):
     return samples
 
 
+def snow_toned(m, samples, x, y):
+    """Colour, normal and roughness samples of the snow scan after SNOW_TONE_HLSL: physical albedo, soft undulation and
+    high roughness. Returns three nodes in the same order, each read with the pin season_samples' results use."""
+    tone = expr(m, unreal.MaterialExpressionCustom, x, y, code=SNOW_TONE_HLSL, description="SnowTone",
+                output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                inputs=[custom_input(n) for n in ("Scan", "ScanNormal", "ScanRough", "WorldPos", "Mean", "Target")])
+    tone.set_editor_property("additional_outputs", [custom_output("NormalOut", unreal.CustomMaterialOutputType.CMOT_FLOAT3),
+                                                    custom_output("RoughOut", unreal.CustomMaterialOutputType.CMOT_FLOAT1)])
+    tone.set_editor_property("include_file_paths", [TERRAIN_INCLUDE])
+    link(samples[0], "RGB", tone, "Scan")
+    link(samples[1], "RGB", tone, "ScanNormal")
+    link(samples[2], "R", tone, "ScanRough")
+    link(expr(m, unreal.MaterialExpressionWorldPosition, x - 200, y + 300), "", tone, "WorldPos")
+    link(scalar(m, "SnowMean", SNOW_TONE[SNOW_SET][0], x - 200, y + 400), "", tone, "Mean")
+    link(scalar(m, "SnowTarget", SNOW_TONE[SNOW_SET][1], x - 200, y + 500), "", tone, "Target")
+    return [(tone, ""), (tone, "NormalOut"), (tone, "RoughOut")]
+
+
 def add_season(m, color, rough, normal, snow_keep, leaf_keep):
     """Lays snow and fallen leaves over the surface by the season; colour, roughness and normal are (node, pin)
     pairs, and so are the results. Without the weather collection the inputs pass through unchanged."""
@@ -289,7 +336,7 @@ def add_season(m, color, rough, normal, snow_keep, leaf_keep):
     leaf_mask = expr(m, unreal.MaterialExpressionComponentMask, 600, 1400, r=False, g=True, b=False, a=False)
     link(mask, "", snow_mask, "")
     link(mask, "", leaf_mask, "")
-    snow = season_samples(m, SNOW_SET, 250.0, 400, 1900, parameter_prefix="Snow")
+    snow = snow_toned(m, season_samples(m, SNOW_SET, 250.0, 400, 1900, parameter_prefix="Snow"), 600, 1900)
     leaves = season_samples(m, LEAF_SET, 150.0, 400, 2400)
     pins = ("RGB", "RGB", "R")
     results = []
@@ -300,7 +347,7 @@ def add_season(m, color, rough, normal, snow_keep, leaf_keep):
         link(leaf_mask, "", with_leaves, "Alpha")
         with_snow = expr(m, unreal.MaterialExpressionLinearInterpolate, 950, 1300 + index * 200)
         link(with_leaves, "", with_snow, "A")
-        link(snow[index], pins[index], with_snow, "B")
+        link(snow[index][0], snow[index][1], with_snow, "B")
         link(snow_mask, "", with_snow, "Alpha")
         results.append((with_snow, ""))
     return results[0], results[2], results[1]
@@ -535,6 +582,9 @@ def build_instance(master, section, set_path, tile_size, opts):
         if section.startswith(prefix):
             for kind in ("BaseColor", "Normal", "Roughness"):
                 mel.set_material_instance_texture_parameter_value(mi, "Snow" + kind, tex(snow_set, kind))
+            mean, target = SNOW_TONE[snow_set]
+            mel.set_material_instance_scalar_parameter_value(mi, "SnowMean", mean)
+            mel.set_material_instance_scalar_parameter_value(mi, "SnowTarget", target)
     for prefix, (snow_keep, leaf_keep) in SEASON_KEEP.items():
         if section.startswith(prefix):
             mel.set_material_instance_scalar_parameter_value(mi, "SnowKeep", snow_keep)
