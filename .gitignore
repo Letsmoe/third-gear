@@ -24,6 +24,7 @@ Tools/**/.venv
 /Content/Textures
 /Content/Vegetation
 /Content/Grass
+/Content/Leaves
 /Content/World
 
 # Plugin build output
