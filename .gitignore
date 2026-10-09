@@ -6,6 +6,8 @@
 *.sln
 Makefile
 CMakeLists.txt
+!/WorldBuilder/CMakeLists.txt
+/WorldBuilder/Build
 .idea/
 __pycache__/
 .claude/
