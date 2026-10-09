@@ -22,6 +22,7 @@
 #include "TrafficSubsystem.h"
 #include "GrassField.h"
 #include "WorldFurniture.h"
+#include "WorldSnow.h"
 #include "WorldTileActor.h"
 #include "WorldTileData.h"
 #include "WorldTileMesher.h"
@@ -37,6 +38,8 @@ constexpr int32 ShrubCullDistanceCm = 40000;
 constexpr int32 PlantWindDistanceCm = 9000;
 /** Height the car is dropped from with -StartPose; the ground trace in the game mode reaches 80 m. */
 constexpr float StartPoseHeightCm = 4000.f;
+/** The snow layer is meshed for near tiles once the snow cover is above this. */
+constexpr float SnowMeshWantedAbove = 0.0005f;
 }
 
 /** One tile meshed at one detail level by a worker. */
@@ -75,7 +78,7 @@ namespace
 {
 /** Reads (if not cached) and meshes one tile. Runs on a worker thread. */
 TSharedPtr<FWorldTileBuild> RunBuild(int32 TileIndex, int32 Detail, const FString& Path,
-	TSharedPtr<const FWorldTileData> Data, const FWorldMeshingContext& Context)
+	TSharedPtr<const FWorldTileData> Data, const FWorldMeshingContext& Context, bool bBuildSnow)
 {
 	TSharedPtr<FWorldTileBuild> Build = MakeShared<FWorldTileBuild>();
 	Build->TileIndex = TileIndex;
@@ -91,7 +94,7 @@ TSharedPtr<FWorldTileBuild> RunBuild(int32 TileIndex, int32 Detail, const FStrin
 		Data = Loaded;
 	}
 	Build->Data = Data;
-	Build->Meshes = MakeUnique<FWorldTileMeshes>(BuildWorldTileMeshes(*Data, static_cast<EWorldTileDetail>(Detail), Context));
+	Build->Meshes = MakeUnique<FWorldTileMeshes>(BuildWorldTileMeshes(*Data, static_cast<EWorldTileDetail>(Detail), Context, bBuildSnow));
 	Build->BuildSeconds = FPlatformTime::Seconds() - StartTime;
 	return Build;
 }
@@ -390,12 +393,12 @@ void AWorldStreamer::StartBuild(int32 TileIndex, int32 Detail)
 	Tile.PendingDetail = Detail;
 	++BuildsInFlight;
 	UE::Tasks::Launch(UE_SOURCE_LOCATION,
-		[TileIndex, Detail, Path = Tile.Path, Data = Tile.Data, Context = MeshingContext, SharedState = Shared]()
+		[TileIndex, Detail, bBuildSnow = bSnowWanted, Path = Tile.Path, Data = Tile.Data, Context = MeshingContext, SharedState = Shared]()
 		{
 			TSharedPtr<FWorldTileBuild> Build;
 			if (!SharedState->bCancelled)
 			{
-				Build = RunBuild(TileIndex, Detail, Path, Data, *Context);
+				Build = RunBuild(TileIndex, Detail, Path, Data, *Context, bBuildSnow);
 			}
 			else
 			{
@@ -459,6 +462,7 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 	const int32 Step = Job.NextStep++;
 	const int32 ChunkSteps = Meshes.GroundChunks.Num();
 	const int32 PlantSteps = Meshes.Plants.Num();
+	const int32 SnowSteps = Meshes.Snow ? Meshes.Snow->Chunks.Num() : 0;
 	bool bDone = false;
 	if (Step == 0)
 	{
@@ -523,6 +527,13 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 			}
 		}
 	}
+	else if (Step <= ChunkSteps + 3 + PlantSteps + SnowSteps)
+	{
+		const int32 SnowChunk = Step - ChunkSteps - 4 - PlantSteps;
+		const FVector2D ChunkSize(Meshes.Snow->ChunkSizeCm);
+		const FVector2D ChunkMin = Tile.Bounds.Min + FVector2D(SnowChunk % Meshes.Snow->ChunksPerSide, SnowChunk / Meshes.Snow->ChunksPerSide) * ChunkSize;
+		Actor->AddSnowChunk(MoveTemp(Meshes.Snow->Chunks[SnowChunk]), FBox2D(ChunkMin, ChunkMin + ChunkSize), FindMaterial(TEXT("Snow_Layer")));
+	}
 	else
 	{
 		if (bNear)
@@ -536,13 +547,14 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 		Tile.Actor = Actor;
 		Tile.ShownDetail = Build.Detail;
 		Tile.PendingDetail = INDEX_NONE;
+		Tile.bHasSnowMesh = Meshes.Snow.IsValid();
 		bDone = true;
 	}
 	const double StepSeconds = FPlatformTime::Seconds() - StartTime;
 	if (StepSeconds > 0.008)
 	{
 		UE_LOG(LogWorldStreamer, Log, TEXT("Tile %s detail %d: step %d of %d took %.1f ms (furniture part %d)"), *FPaths::GetBaseFilename(Tile.Path), Build.Detail,
-			Step, ChunkSteps + PlantSteps + 5, StepSeconds * 1000.0, Job.FurnitureStep - 1);
+			Step, ChunkSteps + PlantSteps + SnowSteps + 5, StepSeconds * 1000.0, Job.FurnitureStep - 1);
 	}
 	Job.SpawnSeconds += StepSeconds;
 	Job.LongestStepSeconds = FMath::Max(Job.LongestStepSeconds, StepSeconds);
@@ -658,7 +670,12 @@ void AWorldStreamer::UpdateWanted(const FVector& Location)
 			}
 			continue;
 		}
-		if (Wanted != Tile.ShownDetail && Wanted != Tile.PendingDetail && Wanted != Tile.FailedDetail)
+		const bool bNeedsSnowMesh = bSnowWanted && Wanted == int32(EWorldTileDetail::Near) && Tile.ShownDetail == Wanted && !Tile.bHasSnowMesh;
+		if (bNeedsSnowMesh && Tile.PendingDetail == INDEX_NONE && Tile.FailedDetail != Wanted)
+		{
+			Order.Add(Index); // snow started falling: mesh the tile again, this time with its snow layer
+		}
+		else if (Wanted != Tile.ShownDetail && Wanted != Tile.PendingDetail && Wanted != Tile.FailedDetail)
 		{
 			Order.Add(Index);
 		}
@@ -703,7 +720,7 @@ void AWorldStreamer::LoadAroundBlocking(const FVector& Location)
 	ParallelFor(Needed.Num(), [&](int32 Slot)
 	{
 		const FTileState& Tile = Tiles[Needed[Slot]];
-		Builds[Slot] = RunBuild(Needed[Slot], Tile.PendingDetail, Tile.Path, Tile.Data, Context);
+		Builds[Slot] = RunBuild(Needed[Slot], Tile.PendingDetail, Tile.Path, Tile.Data, Context, bSnowWanted);
 	});
 	for (const TSharedPtr<FWorldTileBuild>& Build : Builds)
 	{
@@ -817,6 +834,7 @@ void AWorldStreamer::Tick(float DeltaSeconds)
 	if (bHasViewer && SecondsSinceUpdate >= UpdateIntervalSeconds)
 	{
 		SecondsSinceUpdate = 0.f;
+		bSnowWanted = ReadWorldSnowCover(GetWorld()) > SnowMeshWantedAbove || FParse::Param(FCommandLine::Get(), TEXT("ForceSnowMesh"));
 		UpdateWanted(Location);
 	}
 }

@@ -4,6 +4,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "HAL/PlatformMemory.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 
@@ -111,5 +112,8 @@ void AStreamTestRunner::Finish()
 		UE_LOG(LogStreamTest, Display, TEXT("STREAMTEST %d frames over %.0f m: average %.1f ms, median %.1f ms, 99th percentile %.1f ms, worst %.1f ms, %d frames over %.0f ms"),
 			Sorted.Num(), Travelled / 100.0, Sum / Sorted.Num(), Percentile(0.5), Percentile(0.99), Sorted.Last(), Hitches, HitchMilliseconds);
 	}
+	const FPlatformMemoryStats MemoryStats = FPlatformMemory::GetStats();
+	UE_LOG(LogStreamTest, Display, TEXT("STREAMTEST memory: %.0f MB in use, %.0f MB peak"),
+		double(MemoryStats.UsedPhysical) / (1024.0 * 1024.0), double(MemoryStats.PeakUsedPhysical) / (1024.0 * 1024.0));
 	GEngine->Exec(GetWorld(), TEXT("quit"));
 }
