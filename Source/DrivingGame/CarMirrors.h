@@ -138,6 +138,9 @@ private:
 	/** Cuts the capture's cost: no screen-space effects and no Lumen (shadows are switched per capture, tg.Mirrors.Shadows). */
 	void ApplyCheapShowFlags(USceneCaptureComponent2D& Capture) const;
 
+	/** Applies the console variables that can change while the game runs: shadows, sky light and resolution. */
+	void ApplyPerCaptureSettings(FMirror& Mirror) const;
+
 	/** True when the mirror is within the driver's field of view, so refreshing it is worth the cost. */
 	bool IsInView(const FMirror& Mirror, const UCameraComponent& Camera) const;
 

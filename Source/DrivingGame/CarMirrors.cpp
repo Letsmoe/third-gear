@@ -19,7 +19,13 @@ TAutoConsoleVariable<int32> CVarMirrorShadows(TEXT("tg.Mirrors.Shadows"), 0,
 	TEXT("Dynamic shadows in the mirror captures: 1 = on, 0 = off (cheaper, but flatter)."), ECVF_Default);
 
 TAutoConsoleVariable<float> CVarMirrorResolutionScale(TEXT("tg.Mirrors.ResolutionScale"), 1.f,
-	TEXT("Scales the resolution of all mirror captures (applied when the game starts)."), ECVF_Default);
+	TEXT("Scales the resolution of all mirror captures."), ECVF_Default);
+
+TAutoConsoleVariable<int32> CVarMirrorSkyLight(TEXT("tg.Mirrors.SkyLight"), 1,
+	TEXT("Sky light ambient in the mirror captures: 1 = on, 0 = off (cheaper, but shaded surfaces turn black)."), ECVF_Default);
+
+TAutoConsoleVariable<int32> CVarMirrorProfile(TEXT("tg.Mirrors.CaptureAllEveryFrame"), 0,
+	TEXT("Profiling aid: refresh every visible mirror on every frame, ignoring the update rates."), ECVF_Default);
 
 /** Distance of the capture's near plane behind the glass plane, so the glass rim itself is not drawn, cm. */
 constexpr float MirrorNearClipMarginCm = 0.5f;
@@ -97,11 +103,10 @@ void UCarMirrorsComponent::CreateMirror(const FCarMirrorDefinition& Settings, US
 	Mirror.Glass->bAffectDistanceFieldLighting = false;
 	Mirror.Glass->RegisterComponent();
 
-	const float ResolutionScale = FMath::Clamp(CVarMirrorResolutionScale.GetValueOnGameThread(), 0.25f, 4.f);
 	Mirror.RenderTarget = NewObject<UTextureRenderTarget2D>(this);
 	Mirror.RenderTarget->RenderTargetFormat = RTF_RGBA16f;
 	Mirror.RenderTarget->bAutoGenerateMips = false;
-	Mirror.RenderTarget->InitAutoFormat(FMath::RoundToInt(Settings.ResolutionX * ResolutionScale), FMath::RoundToInt(Settings.ResolutionY * ResolutionScale));
+	Mirror.RenderTarget->InitAutoFormat(Settings.ResolutionX, Settings.ResolutionY);
 	Mirror.RenderTarget->UpdateResourceImmediate(true);
 
 	if (GlassMaterial)
@@ -213,6 +218,20 @@ bool UCarMirrorsComponent::PrepareCapture(FMirror& Mirror, const FVector& EyeLoc
 	return true;
 }
 
+void UCarMirrorsComponent::ApplyPerCaptureSettings(FMirror& Mirror) const
+{
+	Mirror.Capture->ShowFlags.SetDynamicShadows(CVarMirrorShadows.GetValueOnGameThread() != 0);
+	Mirror.Capture->ShowFlags.SetSkyLighting(CVarMirrorSkyLight.GetValueOnGameThread() != 0);
+
+	const float ResolutionScale = FMath::Clamp(CVarMirrorResolutionScale.GetValueOnGameThread(), 0.25f, 4.f);
+	const int32 TargetX = FMath::Max(16, FMath::RoundToInt(Mirror.Settings.ResolutionX * ResolutionScale));
+	const int32 TargetY = FMath::Max(16, FMath::RoundToInt(Mirror.Settings.ResolutionY * ResolutionScale));
+	if (Mirror.RenderTarget->SizeX != TargetX || Mirror.RenderTarget->SizeY != TargetY)
+	{
+		Mirror.RenderTarget->ResizeTarget(TargetX, TargetY);
+	}
+}
+
 bool UCarMirrorsComponent::IsInView(const FMirror& Mirror, const UCameraComponent& Camera) const
 {
 	const FVector MirrorLocation = GetCar()->GetMesh()->GetComponentTransform().TransformPosition(Mirror.Settings.Center);
@@ -238,11 +257,12 @@ void UCarMirrorsComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 	// One capture per frame at most: take the next mirror that is due and in the driver's view.
 	const double Now = GetWorld()->GetTimeSeconds();
 	const int32 Count = MirrorList.Num();
+	const bool bCaptureAll = CVarMirrorProfile.GetValueOnGameThread() != 0;
 	for (int32 Step = 0; Step < Count; ++Step)
 	{
 		FMirror& Mirror = MirrorList[(NextMirror + Step) % Count];
 		const double Interval = 1.0 / FMath::Max(1.f, Mirror.Settings.UpdateRateHz);
-		if (Now - Mirror.LastCaptureTime < Interval || !IsInView(Mirror, *Camera))
+		if (!bCaptureAll && (Now - Mirror.LastCaptureTime < Interval || !IsInView(Mirror, *Camera)))
 		{
 			continue;
 		}
@@ -250,9 +270,12 @@ void UCarMirrorsComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 		Mirror.LastCaptureTime = Now;
 		if (PrepareCapture(Mirror, Camera->GetComponentLocation()))
 		{
-			Mirror.Capture->ShowFlags.SetDynamicShadows(CVarMirrorShadows.GetValueOnGameThread() != 0);
+			ApplyPerCaptureSettings(Mirror);
 			Mirror.Capture->CaptureScene();
 		}
-		return;
+		if (!bCaptureAll)
+		{
+			return;
+		}
 	}
 }
