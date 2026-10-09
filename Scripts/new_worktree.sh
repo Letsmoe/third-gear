@@ -17,7 +17,7 @@ fi
 
 # Untracked paths shared from the root (see .gitignore)
 SHARED=(
-	RawAssets GeoData/raw GeoData/osm GeoData/build DerivedDataCache Plugins/OpenXR
+	RawAssets GeoData/raw GeoData/osm GeoData/build DerivedDataCache
 	Content/CitySampleVehicles Content/Textures Content/World Content/Vegetation
 	Content/Vehicles/SportsCar Content/Vehicles/PhysicsMaterials
 )
@@ -27,6 +27,11 @@ for path in "${SHARED[@]}"; do
 		ln -s "$ROOT/$path" "$TREE/$path"
 	fi
 done
+# The patched OpenXR plugin is compiled with the project, and Unreal's build accelerator fails on symlinked sources:
+# copy it, build output included, so the worktree doesn't have to recompile it.
+if [ -d "$ROOT/Plugins/OpenXR" ] && [ ! -e "$TREE/Plugins/OpenXR" ]; then
+	cp -a "$ROOT/Plugins/OpenXR" "$TREE/Plugins/OpenXR"
+fi
 # Generated maps are single files next to the tracked ProvingGround map
 for map in "$ROOT"/Content/Maps/*.umap; do
 	name=$(basename "$map")
