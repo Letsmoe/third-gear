@@ -25,6 +25,8 @@ SCALARS = {
     "LeafColour": 0.0,      # autumn colouring of the remaining foliage: 0 green to 1 fully turned
     "FallenLeaves": 0.0,    # leaves lying on the ground
     "LeafFall": 0.0,        # leaves falling right now, with the wind
+    "TimeOfDay": 12.0,      # local hour, 0 to 24: window lamps switch on and off by it
+    "GroundIlluminance": 1.0,  # daylight on level ground relative to the clear 38 degree sun, the light in rooms
 }
 
 
