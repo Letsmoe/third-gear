@@ -7,8 +7,8 @@
 # kind = "wfs"   all features of a WFS layer inside `bbox`, paged, saved as one GeoJSON file.
 # `optional = true` sources are only fetched with --all or by id (data for features not built yet).
 #
-# Bounding box of the project (EPSG:25832): E 569599–588427, N 5917282–5932054
-# (WGS84 lon 10.05–10.33, lat 53.40–53.53).
+# Bounding boxes: Bergedorf, the first project area (EPSG:25832 E 569599–588427, N 5917282–5932054, WGS84 lon
+# 10.05–10.33, lat 53.40–53.53), and the city (E 548000–589000, N 5916000–5957000, all of Hamburg except Neuwerk).
 
 [osm_hamburg]
 kind = "url"
@@ -40,8 +40,9 @@ licence = "dl-de/by-2.0"
 attribution = "Freie und Hansestadt Hamburg, Landesbetrieb Geoinformation und Vermessung (LGV)"
 
 [bdom_hamburg]
-description = "Hamburg surface model bDOM 2020, 1 m XYZ tiles (image matching), a zip despite the .ASCII name; used to detect trees"
+description = "Hamburg surface model bDOM 2020, 1 m XYZ tiles (image matching), a zip despite the .ASCII name; detected trees in the prebaked maps"
 kind = "url"
+optional = true
 url = "https://archiv.transparenz.hamburg.de/hmbtgarchive/HMDK/dom1_xyz_hh_2020_04_30_74375_snap_1.ASCII"
 file = "dom1_xyz_hh_2020.zip"
 licence = "dl-de/by-2.0"
@@ -64,12 +65,19 @@ size = 33503867
 licence = "Copernicus DEM licence"
 attribution = "© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA"
 
+[glo30_e009]
+description = "Copernicus GLO-30 surface model, the tile west of 10° E, fallback around the west of the city"
+kind = "url"
+url = "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N53_00_E009_00_DEM/Copernicus_DSM_COG_10_N53_00_E009_00_DEM.tif"
+licence = "Copernicus DEM licence"
+attribution = "© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA"
+
 [street_trees_hamburg]
 description = "Hamburg street tree register (species, crown diameter, planting year)"
 kind = "wfs"
 url = "https://geodienste.hamburg.de/HH_WFS_Strassenbaumkataster"
 typename = "de.hh.up:strassenbaumkataster"
-bbox = [569599, 5917282, 588427, 5932054]
+bbox = [548000, 5916000, 589000, 5957000]
 crs = "EPSG:25832"
 file = "strassenbaeume_bbox.geojson"
 licence = "dl-de/by-2.0"

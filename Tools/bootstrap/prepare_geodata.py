@@ -3,12 +3,11 @@
   <data root>/venvs/osmimport/bin/python -I Tools/bootstrap/prepare_geodata.py [--force]
 
 Layout written (what Tools/osmimport expects):
-  osm/bergedorf.osm.pbf                      Hamburg, Schleswig-Holstein and Lower Saxony, clipped to the project bbox
-  raw/dgm1_hamburg_extracted/*.tif           Hamburg DGM1 tiles inside the bbox
-  raw/dgm1_niedersachsen/*.tif               Lower Saxony DGM1 tiles (links to the downloads)
-  raw/copernicus_glo30/*.tif                 GLO-30 fallback (link)
-  raw/bdom_hamburg/tif/*.tif                 Hamburg bDOM 2020 inside the bbox, converted from XYZ
-  raw/strassenbaeume/strassenbaeume_bbox.geojson   street tree register (link)
+  osm/bergedorf.osm.pbf                      Hamburg, Schleswig-Holstein and Lower Saxony, clipped to the Bergedorf bbox
+  osm/hamburg.osm.pbf                        the same, clipped to the city bbox
+  raw/dgm5/*.tif                             5 m terrain in 1 km tiles, averaged from the Hamburg and Lower Saxony DGM1
+  raw/copernicus_glo30/*.tif                 GLO-30 fallback (links)
+  raw/strassenbaeume/strassenbaeume_bbox.geojson   street tree register of the city bbox (link)
 
 Every step writes a marker file and is skipped on the next run unless --force is given.
 """
@@ -19,19 +18,29 @@ import re
 import shutil
 import subprocess
 import sys
+import warnings
 import zipfile
+
+import numpy as np
+import rasterio
+from rasterio.transform import from_origin
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import data_root  # noqa: E402
 
 TOOLS_DIR = os.path.join(data_root.REPO_ROOT, "Tools")
-# Project bbox in UTM 32N kilometres (see Data/sources.toml) and in WGS84 for the OSM clip.
-BBOX_KM_EAST = (569, 588)
-BBOX_KM_NORTH = (5917, 5932)
+# Bergedorf bbox, the first project area, in WGS84 for its OSM clip (see Data/sources.toml).
 BBOX_WGS84 = (10.05, 53.40, 10.33, 53.53)
+# City bbox in UTM 32N kilometres and WGS84: all of Hamburg except the island of Neuwerk.
+CITY_KM_EAST = (548, 589)
+CITY_KM_NORTH = (5916, 5957)
+CITY_WGS84 = (9.72, 53.385, 10.35, 53.76)
+# The terrain is averaged over squares of this many 1 m cells.
+TERRAIN_CELL = 5
 OSM_SOURCES = ["osm_hamburg", "osm_schleswig_holstein", "osm_niedersachsen"]
 TILE_KM_RE = re.compile(r"_32_(\d+)_(\d+)_")
-ZIP_DEFLATE64 = 9  # zipfile has no constant for it
+# Hamburg tiles use -9999 for no data despite their header.
+NODATA_LIMIT = -1000.0
 
 
 def marker(name):
@@ -51,13 +60,13 @@ def finish(name):
     print(f"{name}: done", flush=True)
 
 
-def in_bbox(file_name):
-    """True when a 1 km tile named like `..._32_<E km>_<N km>_...` overlaps the project bbox."""
+def in_city(file_name):
+    """True when a 1 km tile named like `..._32_<E km>_<N km>_...` lies in the city bbox."""
     match = TILE_KM_RE.search(os.path.basename(file_name))
     if not match:
         return False
     east, north = int(match[1]), int(match[2])
-    return BBOX_KM_EAST[0] <= east < BBOX_KM_EAST[1] and BBOX_KM_NORTH[0] <= north < BBOX_KM_NORTH[1]
+    return CITY_KM_EAST[0] <= east < CITY_KM_EAST[1] and CITY_KM_NORTH[0] <= north < CITY_KM_NORTH[1]
 
 
 def download_files(source_id, pattern="*"):
@@ -73,37 +82,14 @@ def link(source, destination):
     os.symlink(source, destination)
 
 
-def extract_tiles(archive, destination, suffix):
-    """Extracts the bbox tiles with the given suffix from a zip into one flat folder; returns their count.
-
-    Python's zipfile can't read Deflate64, which the Hamburg bDOM archive uses; those entries go through 7z."""
-    os.makedirs(destination, exist_ok=True)
-    count = 0
-    deflate64_entries = []
-    with zipfile.ZipFile(archive) as zip_file:
-        for entry in zip_file.infolist():
-            name = os.path.basename(entry.filename)
-            if not name.endswith(suffix) or not in_bbox(name):
-                continue
-            count += 1
-            target = os.path.join(destination, name)
-            if os.path.exists(target):
-                continue
-            if entry.compress_type == ZIP_DEFLATE64:
-                deflate64_entries.append(entry.filename)
-                continue
-            with zip_file.open(entry) as source, open(target + ".part", "wb") as output:
-                shutil.copyfileobj(source, output, 1 << 22)
-            os.replace(target + ".part", target)
-    if deflate64_entries:
-        # `e` extracts without the archive's folders, so names can't escape the destination.
-        subprocess.run(["7z", "e", "-y", "-bd", f"-o{destination}", archive, *deflate64_entries], check=True,
-                       stdout=subprocess.DEVNULL)
-    return count
-
-
 def prepare_osm(geodata):
-    """Clips each OSM extract to the bbox and merges them into osm/bergedorf.osm.pbf."""
+    """The Bergedorf and the city OSM extracts."""
+    clip_osm_extract(geodata, "bergedorf", BBOX_WGS84)
+    clip_osm_extract(geodata, "hamburg", CITY_WGS84)
+
+
+def clip_osm_extract(geodata, name, bbox):
+    """Clips each OSM download to the bbox and merges them into osm/<name>.osm.pbf."""
     work = os.path.join(geodata, "osm", "clipped")
     os.makedirs(work, exist_ok=True)
     clipped = []
@@ -111,59 +97,71 @@ def prepare_osm(geodata):
         source = download_files(source_id, "*.osm.pbf")[0]
         output = os.path.join(work, source_id + ".osm.pbf")
         subprocess.run([sys.executable, "-I", os.path.join(TOOLS_DIR, "geodata", "clip_osm.py"), source, output,
-                        *map(str, BBOX_WGS84)], check=True)
+                        *map(str, bbox)], check=True)
         clipped.append(output)
-    merged = os.path.join(geodata, "osm", "bergedorf.osm.pbf")
+    merged = os.path.join(geodata, "osm", name + ".osm.pbf")
     subprocess.run([sys.executable, "-I", os.path.join(TOOLS_DIR, "geodata", "merge_osm.py"), merged, *clipped],
                    check=True)
     shutil.rmtree(work)
 
 
-def prepare_dgm_hamburg(geodata):
-    """Extracts the Hamburg DGM1 tiles inside the bbox."""
+def prepare_terrain(geodata):
+    """Averages the DGM1 tiles of the city bbox to 5 m: Hamburg's from its zip, Lower Saxony's 2025 survey."""
+    destination = os.path.join(geodata, "raw", "dgm5")
+    os.makedirs(destination, exist_ok=True)
     archive = download_files("dgm1_hamburg", "*.zip")[0]
-    count = extract_tiles(archive, os.path.join(geodata, "raw", "dgm1_hamburg_extracted"), ".tif")
-    print(f"  {count} Hamburg DGM1 tiles")
+    with zipfile.ZipFile(archive) as zip_file:
+        hamburg = [f"/vsizip/{archive}/{entry}" for entry in zip_file.namelist()
+                   if entry.endswith(".tif") and in_city(entry)]
+    lower_saxony = [path for path in download_files("dgm1_niedersachsen", "*_2025.tif") if in_city(path)]
+    for paths, state in ((hamburg, "hh"), (lower_saxony, "ni")):
+        for path in paths:
+            write_coarse_tile(path, destination, state)
+        print(f"  {len(paths)} {state} tiles", flush=True)
 
 
-def prepare_dgm_niedersachsen(geodata):
-    """Links the Lower Saxony DGM1 tiles."""
-    destination = os.path.join(geodata, "raw", "dgm1_niedersachsen")
-    for path in download_files("dgm1_niedersachsen", "*.tif"):
-        link(path, os.path.join(destination, os.path.basename(path)))
+def write_coarse_tile(source_path, destination, state):
+    """One 1 km DGM1 tile averaged over TERRAIN_CELL squares, written as dgm5_32_<E>_<N>_<state>.tif."""
+    east, north = TILE_KM_RE.search(os.path.basename(source_path)).groups()
+    target = os.path.join(destination, f"dgm5_32_{east}_{north}_{state}.tif")
+    if os.path.exists(target):
+        return
+    with rasterio.open(source_path) as source:
+        heights = source.read(1).astype(np.float32)
+        left, top = source.bounds.left, source.bounds.top
+    heights[heights < NODATA_LIMIT] = np.nan
+    rows, columns = heights.shape[0] // TERRAIN_CELL, heights.shape[1] // TERRAIN_CELL
+    blocks = heights[:rows * TERRAIN_CELL, :columns * TERRAIN_CELL].reshape(rows, TERRAIN_CELL, columns, TERRAIN_CELL)
+    # Squares with no valid cell (outside the survey) stay NaN, so the GLO-30 fallback fills them.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        coarse = np.nanmean(blocks, axis=(1, 3)).astype(np.float32)
+    profile = {"driver": "GTiff", "width": columns, "height": rows, "count": 1, "dtype": "float32",
+               "crs": "EPSG:25832", "transform": from_origin(left, top, TERRAIN_CELL, TERRAIN_CELL),
+               "nodata": float("nan"), "compress": "deflate", "predictor": 3}
+    with rasterio.open(target + ".part", "w", **profile) as output:
+        output.write(coarse, 1)
+    os.replace(target + ".part", target)
 
 
 def prepare_glo30(geodata):
-    """Links the Copernicus GLO-30 tile."""
-    for path in download_files("glo30", "*.tif"):
-        link(path, os.path.join(geodata, "raw", "copernicus_glo30", os.path.basename(path)))
-
-
-def prepare_bdom(geodata):
-    """Extracts the bDOM XYZ tiles inside the bbox, converts them to GeoTIFF and drops the XYZ files."""
-    archive = download_files("bdom_hamburg", "*.zip")[0]
-    xyz_dir = os.path.join(geodata, "raw", "bdom_hamburg", "xyz")
-    tif_dir = os.path.join(geodata, "raw", "bdom_hamburg", "tif")
-    count = extract_tiles(archive, xyz_dir, ".xyz")
-    print(f"  {count} bDOM tiles, converting", flush=True)
-    subprocess.run([sys.executable, "-I", os.path.join(TOOLS_DIR, "osmimport", "convert_bdom.py"), xyz_dir, tif_dir],
-                   check=True, stdout=subprocess.DEVNULL)
-    shutil.rmtree(xyz_dir)
+    """Links the Copernicus GLO-30 tiles."""
+    for source_id in ("glo30", "glo30_e009"):
+        for path in download_files(source_id, "*.tif"):
+            link(path, os.path.join(geodata, "raw", "copernicus_glo30", os.path.basename(path)))
 
 
 def prepare_street_trees(geodata):
-    """Links the street tree register."""
+    """Links the street tree register of the city bbox."""
     for path in download_files("street_trees_hamburg", "*.geojson"):
         link(path, os.path.join(geodata, "raw", "strassenbaeume", os.path.basename(path)))
 
 
 STEPS = [
-    ("osm", prepare_osm),
-    ("dgm1_hamburg", prepare_dgm_hamburg),
-    ("dgm1_niedersachsen", prepare_dgm_niedersachsen),
-    ("glo30", prepare_glo30),
-    ("bdom_hamburg", prepare_bdom),
-    ("street_trees", prepare_street_trees),
+    ("osm_city", prepare_osm),
+    ("dgm5", prepare_terrain),
+    ("glo30_city", prepare_glo30),
+    ("street_trees_city", prepare_street_trees),
 ]
 
 
