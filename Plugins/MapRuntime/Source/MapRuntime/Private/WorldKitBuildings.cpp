@@ -49,18 +49,20 @@ struct FKitStyle
 	const TCHAR* Dormer;
 	float DormerWidth;
 	bool bBalconies;
+	/** Every how many 2 m bays a facade gets a window; the bays between are wall piers. Side walls get at most every second. */
+	int32 WindowEveryNthBay;
 };
 
 const FKitStyle KitStyles[] = {
 	{TEXT("brick"), 3.25f, 0.36f, 45.f, 0.42f, 0.10f, false, TEXT("Wall_Solid"), TEXT("Wall_Window"), TEXT("Wall_Door"), TEXT("Window"),
 		TEXT("Door"), TEXT("Sill"), TEXT("Lintel_Arch_Window"), TEXT("Lintel_Arch_Door"), TEXT("Door_Step"), TEXT("StringCourse"),
-		TEXT("Cornice"), TEXT("Dormer_Gable"), 1.64f, false},
+		TEXT("Cornice"), TEXT("Dormer_Gable"), 1.64f, false, 2},
 	{TEXT("plaster"), 2.75f, 0.30f, 35.f, 0.32f, 0.08f, false, TEXT("Wall_Solid"), TEXT("Wall_Window"), TEXT("Wall_Door"), TEXT("Window"),
-		TEXT("Door"), TEXT("Sill"), TEXT(""), TEXT(""), TEXT("Canopy"), TEXT("StringCourse"), TEXT("Cornice"), TEXT("Dormer_Shed"), 2.1f, false},
+		TEXT("Door"), TEXT("Sill"), TEXT(""), TEXT(""), TEXT("Canopy"), TEXT("StringCourse"), TEXT("Cornice"), TEXT("Dormer_Shed"), 2.1f, false, 2},
 	{TEXT("block"), 2.75f, 0.30f, 0.f, 0.f, 0.f, true, TEXT("Wall_Solid"), TEXT("Wall_Window"), TEXT("Wall_Door"), TEXT("Window"),
-		TEXT("Door_Glazed"), TEXT("Sill"), TEXT(""), TEXT(""), TEXT(""), TEXT("FloorBand"), TEXT("RoofEdge"), TEXT(""), 0.f, true},
+		TEXT("Door_Glazed"), TEXT("Sill"), TEXT(""), TEXT(""), TEXT(""), TEXT("FloorBand"), TEXT("RoofEdge"), TEXT(""), 0.f, true, 1},
 	{TEXT("farm"), 2.25f, 0.25f, 50.f, 0.60f, -0.10f, false, TEXT("Wall_Frame"), TEXT("Wall_Frame_Window"), TEXT("Wall_Frame_Door"),
-		TEXT("Window"), TEXT("Door"), TEXT(""), TEXT(""), TEXT(""), TEXT(""), TEXT(""), TEXT(""), TEXT(""), 0.f, false},
+		TEXT("Window"), TEXT("Door"), TEXT(""), TEXT(""), TEXT(""), TEXT(""), TEXT(""), TEXT(""), TEXT(""), 0.f, false, 2},
 };
 
 /** Style for a typology class, or null when the class keeps the plain extruded walls. */
@@ -589,7 +591,7 @@ private:
 			Place(Style.DoorExtra, Origin, Z, Yaw, ScaleX);
 			return;
 		}
-		const bool bSolid = bPartyWall || Edge.Length < 2.2f || (bSide && (Bay % 2) == 1)
+		const bool bSolid = bPartyWall || Edge.Length < 2.2f || !IsWindowBay(Bay, bSide)
 			|| KitHash01(Building.OsmId, EdgeIndex * 97 + Bay * 13 + Storey) < 0.04f;
 		if (bSolid)
 		{
@@ -607,6 +609,13 @@ private:
 		Place(Style.Window, Origin, Z, Yaw, ScaleX, ScaleZ);
 		Place(Style.Sill, Origin, Z, Yaw, ScaleX, ScaleZ);
 		Place(Style.LintelWindow, Origin, Z, Yaw, ScaleX, ScaleZ);
+	}
+
+	/** True if a bay of a facade run carries a window rather than a wall pier, centred so the run ends in piers. */
+	bool IsWindowBay(int32 Bay, bool bSide) const
+	{
+		const int32 Every = bSide ? FMath::Max(2, Style.WindowEveryNthBay) : Style.WindowEveryNthBay;
+		return Bay % Every == Every / 2;
 	}
 
 	/** True for a side wall that touches a neighbour, judged from the closed-left and closed-right flags. */

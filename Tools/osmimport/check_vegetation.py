@@ -23,7 +23,6 @@ from scipy.spatial import cKDTree
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bootstrap"))
 import data_root  # noqa: E402
-from osmimport import vegetation  # noqa: E402
 
 CROWN_INTO_BUILDING_LIMIT = 1.0  # m
 
@@ -101,13 +100,12 @@ def main():
     overlap = distance < needed
     overlap_pairs = pairs[overlap]
 
-    walkable = shapely.difference(net.pavement, net.ground.buffer(vegetation.KERB_STRIP))
-    on_walkable = shapely.contains_xy(walkable, x, y)
+    on_walkable = shapely.contains_xy(net.pavement, x, y)
 
     print(f"trunks inside buildings:                {int(inside.sum())}")
     print(f"crowns reaching >1 m into buildings:    {int(crown_in.sum())}")
     print(f"overlapping tree pairs:                 {len(overlap_pairs)}")
-    print(f"trunks on the walkable pavement:        {int(on_walkable.sum())}")
+    print(f"trunks on the pavement:                 {int(on_walkable.sum())}")
     world_json = os.path.join(world_dir, "world.json")
     sources = json.load(open(world_json)).get("plants_by_source") if os.path.exists(world_json) else None
     print(f"trees per source: {sources if sources else 'not recorded'}")
