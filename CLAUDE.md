@@ -290,7 +290,18 @@ rides a camera over the lanes and prints violations by AI cars, collisions betwe
   `UCarMovementComponent` (Chaos wheeled vehicle; Chaos keeps rigid body, suspension raycasts/springs, wheel anim data);
   its physics-thread `FCarVehicleSimulation` (in the .cpp) replaces Chaos' engine/gearbox/tyres/steering with
   `FCarDrivetrain` (`CarDrivetrain.*`, plain C++); `UCarSettings` (all assets + tuning); `CarSimTypes.h` (params,
-  driver input, telemetry, GT↔PT exchange); `UCarWheelFront/Rear`; `ADriveTestRunner` (`DriveTest.*`).
+  driver input, telemetry, GT↔PT exchange); `UCarWheelFront/Rear`; `ADriveTestRunner` (`DriveTest.*`);
+  `UCarMirrorsComponent` (`CarMirrors.*`: scene-capture mirrors, planar reflection from the reflected eye with an off-axis
+  frustum, 20/15 Hz, no Lumen or shadows, `tg.Mirrors*` cvars, glass positions in `[/Script/DrivingGame.CarMirrorSettings]`);
+  `UCarLightsComponent` (`CarLights.*`: beams are classic deferred spot lights shaped by IES profiles
+  (`Tools/texturegen/headlamp_ies.py`, imported by `Scripts/import_headlight_profiles.py`: ECE low beam cut-off with the
+  kick-up to the right, high beam), night exposure adapts to them; emissive through the City Sample `... Amt LE` parameters of the
+  body's `veh_light` slot; indicators 1.5 Hz, self-cancelling, `OnIndicatorLamp` and `UCarAudioComponent::SetIndicatorActive`);
+  `UInstrumentClusterComponent` (`InstrumentCluster.*`, `SInstrumentClusterWidget.*`: the Golf VII style cluster with two
+  dials, needles, centre display, warning lights and tell-tales, painted with Slate by an `FWidgetRenderer` into a render
+  target at 30 Hz and shown on a quad over the body's cluster window with `M_ClusterScreen`; bulb check and needle sweep at
+  ignition; position in `[/Script/DrivingGame.InstrumentClusterSettings]`; screenshot switches `-ClusterTest=<km/h>,<rpm>,<gear>`,
+  `-ClusterCold`, `-ClusterFreezeStartup=<s>`, `-DumpCluster` writes the render target as EXR to Saved/Screenshots).
 - **Physics model** (every 2 ms physics step, 8 sub-steps): engine = full-load torque curve + friction/pumping drag,
   progressive pedal map, turbo lag (NA share instant, boost lags), idle/anti-stall PI controller, rev limiter, stall
   below 350 rpm, starter with clutch interlock, bump start. Clutch, engine friction and brakes are torque-limited
