@@ -47,7 +47,7 @@ float depth_cm = Depth * 100.0;
 float rut_scale = map_fade * saturate(depth_cm / 1.5) * saturate(Cover * 2.0);
 float rut_depth_cm = 0.7 * depth_cm;
 #define RUT_UV(q_) frac((q_) / 10240.0)
-#define RUT_MASK(q_) smoothstep(0.42, 0.58, Texture2DSampleLevel(TrackMap, TrackMapSampler, RUT_UV(q_), 0).r)
+#define RUT_MASK(q_) smoothstep(0.46, 0.54, Texture2DSampleLevel(TrackMap, TrackMapSampler, RUT_UV(q_), 0).r)
 
 // Scan textures are sampled at the unshifted position: the ray march moves the position discontinuously, which would wreck their mip selection.
 float2 surface_p = WorldPos.xy / 100.0;
@@ -100,13 +100,20 @@ float compaction = RUT_MASK(hit_xy) * rut_scale;
 float4 rut_sample = Texture2DSampleLevel(TrackMap, TrackMapSampler, RUT_UV(hit_xy), 0);
 float2 travel = normalize((rut_sample.ba - 0.5) * 2.0 + float2(1e-4, 0.0));
 float2 across = float2(-travel.y, travel.x);
-// Tread: transverse blocks with a shallow V, 4.5 cm pitch, repeating every 20 cm across the tyre; only inside the rut.
-float fade_tread = saturate(1.0 - pixel_cm / 1.4);
-#define TREAD_H(q_) (0.5 * smoothstep(0.30, 0.5, abs(frac(dot((q_) / 100.0, travel) / 0.045 + 0.35 * abs(frac(dot((q_) / 100.0, across) / 0.2) - 0.5)) - 0.5) * 2.0) * fade_tread)
+// Tread: a regular print of transverse blocks, 4.5 cm pitch, with a groove down the middle of the tyre. It is drawn only where
+// the stored direction of travel is coherent (bilinear blending of directions shortens the vector where it changes fast) and
+// only within a few metres, because beyond that the 4.5 cm pitch would alias into waves.
+float direction_length = length((rut_sample.ba - 0.5) * 2.0);
+float tread_on = smoothstep(0.9, 0.98, direction_length) * (1.0 - smoothstep(250.0, 450.0, PixelDepth));
+float fade_tread = saturate(1.0 - pixel_cm / 1.4) * tread_on;
+#define TREAD_H(q_) (0.5 * fade_tread * smoothstep(0.1, 0.2, frac(dot((q_) / 100.0, travel) / 0.045)) * (1.0 - smoothstep(0.55, 0.65, frac(dot((q_) / 100.0, travel) / 0.045))) * smoothstep(0.02, 0.05, abs(frac(dot((q_) / 100.0, across) / 0.2) - 0.5)))
 #define RUT_H(q_) (-RUT_MASK(q_) * rut_scale * rut_depth_cm + Texture2DSampleLevel(TrackMap, TrackMapSampler, RUT_UV(q_), 0).g * rut_scale * 1.8 + RUT_MASK(q_) * rut_scale * TREAD_H(q_))
 float rut_h = RUT_H(hit_xy);
-float rut_dx = (RUT_H(hit_xy + float2(2.0, 0)) - rut_h) / 2.0;
-float rut_dy = (RUT_H(hit_xy + float2(0, 2.0)) - rut_h) / 2.0;
+float2 rut_slope = float2(RUT_H(hit_xy + float2(3.0, 0)) - rut_h, RUT_H(hit_xy + float2(0, 3.0)) - rut_h) / 3.0;
+// A wall is steep but never vertical; capping the slope keeps single texel steps from turning into dark spikes.
+rut_slope *= min(1.0, 3.0 / max(length(rut_slope), 1e-4));
+float rut_dx = rut_slope.x;
+float rut_dy = rut_slope.y;
 
 float road = VertexRoad;
 float footway = VertexFootway;

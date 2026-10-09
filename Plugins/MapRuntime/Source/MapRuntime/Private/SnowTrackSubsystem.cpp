@@ -282,7 +282,7 @@ void USnowTrackSubsystem::StampWheel(const void* Key, const FVector& WheelLocati
 void USnowTrackSubsystem::PressSegment(const FVector2D& FromCm, const FVector2D& ToCm, float HalfWidthCm)
 {
 	// Ridges of pushed aside snow sit just outside the tyre and reach about 10 cm further.
-	const float RidgeCentreCm = HalfWidthCm + 6.f;
+	const float RidgeCentreCm = HalfWidthCm + 9.f;
 	const float ReachCm = RidgeCentreCm + 8.f;
 	const FVector2D Direction = (ToCm - FromCm).GetSafeNormal();
 	const uint8 DirectionCos = static_cast<uint8>(FMath::Clamp(Direction.X * 127.f + 128.f, 0.f, 255.f));
@@ -298,11 +298,12 @@ void USnowTrackSubsystem::PressSegment(const FVector2D& FromCm, const FVector2D&
 		{
 			const FVector2D Centre((TexelX + 0.5) * TexelSizeCm, (TexelY + 0.5) * TexelSizeCm);
 			const float Distance = SnowTrackMath::DistanceToSegment(Centre, FromCm, ToCm);
-			const float Compaction = 1.f - FMath::SmoothStep(HalfWidthCm - 3.f, HalfWidthCm + 3.f, Distance);
+			// A linear ramp across the edge, not a steep step: the bilinear map then reproduces the 0.5 contour (the rut edge) to a fraction of a texel.
+			const float Compaction = FMath::Clamp(0.5f + (HalfWidthCm - Distance) / 12.f, 0.f, 1.f);
 			const float RidgeOffset = (Distance - RidgeCentreCm) / 4.5f;
 			const float Ridge = FMath::Exp(-RidgeOffset * RidgeOffset);
 			uint8* Texel = TexelAt(TexelX, TexelY);
-			const uint8 NewCompaction = FMath::Max<uint8>(Texel[SnowTrackConfig::ChannelCompaction], static_cast<uint8>(Compaction * 255.f));
+			const uint8 NewCompaction = FMath::Max<uint8>(Texel[SnowTrackConfig::ChannelCompaction], static_cast<uint8>(Compaction * 255.f + 0.5f));
 			// A later pass over a ridge flattens it again; ridges only stand where nothing is pressed.
 			const float RidgeHeight = FMath::Max(Texel[SnowTrackConfig::ChannelRidge] / 255.f, Ridge) * (1.f - NewCompaction / 255.f);
 			Texel[SnowTrackConfig::ChannelCompaction] = NewCompaction;
