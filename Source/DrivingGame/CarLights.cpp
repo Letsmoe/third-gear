@@ -13,10 +13,18 @@ namespace
 TAutoConsoleVariable<int32> CVarHeadlightShadows(TEXT("tg.Headlights.Shadows"), 0,
 	TEXT("Virtual shadow maps for the headlights: 1 = on, 0 = off (a moving light invalidates cached shadow pages every frame)."), ECVF_Default);
 
+TAutoConsoleVariable<int32> CVarHeadlightMode(TEXT("tg.Headlights.Mode"), -1,
+	TEXT("Test override of the light switch: -1 = driver's switch, 0 = off, 1 = low beam, 2 = high beam."), ECVF_Default);
+TAutoConsoleVariable<int32> CVarBrakeLightTest(TEXT("tg.Headlights.Brake"), -1,
+	TEXT("Test override of the brake lights: -1 = pedal, 0 = off, 1 = on."), ECVF_Default);
+TAutoConsoleVariable<float> CVarBeamScale(TEXT("tg.Headlights.BeamScale"), 1.f, TEXT("Multiplier on the beam intensities, for tuning."), ECVF_Default);
+TAutoConsoleVariable<float> CVarRearScale(TEXT("tg.Headlights.RearScale"), 1.f, TEXT("Multiplier on the tail, brake and reverse lamp intensities, for tuning."), ECVF_Default);
+
 /** Name of the body material slot whose texture mask lights up the lamps (City Sample "LE" parameters). */
 const FName LightMaterialSlotName(TEXT("veh_light"));
 
-const FLinearColor WarmWhite(1.f, 0.93f, 0.8f);
+/** LED headlamps, about 5500 K: slightly cool white (halogen would be about 3200 K, 1.0, 0.8, 0.55). */
+const FLinearColor WarmWhite(0.92f, 0.96f, 1.f);
 const FLinearColor TailRed(1.f, 0.03f, 0.01f);
 const FLinearColor ReverseWhite(1.f, 0.97f, 0.9f);
 const FLinearColor IndicatorAmber(1.f, 0.38f, 0.02f);
@@ -116,7 +124,9 @@ USpotLightComponent* UCarLightsComponent::AddHeadlamp(const TCHAR* Name, const F
 	Light->SetVisibility(false);
 	if (Function)
 	{
-		Light->SetLightFunctionMaterial(Function);
+		UMaterialInstanceDynamic* FunctionInstance = UMaterialInstanceDynamic::Create(Function, this);
+		BeamFunctions.Add(Light, FunctionInstance);
+		Light->SetLightFunctionMaterial(FunctionInstance);
 		Light->SetLightFunctionScale(FVector(1.f)); // the function then sees the lit point in centimetres from the lamp
 	}
 	Light->RegisterComponent();
@@ -139,13 +149,13 @@ void UCarLightsComponent::CreateLights()
 			Settings->HighBeamRangeCm, HighFunction));
 
 		const FVector Tail(Settings->TailLampLocation.X, Side * Settings->TailLampLocation.Y, Settings->TailLampLocation.Z);
-		TailLights.Add(AddLamp(*FString::Printf(TEXT("Tail%s"), SideName), Tail, 180.f, TailRed, 900.f));
-		ReverseLights.Add(AddLamp(*FString::Printf(TEXT("Reverse%s"), SideName), Tail + FVector(-4.f, -Side * 22.f, -4.f), 180.f, ReverseWhite, 1200.f));
+		TailLights.Add(AddLamp(*FString::Printf(TEXT("Tail%s"), SideName), Tail, 180.f, TailRed, 250.f));
+		ReverseLights.Add(AddLamp(*FString::Printf(TEXT("Reverse%s"), SideName), Tail + FVector(-4.f, -Side * 22.f, -4.f), 180.f, ReverseWhite, 500.f));
 
 		const FVector Front(Settings->FrontIndicatorLocation.X, Side * Settings->FrontIndicatorLocation.Y, Settings->FrontIndicatorLocation.Z);
-		IndicatorLights.Add({AddLamp(*FString::Printf(TEXT("IndicatorFront%s"), SideName), Front, Side * 35.f, IndicatorAmber, 700.f), Side < 0.f});
+		IndicatorLights.Add({AddLamp(*FString::Printf(TEXT("IndicatorFront%s"), SideName), Front, Side * 35.f, IndicatorAmber, 250.f), Side < 0.f});
 		const FVector Rear = Tail + FVector(0.f, Side * 2.f, 3.f);
-		IndicatorLights.Add({AddLamp(*FString::Printf(TEXT("IndicatorRear%s"), SideName), Rear, 180.f - Side * 35.f, IndicatorAmber, 700.f), Side < 0.f});
+		IndicatorLights.Add({AddLamp(*FString::Printf(TEXT("IndicatorRear%s"), SideName), Rear, 180.f - Side * 35.f, IndicatorAmber, 250.f), Side < 0.f});
 	}
 }
 
@@ -231,15 +241,42 @@ void UCarLightsComponent::UpdateIndicator(float DeltaTime, float SteeringWheelDe
 	SetLampPhase(bPhaseOn);
 }
 
+void UCarLightsComponent::UpdateBeamFrames()
+{
+	for (const TPair<TObjectPtr<USpotLightComponent>, TObjectPtr<UMaterialInstanceDynamic>>& Beam : BeamFunctions)
+	{
+		const USpotLightComponent* Lamp = Beam.Key;
+		UMaterialInstanceDynamic* Function = Beam.Value;
+		if (!Lamp || !Function)
+		{
+			continue;
+		}
+		const FVector Position = Lamp->GetComponentLocation();
+		Function->SetVectorParameterValue(TEXT("LampPosition"), FLinearColor(Position.X, Position.Y, Position.Z, 0.f));
+		const FVector Forward = Lamp->GetForwardVector();
+		const FVector Right = Lamp->GetRightVector();
+		const FVector Up = Lamp->GetUpVector();
+		Function->SetVectorParameterValue(TEXT("LampForward"), FLinearColor(Forward.X, Forward.Y, Forward.Z, 0.f));
+		Function->SetVectorParameterValue(TEXT("LampRight"), FLinearColor(Right.X, Right.Y, Right.Z, 0.f));
+		Function->SetVectorParameterValue(TEXT("LampUp"), FLinearColor(Up.X, Up.Y, Up.Z, 0.f));
+	}
+}
+
 void UCarLightsComponent::ApplyState(float DeltaTime, const FCarDriverInput& Input, const FCarTelemetry& Telemetry)
 {
 	const UCarLightSettings* Settings = GetDefault<UCarLightSettings>();
 	const bool bPowered = Telemetry.bEngineRunning || Input.bIgnitionOn;
-	const bool bBrakeLit = bForceBrakeLights || (bPowered && Input.Brake > 0.03f);
+	const int32 SwitchOverride = CVarHeadlightMode.GetValueOnGameThread();
+	const int32 BrakeOverride = CVarBrakeLightTest.GetValueOnGameThread();
+	const bool bBrakeLit = BrakeOverride >= 0 ? BrakeOverride != 0 : (bForceBrakeLights || (bPowered && Input.Brake > 0.03f));
+	const bool bLowOn = SwitchOverride >= 0 ? SwitchOverride >= 1 : (bLowBeam || bHighBeam);
+	const bool bHighOn = SwitchOverride >= 0 ? SwitchOverride == 2 : bHighBeam;
+	const float BeamScale = CVarBeamScale.GetValueOnGameThread();
+	const float RearScale = CVarRearScale.GetValueOnGameThread();
 	const bool bReverseLit = bForceReverseLight || (bPowered && Telemetry.EngagedGear == -1);
 
-	BeamGlow = ChaseGlow(BeamGlow, (bLowBeam || bHighBeam) ? 1.f : 0.f, DeltaTime);
-	HighBeamGlow = ChaseGlow(HighBeamGlow, bHighBeam ? 1.f : 0.f, DeltaTime);
+	BeamGlow = ChaseGlow(BeamGlow, bLowOn ? 1.f : 0.f, DeltaTime);
+	HighBeamGlow = ChaseGlow(HighBeamGlow, bHighOn ? 1.f : 0.f, DeltaTime);
 	BrakeGlow = ChaseGlow(BrakeGlow, bBrakeLit ? 1.f : 0.f, DeltaTime);
 	ReverseGlow = ChaseGlow(ReverseGlow, bReverseLit ? 1.f : 0.f, DeltaTime);
 	LeftGlow = ChaseGlow(LeftGlow, bLeftLampOn ? 1.f : 0.f, DeltaTime);
@@ -259,23 +296,23 @@ void UCarLightsComponent::ApplyState(float DeltaTime, const FCarDriverInput& Inp
 	{
 		const float Glow = BeamGlow * (1.f - 0.5f * HighBeamGlow);
 		Light->SetVisibility(BeamGlow > 0.01f);
-		Light->SetIntensity(Settings->LowBeamCandela * Glow);
+		Light->SetIntensity(Settings->LowBeamCandela * BeamScale * Glow);
 	}
 	for (USpotLightComponent* Light : HighBeamLights)
 	{
 		Light->SetVisibility(HighBeamGlow > 0.01f);
-		Light->SetIntensity(Settings->HighBeamCandela * HighBeamGlow);
+		Light->SetIntensity(Settings->HighBeamCandela * BeamScale * HighBeamGlow);
 	}
 	for (USpotLightComponent* Light : TailLights)
 	{
-		const float Candela = Settings->TailCandela * BeamGlow + Settings->BrakeCandela * BrakeGlow;
+		const float Candela = RearScale * (Settings->TailCandela * BeamGlow + Settings->BrakeCandela * BrakeGlow);
 		Light->SetVisibility(Candela > 0.05f);
 		Light->SetIntensity(Candela);
 	}
 	for (USpotLightComponent* Light : ReverseLights)
 	{
 		Light->SetVisibility(ReverseGlow > 0.01f);
-		Light->SetIntensity(Settings->ReverseCandela * ReverseGlow);
+		Light->SetIntensity(Settings->ReverseCandela * RearScale * ReverseGlow);
 	}
 	for (const FLampLight& Lamp : IndicatorLights)
 	{
@@ -290,4 +327,5 @@ void UCarLightsComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	UpdateIndicator(DeltaTime, LastInput.SteeringWheelDeg);
 	ApplyState(DeltaTime, LastInput, LastTelemetry);
+	UpdateBeamFrames();
 }

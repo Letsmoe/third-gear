@@ -51,17 +51,17 @@ public:
 
 	/** Peak intensity of one low beam headlamp, candela. */
 	UPROPERTY(Config, EditAnywhere, Category = "Beams")
-	float LowBeamCandela = 30000.f;
+	float LowBeamCandela = 25000.f;
 
 	/** Peak intensity of one high beam headlamp, candela. */
 	UPROPERTY(Config, EditAnywhere, Category = "Beams")
-	float HighBeamCandela = 80000.f;
+	float HighBeamCandela = 60000.f;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Beams")
 	float LowBeamRangeCm = 15000.f;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Beams")
-	float HighBeamRangeCm = 30000.f;
+	float HighBeamRangeCm = 40000.f;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Beams")
 	TSoftObjectPtr<UMaterialInterface> LowBeamFunction;
@@ -71,16 +71,16 @@ public:
 
 	/** Glow on the road behind the car, candela per lamp. */
 	UPROPERTY(Config, EditAnywhere, Category = "Rear")
-	float TailCandela = 0.5f;
+	float TailCandela = 0.02f;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Rear")
-	float BrakeCandela = 3.f;
+	float BrakeCandela = 0.25f;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Rear")
-	float ReverseCandela = 10.f;
+	float ReverseCandela = 1.f;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Rear")
-	float IndicatorCandela = 6.f;
+	float IndicatorCandela = 0.5f;
 
 	/** Indicator blink rate, Hz (the legal range is 1.0 to 2.0, relays click at about 1.5). */
 	UPROPERTY(Config, EditAnywhere, Category = "Indicators")
@@ -146,6 +146,9 @@ private:
 	void SetLampPhase(bool bOn);
 
 	/** Writes the light state into the body material and the real lights. */
+	/** Hands each beam's light function the lamp's position and axes, since the engine's Light Vector node proved unusable. */
+	void UpdateBeamFrames();
+
 	void ApplyState(float DeltaTime, const FCarDriverInput& Input, const FCarTelemetry& Telemetry);
 
 	ACarPawn* GetCar() const;
@@ -175,6 +178,8 @@ private:
 	TObjectPtr<UMaterialInstanceDynamic> LightMaterial;
 	TArray<TObjectPtr<USpotLightComponent>> LowBeamLights;
 	TArray<TObjectPtr<USpotLightComponent>> HighBeamLights;
+	/** One light function instance per headlamp, keyed by the lamp it belongs to. */
+	TMap<TObjectPtr<USpotLightComponent>, TObjectPtr<UMaterialInstanceDynamic>> BeamFunctions;
 	TArray<TObjectPtr<USpotLightComponent>> TailLights;
 	TArray<TObjectPtr<USpotLightComponent>> ReverseLights;
 	TArray<FLampLight> IndicatorLights;
