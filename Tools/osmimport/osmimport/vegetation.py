@@ -26,6 +26,13 @@ SMALL_GENERA = {"Steinobst", "Apfelbaum", "Weissdorn", "Vogelbeere", "Mehlbeere"
 DEFAULT_HEIGHT_RATIO = 1.3  # mature linden/oak/maple street trees: ~20 m tall at ~15 m crown
 
 KEEP_OFF_ROAD = 0.4        # street trees whose trunk lands on the carriageway are pushed this far off it
+KERB_STRIP = 1.2           # pavement within this distance of the carriageway is the planting strip of street trees
+KERB_SNAP_OFFSET = 0.8     # register trees standing further out on the pavement are moved to this distance from the kerb
+WIDE_PAVEMENT_HALF_WIDTH = 2.0  # pavement this far from every edge is wide enough for a tree row: no snapping
+BUILDING_TRUNK_CLEARANCE = 1.0  # every trunk stays this far from facades
+CROWN_FACADE_OVERLAP = 0.8      # a crown may reach this far past the nearest facade
+MIN_CLAMPED_CROWN = 2.5         # trees whose crown would shrink below this next to a building are dropped
+CROWN_OVERLAP_FACTOR = 0.6      # a trunk keeps this fraction of a neighbour's crown radius clear
 
 
 @dataclass
@@ -104,6 +111,8 @@ class _Occupancy:
     def __init__(self, cell=4.0):
         self.cell = cell
         self.grid = {}
+        self.crowns = {}
+        self.max_crown_radius = 12.5  # register crowns are clipped to 25 m diameter
 
     def free(self, x, y, radius):
         cx, cy = int(x // self.cell), int(y // self.cell)
@@ -117,6 +126,44 @@ class _Occupancy:
 
     def add(self, x, y):
         self.grid.setdefault((int(x // self.cell), int(y // self.cell)), []).append((x, y))
+
+    def add_crown(self, x, y, radius):
+        """Records a tree crown for crown_free."""
+        self.crowns.setdefault((int(x // self.cell), int(y // self.cell)), []).append((x, y, radius))
+
+    def crown_free(self, x, y, radius):
+        """True if the trunk is clear of every recorded crown (scaled) and no recorded trunk lies in the new crown."""
+        reach = max(radius, self.max_crown_radius)
+        span = int(np.ceil(reach / self.cell))
+        cx, cy = int(x // self.cell), int(y // self.cell)
+        for i in range(cx - span, cx + span + 1):
+            for j in range(cy - span, cy + span + 1):
+                for px, py, other_radius in self.crowns.get((i, j), ()):
+                    distance_squared = (px - x) ** 2 + (py - y) ** 2
+                    needed = CROWN_OVERLAP_FACTOR * max(radius, other_radius)
+                    if distance_squared < needed * needed:
+                        return False
+        return True
+
+
+def push_towards(boundary, point, distance):
+    """The point on boundary nearest to point, moved `distance` further along the line from point through it."""
+    edge = nearest_points(boundary, point)[0]
+    direction = np.array([edge.x - point.x, edge.y - point.y])
+    direction /= max(np.linalg.norm(direction), 1e-6)
+    return edge.x + direction[0] * distance, edge.y + direction[1] * distance
+
+
+def push_away(footprint, point, distance):
+    """The point at `distance` outside the footprint, on the line from the nearest edge point through `point`."""
+    edge = nearest_points(footprint.boundary, point)[0]
+    direction = np.array([point.x - edge.x, point.y - edge.y])
+    if footprint.contains(point):
+        direction = -direction
+    if np.linalg.norm(direction) < 1e-6:
+        return point.x, point.y
+    direction /= np.linalg.norm(direction)
+    return edge.x + direction[0] * distance, edge.y + direction[1] * distance
 
 
 def build(osm: OsmData, area: Area, ground: HeightGrid, road_ground, pavement, paths, water, buildings_union,
@@ -133,14 +180,80 @@ def build(osm: OsmData, area: Area, ground: HeightGrid, road_ground, pavement, p
     blocked = shapely.union_all([hard.buffer(1.5), paths.buffer(0.8)]) if not paths.is_empty else hard.buffer(1.5)
     shapely.prepare(blocked)
 
+    building_parts = shapely.get_parts(buildings_union) if buildings_union is not None else []
+    building_index = shapely.STRtree(list(building_parts)) if len(building_parts) else None
+    pavement_prep = pavement if pavement is not None else shapely.Polygon()
+    shapely.prepare(pavement_prep)
+    # the kerb-side strip of the pavement, where street trees belong
+    walkable_pavement = pavement_prep.difference(road_ground.buffer(KERB_STRIP))
+    shapely.prepare(walkable_pavement)
+    wide_pavement = pavement_prep.buffer(-WIDE_PAVEMENT_HALF_WIDTH)
+    shapely.prepare(wide_pavement)
+
+    def facade_distance(x, y):
+        """Distance from (x, y) to the nearest building footprint (inf without buildings)."""
+        if building_index is None:
+            return np.inf
+        _, distances = building_index.query_nearest(shapely.Point(x, y), return_distance=True)
+        return float(distances[0])
+
+    def fit_crown_to_facades(x, y, crown, height):
+        """Shrinks a crown that would reach through a facade; returns (crown, height), crown 0 if too little is left."""
+        allowed = 2.0 * (facade_distance(x, y) + CROWN_FACADE_OVERLAP)
+        if crown <= allowed:
+            return crown, height
+        if allowed < MIN_CLAMPED_CROWN:
+            return 0.0, height
+        return allowed, height * (allowed / crown) ** 0.5
+
+    def tree_position_allowed(model, x, y, source):
+        """Placement rules for every tree that is not a register street tree: clear of buildings and pavement."""
+        if model == "shrub":
+            return True
+        if facade_distance(x, y) < BUILDING_TRUNK_CLEARANCE:
+            return False
+        if source == "canopy":
+            return not shapely.contains_xy(pavement_prep, x, y)
+        return not shapely.contains_xy(walkable_pavement, x, y)
+
     def add(model, x, y, crown, height, trunk, source, min_gap):
         if not (area.x_min <= x < area.x_max and area.y_min <= y < area.y_max):
             return False
         if not occ.free(x, y, min_gap):
             return False
+        is_tree = model != "shrub"
+        if is_tree:
+            if source != "kataster":
+                if not tree_position_allowed(model, x, y, source):
+                    return False
+                if not occ.crown_free(x, y, crown / 2):
+                    return False
+            crown, height = fit_crown_to_facades(x, y, crown, height)
+            if crown == 0.0:
+                if source != "kataster":
+                    return False
+                crown = MIN_CLAMPED_CROWN
+            occ.add_crown(x, y, crown / 2)
         occ.add(x, y)
         plants.append(Plant(model, float(x), float(y), float(crown), float(height), float(trunk), source))
         return True
+
+    def street_tree_position(x, y):
+        """Register position corrected for its ~1 m error: off the carriageway, out of buildings, onto the kerb strip."""
+        point = shapely.Point(x, y)
+        if shapely.contains(road_prep, point):
+            x, y = push_towards(road_prep.boundary, point, KEEP_OFF_ROAD)
+        if building_index is not None and facade_distance(x, y) < BUILDING_TRUNK_CLEARANCE:
+            nearest = building_index.nearest(point)
+            x, y = push_away(building_parts[nearest], point, BUILDING_TRUNK_CLEARANCE)
+        elif shapely.contains(walkable_pavement, point) and not shapely.contains(wide_pavement, point):
+            edge = nearest_points(road_prep.boundary, point)[0]
+            away = np.array([x - edge.x, y - edge.y])
+            away /= max(np.linalg.norm(away), 1e-6)
+            snapped = shapely.Point(edge.x + away[0] * KERB_SNAP_OFFSET, edge.y + away[1] * KERB_SNAP_OFFSET)
+            if shapely.contains(pavement_prep, snapped):
+                x, y = snapped.x, snapped.y
+        return x, y
 
     # 1) Real street trees: exact positions, species, crown size.
     n_street = 0
@@ -152,13 +265,7 @@ def build(osm: OsmData, area: Area, ground: HeightGrid, road_ground, pavement, p
             x, y = utm_to_world(e, n, area)
             if not (area.x_min <= x < area.x_max and area.y_min <= y < area.y_max):
                 continue
-            pt = shapely.Point(x, y)
-            if shapely.contains(road_prep, pt):
-                # register positions are ~1 m accurate; never leave a trunk on the carriageway
-                edge = nearest_points(road_prep.boundary, pt)[0]
-                d = np.array([edge.x - x, edge.y - y])
-                d /= max(np.linalg.norm(d), 1e-6)
-                x, y = edge.x + d[0] * KEEP_OFF_ROAD, edge.y + d[1] * KEEP_OFF_ROAD
+            x, y = street_tree_position(x, y)
             model, crown, height, trunk = _street_tree(feat["properties"], rng)
             if canopy is not None and canopy.is_covered(x, y):
                 measured = _canopy_height(canopy, x, y)
