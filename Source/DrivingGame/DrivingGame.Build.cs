@@ -20,6 +20,7 @@ public class DrivingGame : ModuleRules
 			"Chaos",
 			"ChaosVehicles",
 			"ChaosVehiclesCore",
+			"MapRuntime",
 		});
 	}
 }

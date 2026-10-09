@@ -13,6 +13,8 @@
 #include "Misc/Paths.h"
 #include "TimerManager.h"
 #include "UnrealClient.h"
+#include "EngineUtils.h"
+#include "WorldStreamer.h"
 
 ADrivingGameMode::ADrivingGameMode()
 {
@@ -49,6 +51,33 @@ FVector ADrivingGameMode::FindGroundBelow(const FVector& Location) const
 		return Hit.ImpactPoint;
 	}
 	return Location - FVector(0, 0, 120); // player starts are placed at eye height (1.2 m) above the road
+}
+
+AWorldStreamer* ADrivingGameMode::FindWorldStreamer() const
+{
+	TActorIterator<AWorldStreamer> It(GetWorld());
+	return It ? *It : nullptr;
+}
+
+AActor* ADrivingGameMode::ChoosePlayerStart_Implementation(AController* Player)
+{
+	// A generated world has no player start in the level: make one where its data says, and generate the ground
+	// around it before anything is placed on it.
+	AWorldStreamer* Streamer = FindWorldStreamer();
+	FTransform Start;
+	if (!Streamer || !Streamer->GetStartTransform(Start))
+	{
+		return Super::ChoosePlayerStart_Implementation(Player);
+	}
+	if (!GeneratedStart)
+	{
+		FActorSpawnParameters SpawnInfo;
+		SpawnInfo.ObjectFlags |= RF_Transient;
+		SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		GeneratedStart = GetWorld()->SpawnActor<APlayerStart>(Start.GetLocation(), Start.Rotator(), SpawnInfo);
+		Streamer->LoadAroundBlocking(Start.GetLocation());
+	}
+	return GeneratedStart;
 }
 
 APawn* ADrivingGameMode::SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform)
@@ -160,6 +189,10 @@ void ADrivingGameMode::TakeNextShot()
 		const FRotator Rotation(FCString::Atof(*Parts[3]), FCString::Atof(*Parts[4]), 0.0);
 		PC->GetPawn()->SetActorLocation(Location, false, nullptr, ETeleportType::TeleportPhysics);
 		PC->SetControlRotation(Rotation);
+		if (AWorldStreamer* Streamer = FindWorldStreamer())
+		{
+			Streamer->LoadAroundBlocking(Location);
+		}
 	}
 	// Give streaming/Lumen a moment to settle at the new viewpoint, then capture.
 	FTimerHandle CaptureHandle;

@@ -301,6 +301,35 @@ def build_terrain_master():
     return m
 
 
+# Sections without a texture set: (base colour sRGB 0..1, roughness, metallic). Same look as the old placeholders.
+PLAIN = {
+    "Marking_White": ((0.85, 0.85, 0.85), 0.6, 0.0),
+    "Facade_Glass": ((0.6, 0.7, 0.7), 0.1, 0.0),
+    "Roof_Glass": ((0.6, 0.7, 0.7), 0.1, 0.0),
+}
+
+
+def build_plain(section, color, roughness, metallic):
+    """Single-colour material M_<section>, rebuilt in place."""
+    path = f"{FOLDER}/M_{section}"
+    if eal.does_asset_exist(path):
+        m = unreal.load_asset(path)
+        mel.delete_all_material_expressions(m)
+    else:
+        m = asset_tools.create_asset(f"M_{section}", FOLDER, unreal.Material, unreal.MaterialFactoryNew())
+    m.set_editor_property("used_with_nanite", True)
+    base = expr(m, unreal.MaterialExpressionConstant3Vector, -400, 0,
+                constant=unreal.LinearColor(*[c ** 2.2 for c in color], 1.0))  # sRGB -> linear
+    mel.connect_material_property(base, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    mel.connect_material_property(expr(m, unreal.MaterialExpressionConstant, -400, 200, r=roughness), "",
+                                  unreal.MaterialProperty.MP_ROUGHNESS)
+    if metallic:
+        mel.connect_material_property(expr(m, unreal.MaterialExpressionConstant, -400, 300, r=metallic), "",
+                                      unreal.MaterialProperty.MP_METALLIC)
+    mel.recompile_material(m)
+    eal.save_loaded_asset(m)
+
+
 def build_water():
     path = f"{FOLDER}/M_Water"
     if eal.does_asset_exist(path):
@@ -320,6 +349,8 @@ def build_water():
 master = build_master()
 for section, (set_path, tile_size, opts) in SECTIONS.items():
     build_instance(master, section, set_path, tile_size, opts)
+for section, (color, roughness, metallic) in PLAIN.items():
+    build_plain(section, color, roughness, metallic)
 build_water()
 build_terrain_master()
 unreal.log_warning(f"create_materials: master + {len(SECTIONS)} instances + water done")

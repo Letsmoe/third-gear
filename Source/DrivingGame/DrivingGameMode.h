@@ -15,6 +15,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
 	virtual APawn* SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform) override;
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 
 	/**
 	 * True when the free-fly camera pawn (ASeatedVRPawn) is used instead of the car:
@@ -27,6 +28,13 @@ private:
 	FVector FindGroundBelow(const FVector& Location) const;
 
 	void TakeNextShot();
+
+	/** The level's world streamer, if the world is generated at runtime. */
+	class AWorldStreamer* FindWorldStreamer() const;
+
+	/** Player start placed where the generated world's data says the drive starts. */
+	UPROPERTY(Transient)
+	TObjectPtr<AActor> GeneratedStart;
 
 	TArray<FString> PendingShots;
 	int32 ShotIndex = 0;
