@@ -17,8 +17,8 @@ constexpr float KerbDepthBelowRoad = 0.1f;
 /** Kerb stone top width, chamfer, mortar joint width and recess, seam strip against the pavement, all metres. */
 constexpr float KerbWidth = 0.15f;
 constexpr float KerbChamfer = 0.02f;
-constexpr float KerbJointWidth = 0.012f;
-constexpr float KerbJointRecess = 0.012f;
+constexpr float KerbJointWidth = 0.004f;
+constexpr float KerbJointRecess = -0.0005f;
 constexpr float KerbSeamWidth = 0.025f;
 /** Stone tops sit this far above the pavement slabs so the two surfaces never z-fight. */
 constexpr float KerbTopLift = 0.002f;
@@ -371,19 +371,30 @@ void AddKerbStonePiece(FWorldMeshBuilder& Builder, int32 Material, const FKerbPr
 	const float FaceTop = KerbTop - KerbChamfer;
 	// Face and chamfer lead down into the road; the top runs back to the pavement.
 	AddKerbQuad(Builder, Material, Start, End, FVector2f(0.f, FaceBottom), FVector2f(0.f, FaceTop), StartU, EndU, -FaceBottom, -FaceTop, OutwardFacing, Stone);
-	AddKerbQuad(Builder, Material, Start, End, FVector2f(0.f, FaceTop), FVector2f(KerbChamfer, KerbTop), StartU, EndU, -FaceTop, -KerbTop, ChamferFacing, Stone);
+	// The road-side top edge is rounded: a quarter circle of the chamfer's radius in a few facets.
+	constexpr int32 RoundingFacets = 4;
+	for (int32 Facet = 0; Facet < RoundingFacets; ++Facet)
+	{
+		const float AngleA = HALF_PI * Facet / RoundingFacets;
+		const float AngleB = HALF_PI * (Facet + 1) / RoundingFacets;
+		const FVector2f PointA(KerbChamfer - KerbChamfer * FMath::Cos(AngleA), FaceTop + KerbChamfer * FMath::Sin(AngleA));
+		const FVector2f PointB(KerbChamfer - KerbChamfer * FMath::Cos(AngleB), FaceTop + KerbChamfer * FMath::Sin(AngleB));
+		const float MiddleAngle = 0.5f * (AngleA + AngleB);
+		const FVector3f Facing(Start.Outward.X * FMath::Cos(MiddleAngle), Start.Outward.Y * FMath::Cos(MiddleAngle), FMath::Sin(MiddleAngle));
+		AddKerbQuad(Builder, Material, Start, End, PointA, PointB, StartU, EndU, -PointA.Y, -PointB.Y, Facing, Stone);
+	}
 	AddKerbQuad(Builder, Material, Start, End, FVector2f(KerbChamfer, KerbTop), FVector2f(KerbWidth, KerbTop), StartU, EndU, 4.f + KerbChamfer, 4.f + KerbWidth, Up, Stone);
 	AddKerbQuad(Builder, Material, Start, End, FVector2f(KerbWidth, KerbTop), FVector2f(KerbWidth + KerbSeamWidth, KerbTop), StartU, EndU, 4.f, 4.f + KerbSeamWidth, Up, StoneColor(0.08f));
 }
 
-/** The mortar joint between two stones: face and top recessed a little, dark. */
+/** The mortar joint between two stones: a thin dark strip laid just proud of the face and top, covering the gap between them. */
 void AddKerbJoint(FWorldMeshBuilder& Builder, int32 Material, const FKerbProfile& Start, const FKerbProfile& End, float StartU, float EndU)
 {
-	const float KerbTop = Start.KerbHeight - KerbJointRecess;
+	const float KerbTop = Start.KerbHeight + KerbTopLift + 0.005f;
 	const FColor Joint = StoneColor(0.f);
 	AddKerbQuad(Builder, Material, Start, End, FVector2f(KerbJointRecess, -KerbDepthBelowRoad), FVector2f(KerbJointRecess, KerbTop), StartU, EndU,
 		KerbDepthBelowRoad, -KerbTop, FVector3f(Start.Outward.X, Start.Outward.Y, 0.f), Joint);
-	AddKerbQuad(Builder, Material, Start, End, FVector2f(KerbJointRecess, KerbTop), FVector2f(KerbWidth, KerbTop), StartU, EndU, 4.f, 4.f + KerbWidth, Up, Joint);
+	AddKerbQuad(Builder, Material, Start, End, FVector2f(KerbJointRecess, KerbTop), FVector2f(KerbWidth + KerbSeamWidth, KerbTop), StartU, EndU, 4.f, 4.f + KerbWidth, Up, Joint);
 }
 
 FKerbProfile ProfileAt(const FWorldTileData& Tile, const FVector2f& Start, const FVector2f& End, float Along, const FVector2f& Outward, float KerbHeight)
@@ -416,7 +427,7 @@ bool IsRoadBesideEdge(const FWorldTileData& Tile, const FVector2f& Middle, const
 void AddGutter(const FWorldTileData& Tile, const FVector2f& A, const FVector2f& B, const FVector2f& Outward, float StartDistance,
 	FWorldTileMeshes& Meshes)
 {
-	const int32 Material = MaterialSlot(Meshes, TEXT("KerbGutter"));
+	const int32 Material = MaterialSlot(Meshes, TEXT("GutterPavers"));
 	FWorldMeshBuilder& Builder = Meshes.Ground;
 	const float Length = FVector2f::Distance(A, B);
 	const int32 Pieces = FMath::Max(1, FMath::CeilToInt(Length));

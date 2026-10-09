@@ -179,10 +179,10 @@ bool SampleGround(const TArray<FTileView>& Tiles, const FVector2D& WorldCm, floa
 
 
 /** Offset of a seam tuft from the pavement edge: the kerb stone's width plus half its seam strip, metres. */
-constexpr float SeamOffsetMetres = 0.15f;
-constexpr float SeamSpacingMetres = 0.1f;
+constexpr float SeamOffsetMetres = 0.145f;
+constexpr float SeamSpacingMetres = 0.06f;
 /** Share of the 3 m patches along a kerb where weeds grow; the rest of the seam stays clean. */
-constexpr float SeamPatchShare = 0.65f;
+constexpr float SeamPatchShare = 0.75f;
 
 /** Even-odd point in polygon test over all rings. */
 bool GrassPolygonContains(const FWorldPolygon& Polygon, const FVector2f& Point)
@@ -217,6 +217,16 @@ void PlaceSeamTuftsOnEdge(const FTileView& Tile, const FWorldSurface& Surface, c
 	const bool bSideInside = GrassPolygonContains(Surface.Polygon, Middle + Side * 0.05f);
 	const FVector2f Inward = bSideInside ? Side : -Side;
 	const FVector2D TileOriginCm = Tile.BoundsCm.Min;
+	bool bRoadBeside = false;
+	for (const FWorldSurface& Other : Data.Surfaces)
+	{
+		const bool bRoad = Data.Names.IsValidIndex(Other.Material) && Data.Names[Other.Material].StartsWith(TEXT("Road_"));
+		if (bRoad && GrassPolygonContains(Other.Polygon, Middle - Inward * 0.4f))
+		{
+			bRoadBeside = true;
+			break;
+		}
+	}
 	const int32 Steps = FMath::FloorToInt(Length / SeamSpacingMetres);
 	for (int32 Step = 0; Step < Steps; ++Step)
 	{
@@ -229,17 +239,20 @@ void PlaceSeamTuftsOnEdge(const FTileView& Tile, const FWorldSurface& Surface, c
 			continue;
 		}
 		const uint32 Hash = HashCell(FMath::RoundToInt(WorldCm.X), FMath::RoundToInt(WorldCm.Y), 52u);
-		if (Random01(Hash, 0) > 0.8f)
+		if (Random01(Hash, 0) > 0.7f)
 		{
 			continue;
 		}
-		const FVector2f Position = Along + Inward * (SeamOffsetMetres + 0.012f * (Random01(Hash, 1) - 0.5f));
+		// A few tufts grow in the joints between the gutter's rows of setts, on the road side of the kerb.
+		const bool bGutterTuft = bRoadBeside && Random01(Hash, 7) < 0.12f;
+		const float GutterOffset = (Random01(Hash, 8) < 0.5f ? 0.1f : 0.2f) + 0.01f * (Random01(Hash, 9) - 0.5f);
+		const FVector2f Position = bGutterTuft ? Along - Inward * (0.02f + GutterOffset) : Along + Inward * (SeamOffsetMetres + 0.01f * (Random01(Hash, 1) - 0.5f));
 		const FVector2D PositionCm = TileOriginCm + FVector2D(Position.X, Position.Y) * 100.0;
 		if (!CellBounds.IsInside(PositionCm))
 		{
 			continue;
 		}
-		const float HeightCm = (Data.Grid.RoadAt(Position.X, Position.Y) + Surface.Params[0]) * 100.f;
+		const float HeightCm = (Data.Grid.RoadAt(Position.X, Position.Y) + (bGutterTuft ? 0.008f : Surface.Params[0])) * 100.f;
 		const float ScaleAcross = FMath::Lerp(ScaleXY.X, ScaleXY.Y, Random01(Hash, 3));
 		const float ScaleUp = FMath::Lerp(ScaleZ.X, ScaleZ.Y, Random01(Hash, 4));
 		const FQuat Yaw(FVector::UpVector, Random01(Hash, 5) * UE_TWO_PI);
@@ -340,8 +353,8 @@ bool FGrassField::LoadAssets()
 	FKind Seam = Lawn;
 	Seam.Name = TEXT("Seam");
 	Seam.RadiusCm = 3500.f;
-	Seam.ScaleXY = FVector2f(0.35f, 0.7f);
-	Seam.ScaleZ = FVector2f(0.4f, 0.8f);
+	Seam.ScaleXY = FVector2f(0.3f, 0.9f);
+	Seam.ScaleZ = FVector2f(0.35f, 1.0f);
 
 	for (FKind* Kind : {&Lawn, &Meadow, &Seam})
 	{
