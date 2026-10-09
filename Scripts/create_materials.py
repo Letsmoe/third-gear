@@ -11,22 +11,26 @@ import unreal
 FOLDER = "/Game/World/Materials"
 MASTER = f"{FOLDER}/M_SurfaceMaster"
 TEX = "/Game/Textures"
+POM_FUNCTION = "/Engine/Functions/Engine_MaterialFunctions01/Texturing/ParallaxOcclusionMapping"
 
+# Albedo calibration: the tint multiplies the scan's colour, so tint = wanted reflectance / the scan's mean reflectance
+# (Asphalt015 0.175, concrete_pavement_02 0.207, PavingStones092 0.28, brick_wall_10 0.046). Wanted: worn asphalt 0.12 to
+# 0.18, concrete slabs 0.25 to 0.35, red brick paving about 0.25, dark red-brown clinker 0.13 to 0.19.
 # section -> (texture folder/set, tile size m, overrides)
 SECTIONS = {
-    "Road_Asphalt": ("Asphalt/Asphalt015", 2.5, {"tint": (0.55, 0.55)}),
-    "Road_Cobble": ("Cobble/cobblestone_floor_08", 2.0, {}),
-    "Road_Pavers": ("Pavers/brick_pavement", 2.0, {}),
-    "Pavement": ("Pavers/concrete_pavement_02", 2.5, {"tint": (0.8, 0.8)}),
-    "Path_Paved": ("Pavers/brick_pavement_03", 2.0, {}),
+    "Road_Asphalt": ("Asphalt/Asphalt015", 2.5, {"tint": (0.85, 0.85)}),
+    "Road_Cobble": ("Cobble/cobblestone_floor_08", 2.0, {"parallax": 0.03}),
+    "Road_Pavers": ("Pavers/PavingStones092", 2.0, {"tint": (0.9, 0.9), "parallax": 0.015}),
+    "Pavement": ("Pavers/concrete_pavement_02", 2.5, {"tint": (1.35, 1.35), "parallax": 0.012}),
+    "Path_Paved": ("Pavers/brick_pavement_03", 2.0, {"parallax": 0.015}),
     "Path_Gravel": ("Ground/gravel_ground_01", 3.0, {}),
     "Kerb": ("Pavers/granite_tile_04", 1.0, {}),
     "Bridge_Concrete": ("Concrete/concrete_wall_001", 3.0, {}),
-    "Facade_Brick": ("Brick/brick_wall_006", 2.2, {"windows": True, "tint": (0.7, 1.15)}),
+    "Facade_Brick": ("Brick/brick_wall_10", 2.2, {"windows": True, "tint": (2.8, 4.0), "parallax": 0.012}),
     "Facade_Plaster": ("Plaster/plastered_wall", 2.0, {"windows": True, "tint": (0.85, 1.1)}),
     "Facade_Concrete": ("Concrete/concrete_wall_004", 3.0, {"windows": True, "tint": (0.8, 1.1)}),
     "Facade_Metal": ("Metal/corrugated_iron", 2.0, {"tint": (0.7, 1.2)}),
-    "Roof_Tiles": ("Roof/clay_roof_tiles_03", 2.5, {"tint": (0.75, 1.1)}),
+    "Roof_Tiles": ("Roof/clay_roof_tiles_03", 2.5, {"tint": (0.75, 1.1), "parallax": 0.03}),
     "Roof_Flat": ("Asphalt/Asphalt031", 3.0, {"tint": (0.45, 0.6)}),
 }
 
@@ -45,7 +49,7 @@ return float2(inner, saturate(outer - inner)) * above;
 # Terrain layers (vertex colour weights from Tools/osmimport/osmimport/landcover.py): name -> (texture set, tile m, tint)
 TERRAIN_MASTER = f"{FOLDER}/M_TerrainMaster"
 TERRAIN_LAYERS = {
-    "Lawn": ("Ground/rocky_terrain_02", 8.0, (0.9, 1.0, 0.85)),
+    "Lawn": ("Generated/lawn", 2.0, (1.0, 1.0, 1.0)),  # generated close-up lawn (Tools/texturegen); falls back to a scan
     "Meadow": ("Ground/grass_ground", 3.5, (0.72, 1.0, 0.55)),
     "Field": ("Ground/farm_soil", 3.0, (1.0, 1.0, 1.0)),
     "Forest": ("Ground/forest_leaves_04", 2.5, (0.8, 0.8, 0.8)),
@@ -81,8 +85,15 @@ asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
 eal = unreal.EditorAssetLibrary
 
 
+# Scan used when a generated set has not been imported (Scripts/import_generated_textures.py): generated set -> scan
+GENERATED_FALLBACKS = {"Generated/lawn": "Ground/rocky_terrain_02"}
+
+
 def tex(set_path, kind):
     name = set_path.split("/")[-1]
+    if set_path in GENERATED_FALLBACKS and not eal.does_asset_exist(f"{TEX}/{set_path}/T_{name}_BaseColor"):
+        set_path = GENERATED_FALLBACKS[set_path]
+        name = set_path.split("/")[-1]
     path = f"{TEX}/{set_path}/T_{name}_{kind}"
     return unreal.load_asset(path) if eal.does_asset_exist(path) else None
 
@@ -116,6 +127,28 @@ def tex_param(material, name, texture, sampler, uv, x, y):
     return e
 
 
+def parallax_uv(material, uv, default_height):
+    """Returns the UVs the colour, normal, roughness and AO maps are sampled with: the plain tiled UVs, or with the
+    Parallax static switch on, UVs displaced by the Height map (screen-space parallax occlusion mapping, no geometry).
+    HeightRatio is the depth as a fraction of one tile; set per instance together with the Height texture."""
+    height = expr(material, unreal.MaterialExpressionTextureObjectParameter, -1700, 700, parameter_name="Height",
+                  texture=default_height, sampler_type=unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE)
+    call = expr(material, unreal.MaterialExpressionMaterialFunctionCall, -1450, 700)
+    call.set_editor_property("material_function", unreal.load_asset(POM_FUNCTION))
+    link(height, "", call, "Heightmap Texture")
+    link(scalar(material, "HeightRatio", 0.02, -1700, 850), "", call, "Height Ratio")
+    link(expr(material, unreal.MaterialExpressionConstant, -1700, 950, r=8), "", call, "Min Steps")
+    link(expr(material, unreal.MaterialExpressionConstant, -1700, 1000, r=32), "", call, "Max Steps")
+    link(expr(material, unreal.MaterialExpressionConstant4Vector, -1700, 1050, constant=unreal.LinearColor(1, 0, 0, 0)),
+         "", call, "Heightmap Channel")
+    link(uv, "", call, "UVs")
+    switch = expr(material, unreal.MaterialExpressionStaticSwitchParameter, -1250, 700, parameter_name="Parallax",
+                  default_value=False)
+    link(call, "Parallax UVs", switch, "True")
+    link(uv, "", switch, "False")
+    return switch
+
+
 def build_master():
     if eal.does_asset_exist(MASTER):
         m = unreal.load_asset(MASTER)
@@ -131,6 +164,7 @@ def build_master():
     link(tile, "", uv, "B")
 
     default_set = "Asphalt/Asphalt015"
+    uv = parallax_uv(m, uv, tex(default_set, "Height"))
     color = tex_param(m, "BaseColor", tex(default_set, "BaseColor"), unreal.MaterialSamplerType.SAMPLERTYPE_COLOR, uv, -1300, -400)
     normal = tex_param(m, "Normal", tex(default_set, "Normal"), unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL, uv, -1300, -100)
     rough = tex_param(m, "Roughness", tex(default_set, "Roughness"), unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE, uv, -1300, 200)
@@ -219,7 +253,7 @@ def build_instance(master, section, set_path, tile_size, opts):
     mi = existing or asset_tools.create_asset(f"M_{section}", FOLDER, unreal.MaterialInstanceConstant,
                                               unreal.MaterialInstanceConstantFactoryNew())
     mel.set_material_instance_parent(mi, master)
-    for kind in ("BaseColor", "Normal", "Roughness", "AO"):
+    for kind in ("BaseColor", "Normal", "Roughness", "AO", "Height"):
         t = tex(set_path, kind)
         if t:
             mel.set_material_instance_texture_parameter_value(mi, kind, t)
@@ -231,6 +265,11 @@ def build_instance(master, section, set_path, tile_size, opts):
         lo, hi = opts["tint"]
         mel.set_material_instance_scalar_parameter_value(mi, "TintMin", lo)
         mel.set_material_instance_scalar_parameter_value(mi, "TintMax", hi)
+    if "parallax" in opts:
+        mel.set_material_instance_static_switch_parameter_value(mi, "Parallax", True)
+        mel.set_material_instance_scalar_parameter_value(mi, "HeightRatio", opts["parallax"])
+    else:
+        mel.set_material_instance_static_switch_parameter_value(mi, "Parallax", False)
     if opts.get("windows"):
         mel.set_material_instance_static_switch_parameter_value(mi, "Windows", True)
     mel.update_material_instance(mi)
