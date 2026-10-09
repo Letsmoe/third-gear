@@ -9,6 +9,7 @@ Usage:
   analyze.py scenes <capture_dir>                              level per scene and stem, from an Unreal -AudioCapture run
   analyze.py scenegram <capture_dir> <out.png> <stem> <label> [label ...]   spectrogram of scenes of one stem
   analyze.py export <capture_dir> <out_dir>                    cut the mix into one WAV and spectrogram per scene
+  analyze.py mixscenes <game_mix.wav> <log> <out_dir>          cut a real-mixer recording into scenes using the test's log
   analyze.py clicks <in.wav> [more.wav ...]                    count sudden sample-to-sample jumps far above the local level
   analyze.py ordercheck <capture_dir> <label>                  do the firing order and its harmonics follow the rpm
 """
@@ -180,6 +181,34 @@ def export_scenes(capture_dir, out_dir):
         spectrogram(os.path.join(out_dir, f"{label}.png"), [os.path.join(out_dir, f"{label}.wav")])
 
 
+def mixer_scenes(wav_path, log_path, out_dir):
+    """The recording ends when the test logs its last scene, so scene times are counted back from the log time stamps."""
+    import datetime
+    import re
+    from audio_io import write_wav
+    os.makedirs(out_dir, exist_ok=True)
+    data, rate = read_wav(wav_path)
+    scenes = []
+    for line in open(log_path, errors="replace"):
+        match = re.match(r"\[(\d+)\.(\d+)\.(\d+)-(\d+)\.(\d+)\.(\d+):(\d+)\].*DRIVETEST --- (\w+)", line)
+        if match:
+            year, month, day, hour, minute, second, milli = (int(value) for value in match.groups()[:7])
+            stamp = datetime.datetime(year, month, day, hour, minute, second, milli * 1000).timestamp()
+            scenes.append((match.group(8), stamp))
+    end_stamp = next(stamp for name, stamp in scenes if name == "finish_recording")
+    recording_start = end_stamp - len(data) / rate
+    print(f"{'scene':16s} {'start':>6s} {'sec':>5s} {'RMS dBFS':>9s} {'peak':>5s}")
+    for (name, stamp), (_, next_stamp) in zip(scenes, scenes[1:]):
+        if name in ("place", "finish_recording"):
+            continue
+        start = max(0, int((stamp - recording_start) * rate))
+        stop = min(len(data), int((next_stamp - recording_start) * rate))
+        segment = data[start:stop]
+        print(f"{name:16s} {start / rate:6.1f} {len(segment) / rate:5.1f} {rms_db(segment):9.1f} {np.abs(segment).max():5.2f}")
+        write_wav(os.path.join(out_dir, f"{name}.wav"), segment)
+        spectrogram(os.path.join(out_dir, f"{name}.png"), [os.path.join(out_dir, f"{name}.wav")], max_hz=12000.0)
+
+
 def main():
     command = sys.argv[1]
     if command == "spectrogram":
@@ -190,6 +219,8 @@ def main():
     elif command == "clip":
         for path in sys.argv[2:]:
             clip_check(path)
+    elif command == "mixscenes":
+        mixer_scenes(sys.argv[2], sys.argv[3], sys.argv[4])
     elif command == "export":
         export_scenes(sys.argv[2], sys.argv[3])
     elif command == "clicks":

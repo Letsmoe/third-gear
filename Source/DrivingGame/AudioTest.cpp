@@ -2,6 +2,7 @@
 
 #include "CarAudioComponent.h"
 #include "CarPawn.h"
+#include "CarSettings.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "WorldSurfaceQuery.h"
 #include "Misc/CommandLine.h"
@@ -81,6 +82,18 @@ void AAudioTestRunner::AddCruiseScenes(float StartX)
 	{
 		if (UCarAudioComponent* Audio = GetAudio()) { Audio->SetForcedSurface(ECarRoadSurface::Asphalt, 1.f); }
 	}, [this](const FCarTelemetry& T) { CruiseTo(T, 50.f); });
+	// Kerb and pothole hits: the car is thrown up 25 cm three times and lands on the suspension.
+	AddScene(TEXT("cruise_jolts"), 7.f, [this]() { SpeedIntegral = 0.f; }, [this](const FCarTelemetry& T)
+	{
+		HoldSpeed(T, 40.f);
+		SteerToLane(T);
+		const float S = StepTime(T);
+		const bool bJolt = (S > 1.5f && S < 1.52f) || (S > 3.f && S < 3.02f) || (S > 4.5f && S < 4.52f);
+		if (bJolt && Car.IsValid())
+		{
+			Car->GetMesh()->AddImpulse(FVector(0.f, 0.f, GetDefault<UCarSettings>()->MassKg * 220.f));
+		}
+	});
 	AddScene(TEXT("cruise_dry_fast"), 8.f, [this]()
 	{
 		if (UCarAudioComponent* Audio = GetAudio()) { Audio->SetForcedSurface(ECarRoadSurface::Asphalt, 0.f); }

@@ -210,8 +210,8 @@ UCarAudioComponent::FAmbienceLayer& UCarAudioComponent::AddLayer(const FString& 
 void UCarAudioComponent::CreateAmbienceLayers()
 {
 	// Outside sounds heard through the closed car: the low pass stands for glass and doors.
-	AddLayer(TEXT("wind_trees_a"), 0.40f, 1100.f);
-	AddLayer(TEXT("wind_trees_b"), 0.40f, 1100.f);
+	AddLayer(TEXT("wind_trees_a"), 0.55f, 1100.f);
+	AddLayer(TEXT("wind_trees_b"), 0.55f, 1100.f);
 	AddLayer(TEXT("town_day"), 0.45f, 900.f);
 	AddLayer(TEXT("town_night"), 0.30f, 900.f);
 	AddLayer(TEXT("birds_day_b"), 0.30f, 3500.f);

@@ -168,7 +168,7 @@ struct FCarSoundDsp::FImpl
 		{
 			RoadRoar[Channel].SetBandpass(SampleRate, 150.f, 0.7f);
 			RoadMid[Channel].SetBandpass(SampleRate, 600.f, 0.6f);
-			RoadHiss[Channel].SetBandpass(SampleRate, 3200.f, 0.5f);
+			RoadHiss[Channel].SetHighpass(SampleRate, 1800.f, 0.6f); // spray and tread hiss: a shelf, so it joins the road roar without a notch
 			RoadSmooth[Channel].SetLowpass(SampleRate, 2500.f, 0.7f);
 			WindBody[Channel].SetBandpass(SampleRate, 650.f, 0.5f);
 			WindHiss[Channel].SetBandpass(SampleRate, 3000.f, 0.6f);
@@ -572,7 +572,7 @@ struct FCarSoundDsp::FImpl
 		const float MidSpeed = FMath::Pow(Fraction, 1.5f);
 		Block.RoarGain = 0.10f * RoarSpeed * (0.9f * Asphalt + 1.7f * Cobble + 1.3f * Pavers + 1.4f * SurfaceMix[3]);
 		Block.MidGain = 0.10f * MidSpeed * (0.9f * Asphalt + 1.5f * Cobble + 1.2f * Pavers) * (1.f - 0.2f * Wet);
-		Block.HissGain = 0.025f * FMath::Pow(Fraction, 2.f) * (0.25f + 2.6f * Wet) * (1.f + 0.4f * Cobble);
+		Block.HissGain = 0.010f * FMath::Pow(Fraction, 2.f) * (0.25f + 2.6f * Wet) * (1.f + 0.4f * Cobble);
 		RoadMid[0].SetBandpass(SampleRate, 450.f + 450.f * FMath::Min(Fraction, 1.6f), 0.6f);
 		RoadMid[1].SetBandpass(SampleRate, 470.f + 440.f * FMath::Min(Fraction, 1.6f), 0.6f);
 
