@@ -1,0 +1,78 @@
+// Road defects scattered from the crack atlas (Tools/texturegen/road_cracks.py) for material Custom nodes, included via
+// IncludeFilePaths "/Plugin/MapRuntime/Private/RoadCracks.ush" together with TerrainNoise.ush.
+#pragma once
+
+#define DG_CRACK_ATLAS_TILES 4
+#define DG_CRACK_CELL_METRES 2.0
+#define DG_CRACK_LAYERS 3
+
+// What the defects of a point add up to: x open crack, y tar sealant, z patch repair (0 to 1), w the patch's tone
+// (0 weathered light, 1 fresh black), and their normal perturbation in UV space.
+struct FDgRoadDefects
+{
+	float4 Masks;
+	float2 NormalXY;
+};
+
+// Rotation and mirroring of one cell: tile space = Matrix * cell space (orthogonal, so the inverse is the transpose).
+float2x2 DgCrackCellMatrix(float Choice)
+{
+	float Turn = floor(Choice * 4.0);
+	float Mirror = frac(Choice * 4.0) < 0.5 ? 1.0 : -1.0;
+	float C = cos(Turn * 1.5707963);
+	float S = sin(Turn * 1.5707963);
+	return float2x2(C * Mirror, -S, S * Mirror, C);
+}
+
+// Samples one grid layer: the cell under P (in metres, already rotated for this layer) holds an atlas tile or nothing.
+void DgAddCrackLayer(Texture2D Mask, SamplerState MaskSampler, Texture2D Normal, SamplerState NormalSampler,
+	float2 P, float2 Dx, float2 Dy, float Layer, float Density, inout FDgRoadDefects Defects, float2x2 LayerMatrix)
+{
+	float2 Q = P / DG_CRACK_CELL_METRES;
+	float2 Cell = floor(Q);
+	float2 Seed = Cell + Layer * 31.7;
+	if (DgHash(Seed) > Density)
+	{
+		return;
+	}
+	float Tile = floor(DgHash(Seed + 5.3) * DG_CRACK_ATLAS_TILES * DG_CRACK_ATLAS_TILES);
+	float2 TileOrigin = float2(fmod(Tile, DG_CRACK_ATLAS_TILES), floor(Tile / DG_CRACK_ATLAS_TILES));
+	float2x2 CellMatrix = DgCrackCellMatrix(DgHash(Seed + 9.1));
+	float2 Local = mul(CellMatrix, frac(Q) - 0.5) + 0.5;
+	float2 Uv = (TileOrigin + Local) / DG_CRACK_ATLAS_TILES;
+	// Gradients of the continuous position, so cell borders don't pick the smallest mip.
+	float GradientScale = 1.0 / (DG_CRACK_CELL_METRES * DG_CRACK_ATLAS_TILES);
+	float2 UvDx = mul(CellMatrix, Dx) * GradientScale;
+	float2 UvDy = mul(CellMatrix, Dy) * GradientScale;
+	float4 Sampled = Mask.SampleGrad(MaskSampler, Uv, UvDx, UvDy);
+	if (Sampled.b > Defects.Masks.z)
+	{
+		Defects.Masks.w = Sampled.a;
+	}
+	Defects.Masks.xyz = max(Defects.Masks.xyz, Sampled.rgb);
+	float2 TileNormal = Normal.SampleGrad(NormalSampler, Uv, UvDx, UvDy).xy * 2.0 - 1.0;
+	// Back from tile space to cell space, then from the layer's rotated grid to UV space.
+	Defects.NormalXY += mul(transpose(LayerMatrix), mul(transpose(CellMatrix), TileNormal));
+}
+
+// Defects at UV (metres). Wear 0 to 1 sets how many cells hold a defect; it varies further along the street by noise.
+FDgRoadDefects DgRoadDefects(Texture2D Mask, SamplerState MaskSampler, Texture2D Normal, SamplerState NormalSampler,
+	float2 Uv, float Wear)
+{
+	FDgRoadDefects Defects;
+	Defects.Masks = float4(0, 0, 0, 0.5);
+	Defects.NormalXY = 0;
+	float Density = saturate(Wear * lerp(0.25, 1.75, DgValueNoise(Uv / 41.0 + 3.7))) * 0.45;
+	float2 Dx = ddx(Uv);
+	float2 Dy = ddy(Uv);
+	[unroll]
+	for (int Layer = 0; Layer < DG_CRACK_LAYERS; ++Layer)
+	{
+		float Angle = Layer * 1.13;
+		float2x2 LayerMatrix = float2x2(cos(Angle), -sin(Angle), sin(Angle), cos(Angle));
+		float2 P = mul(LayerMatrix, Uv) + Layer * float2(0.73, 1.31);
+		DgAddCrackLayer(Mask, MaskSampler, Normal, NormalSampler, P, mul(LayerMatrix, Dx), mul(LayerMatrix, Dy),
+			Layer, Density, Defects, LayerMatrix);
+	}
+	return Defects;
+}
