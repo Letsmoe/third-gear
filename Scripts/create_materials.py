@@ -69,6 +69,30 @@ float3 warm = lerp(float3(1.0, 0.6, 0.32), float3(1.0, 0.8, 0.6), frac(r2 * 7.13
 return lit * warm * interior * lerp(1.0, 0.75, curtain) * lerp(0.8, 3.0, frac(r * 3.7 + r2));
 """
 
+
+# One layer of photographed leaves from the leaf atlas (/Game/Leaves/T_LeafAtlas) stamped on a jittered grid: every cell
+# holds at most one leaf with its own atlas cell, rotation and size. Returns (atlas uv, presence). Presence is zero
+# beyond 30 m, where the closed carpet underneath is enough.
+LEAF_STAMP_HLSL = """
+float2 q = WorldPos.xy / Cell + Seed * 17.3;
+float2 id = floor(q);
+float2 local = frac(q) - 0.5;
+float h1 = frac(sin(dot(id, float2(127.1, 311.7))) * 43758.5453);
+float h2 = frac(sin(dot(id, float2(269.5, 183.3))) * 43758.5453);
+float h3 = frac(sin(dot(id, float2(419.2, 371.9))) * 43758.5453);
+float h4 = frac(sin(dot(id, float2(12.9, 78.2))) * 43758.5453);
+float h5 = frac(sin(dot(id, float2(93.9, 67.3))) * 43758.5453);
+local -= (float2(h1, h2) - 0.5) * 0.3;
+float angle = h3 * 6.2831853;
+float2 turned = float2(cos(angle) * local.x - sin(angle) * local.y, sin(angle) * local.x + cos(angle) * local.y);
+float2 leaf = turned / lerp(0.6, 0.85, h4) + 0.5;
+float inside = step(0.0, leaf.x) * step(leaf.x, 1.0) * step(0.0, leaf.y) * step(leaf.y, 1.0);
+float cell_index = min(floor(h2 * 16.0), 15.0);
+float2 atlas = (clamp(leaf, 0.01, 0.99) + float2(fmod(cell_index, 4.0), floor(cell_index / 4.0))) * 0.25;
+float near = saturate((3000.0 - Depth) / 1000.0);
+return float3(atlas, step(h5, Density) * inside * near);
+"""
+
 # Snow and fallen leaves from the season (/Game/World/MPC_Weather SnowCover, FallenLeaves), on level surfaces only.
 # SnowKeep and LeafKeep (instance parameters) say how much a surface holds: traffic clears roads, facades hold none.
 # Snow thins out in patches at its edges; leaves lie in drifts. x = snow, y = leaves.
@@ -83,13 +107,20 @@ float snow = saturate((Snow * SnowKeep * 1.25 - 0.25 * n) / 0.08) * up;
 float drift = DgValueNoise(p / 1.1 + 9.7) * 0.7 + DgValueNoise(p / 0.25 + 1.3) * 0.3;
 // Drifts, not a carpet: even at the peak of leaf fall about a third of a pavement or lawn is covered.
 float leaves = saturate((Leaves * LeafKeep * 0.7 - drift + 0.05) / 0.08);
+float settled_cm = Leaves * LeafKeep * 0.6;
 if (Catch < 0.999)
 {
-    float settled_cm = Catch * 127.5 * Leaves * LeafKeep;
-    leaves = saturate((settled_cm - 0.12 - 0.5 * drift) / 0.15);
+    settled_cm = Catch * 127.5 * Leaves * LeafKeep;
+    // The 1 m field never shows its grid: the threshold is broken by noise from 1.5 m down to a few centimetres,
+    // so the edge of the carpet is ragged, and it fades over half a centimetre of depth instead of switching.
+    float broken = DgValueNoise(p / 1.5 + 3.1) * 0.5 + DgValueNoise(p * 7.0 + 8.3) * 0.3 + DgValueNoise(p * 19.0 + 1.7) * 0.2;
+    leaves = saturate((settled_cm - 0.1 - 0.9 * broken) / 0.5);
 }
 leaves *= up * (1.0 - snow);
-return float2(snow, leaves);
+// Single leaves lying outside the closed carpet (layer 1) and a second layer of stamped leaves inside it (layer 2).
+float scattered = saturate(settled_cm * 1.3) * up * (1.0 - snow);
+float piled = saturate(settled_cm / 1.2) * up * (1.0 - snow);
+return float4(snow, leaves, scattered, piled);
 """
 # The ground's snow uses the scans only for grain: SNOW_TONE_HLSL brings their brightness to a physical albedo and adds
 # soft undulation. Scan (mean linear brightness, target albedo) per set; snow_02 is a dull grey scan (0.38), fresh snow
@@ -123,6 +154,7 @@ SEASON_KEEP = {
     "Roof_": (1.0, 0.35), "Facade_": (1.0, 0.0),
 }
 LEAF_SET = "Ground/forest_leaves_04"
+LEAF_ATLAS = "/Game/Leaves/T_LeafAtlas"
 
 # Wet surfaces from the weather (/Game/World/MPC_Weather). Ground gets fully wet, walls only damp. Standing water
 # collects in a low-frequency noise mask on level ground once the wetness is high. x = wetness, y = puddle.
@@ -319,6 +351,59 @@ def snow_toned(m, samples, x, y):
     return [(tone, ""), (tone, "NormalOut"), (tone, "RoughOut")]
 
 
+def add_leaf_stamps(m, base, carpet_mask, scattered_mask, piled_mask, x, y):
+    """Lays two layers of atlas leaves over a colour node: single leaves where the field is thin (density scattered_mask)
+    and a second, denser layer inside the carpet (piled_mask). The carpet texture underneath is darkened to read as the
+    shaded litter below the top leaves. Returns the colour node."""
+    atlas = unreal.load_asset(LEAF_ATLAS) if eal.does_asset_exist(LEAF_ATLAS) else None
+    if atlas is None:
+        unreal.log_warning("create_materials: no leaf atlas, no stamped leaves")
+        return base
+    world = expr(m, unreal.MaterialExpressionWorldPosition, x - 600, y)
+    depth = expr(m, unreal.MaterialExpressionPixelDepth, x - 600, y + 100)
+    darkness = expr(m, unreal.MaterialExpressionLinearInterpolate, x - 300, y - 300)
+    link(scalar(m, "LeafCarpetLight", 1.0, x - 500, y - 350), "", darkness, "A")
+    link(scalar(m, "LeafCarpetShade", 0.72, x - 500, y - 270), "", darkness, "B")
+    link(carpet_mask, "", darkness, "Alpha")
+    shade = expr(m, unreal.MaterialExpressionMultiply, x - 100, y - 200)
+    link(base, "", shade, "A")
+    link(darkness, "", shade, "B")
+    colour = shade
+    for layer, (cell_cm, seed, density_mask) in enumerate(((13.0, 1.0, scattered_mask), (16.0, 2.0, piled_mask))):
+        top = y + layer * 400
+        stamp = expr(m, unreal.MaterialExpressionCustom, x - 300, top, code=LEAF_STAMP_HLSL, description="LeafStamp",
+                     output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                     inputs=[custom_input(n) for n in ("WorldPos", "Cell", "Seed", "Density", "Depth")])
+        link(world, "", stamp, "WorldPos")
+        link(scalar(m, f"LeafStampCell{layer}", cell_cm, x - 600, top + 200), "", stamp, "Cell")
+        link(scalar(m, f"LeafStampSeed{layer}", seed, x - 600, top + 280), "", stamp, "Seed")
+        link(density_mask, "", stamp, "Density")
+        link(depth, "", stamp, "Depth")
+        uv = expr(m, unreal.MaterialExpressionComponentMask, x - 100, top, r=True, g=True, b=False, a=False)
+        presence = expr(m, unreal.MaterialExpressionComponentMask, x - 100, top + 100, r=False, g=False, b=True, a=False)
+        link(stamp, "", uv, "")
+        link(stamp, "", presence, "")
+        sample = expr(m, unreal.MaterialExpressionTextureSample, x, top, texture=atlas,
+                      sampler_type=unreal.MaterialSamplerType.SAMPLERTYPE_COLOR)
+        sample.set_editor_property("mip_value_mode", unreal.TextureMipValueMode.TMVM_MIP_LEVEL)
+        link(uv, "", sample, "UVs")
+        sample.set_editor_property("const_mip_value", 1)
+        cover = expr(m, unreal.MaterialExpressionMultiply, x + 150, top + 100)
+        link(sample, "A", cover, "A")
+        link(presence, "", cover, "B")
+        # Leaves are slightly dulled and darkened so they match the litter texture's exposure.
+        tinted = expr(m, unreal.MaterialExpressionMultiply, x + 150, top - 100)
+        link(sample, "RGB", tinted, "A")
+        link(expr(m, unreal.MaterialExpressionConstant3Vector, x, top - 150, constant=unreal.LinearColor(0.7, 0.7, 0.7, 1)),
+              "", tinted, "B")
+        mixed = expr(m, unreal.MaterialExpressionLinearInterpolate, x + 300, top)
+        link(colour, "", mixed, "A")
+        link(tinted, "", mixed, "B")
+        link(cover, "", mixed, "Alpha")
+        colour = mixed
+    return colour
+
+
 def add_season(m, color, rough, normal, snow_keep, leaf_keep, vertex_color=None):
     """Lays snow and fallen leaves over the surface by the season; colour, roughness and normal are (node, pin)
     pairs, and so are the results. vertex_color: node whose alpha is the settled leaf depth (see SEASON_MASK_HLSL).
@@ -328,7 +413,7 @@ def add_season(m, color, rough, normal, snow_keep, leaf_keep, vertex_color=None)
         unreal.log_warning("create_materials: no weather collection or snow textures, no seasons")
         return color, rough, normal
     mask = expr(m, unreal.MaterialExpressionCustom, 400, 1300, code=SEASON_MASK_HLSL,
-                output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT2, description="SeasonMask",
+                output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT4, description="SeasonMask",
                 inputs=[custom_input(n) for n in ("Snow", "Leaves", "SnowKeep", "LeafKeep", "WorldPos", "NormalZ", "Catch")])
     mask.set_editor_property("include_file_paths", [TERRAIN_INCLUDE])
     if vertex_color is None:
@@ -345,10 +430,14 @@ def add_season(m, color, rough, normal, snow_keep, leaf_keep, vertex_color=None)
     normal_z = expr(m, unreal.MaterialExpressionComponentMask, 150, 1800, r=False, g=False, b=True, a=False)
     link(vertex_normal, "", normal_z, "")
     link(normal_z, "", mask, "NormalZ")
-    snow_mask = expr(m, unreal.MaterialExpressionComponentMask, 600, 1300, r=True, g=False, b=False, a=False)
-    leaf_mask = expr(m, unreal.MaterialExpressionComponentMask, 600, 1400, r=False, g=True, b=False, a=False)
-    link(mask, "", snow_mask, "")
-    link(mask, "", leaf_mask, "")
+    def channel(red, green, blue, alpha, y):
+        node = expr(m, unreal.MaterialExpressionComponentMask, 600, y, r=red, g=green, b=blue, a=alpha)
+        link(mask, "", node, "")
+        return node
+    snow_mask = channel(True, False, False, False, 1300)
+    leaf_mask = channel(False, True, False, False, 1400)
+    scattered_mask = channel(False, False, True, False, 1500)
+    piled_mask = channel(False, False, False, True, 1600)
     snow = snow_toned(m, season_samples(m, SNOW_SET, 250.0, 400, 1900, parameter_prefix="Snow"), 600, 1900)
     leaves = season_samples(m, LEAF_SET, 150.0, 400, 2400)
     pins = ("RGB", "RGB", "R")
@@ -358,6 +447,8 @@ def add_season(m, color, rough, normal, snow_keep, leaf_keep, vertex_color=None)
         link(source, pin, with_leaves, "A")
         link(leaves[index], pins[index], with_leaves, "B")
         link(leaf_mask, "", with_leaves, "Alpha")
+        if index == 0:
+            with_leaves = add_leaf_stamps(m, with_leaves, leaf_mask, scattered_mask, piled_mask, 1000, 2900)
         with_snow = expr(m, unreal.MaterialExpressionLinearInterpolate, 950, 1300 + index * 200)
         link(with_leaves, "", with_snow, "A")
         link(snow[index][0], snow[index][1], with_snow, "B")
