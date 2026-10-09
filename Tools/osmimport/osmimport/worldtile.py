@@ -36,6 +36,9 @@ Sections:
         LAMP: variant 0, param0 mast height m, param1 arm length m, flags 1 = lamp placed from OSM (else from lit=yes).
         SIGNAL_HEAD: link = approach id in traffic.json, param0 pole height m, flags 1 = pole on the left.
         SIGN: variant = name of the graphic (Zeichen_274-30), variant2 = name of an additional sign below it or 0xFFFF.
+        PARKED_CAR: variant = model (index into the list in ParkedCars.cpp), z at the ground under the wheels, yaw = the
+        direction the car faces, param0 roll in degrees (Unreal sign: positive lowers the right side), param1 pitch in
+        degrees (positive nose up). Older readers skip the kind.
         Signal junctions, phases and the speed limit ways are in traffic.json next to world.json.
 """
 import struct
@@ -49,6 +52,7 @@ VERSION = 2
 POI_LAMP = 0
 POI_SIGNAL_HEAD = 1
 POI_SIGN = 2
+POI_PARKED_CAR = 3
 NO_VARIANT = 0xFFFF
 
 # GRID terrain value of a hole

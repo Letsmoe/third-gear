@@ -21,6 +21,8 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "TrafficSubsystem.h"
 #include "GrassField.h"
+#include "ParkedCars.h"
+#include "AITrafficCar.h"
 #include "WorldFurniture.h"
 #include "WorldSnow.h"
 #include "WorldTileActor.h"
@@ -244,6 +246,22 @@ void AWorldStreamer::LoadPlantWindMaterials(const FString& ModelKey, const UStat
 	LoadedPlantWindMaterials.Add(ModelKey, MoveTemp(SlotMaterials));
 }
 
+void AWorldStreamer::PrepareParkedCars()
+{
+	if (ParkedCars::IsDisabled())
+	{
+		return;
+	}
+	for (const TSharedPtr<FTrafficVehicleModel>& Model : ParkedCars::GetModels())
+	{
+		if (Model->Load())
+		{
+			Model->CollectAssets(ParkedCarAssets);
+		}
+	}
+	ParkedCarCollider = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+}
+
 void AWorldStreamer::PrepareFurniture()
 {
 	const FString Folder = TEXT("/Game/World/Furniture/Meshes");
@@ -265,6 +283,7 @@ void AWorldStreamer::PrepareFurniture()
 			UE_LOG(LogWorldStreamer, Warning, TEXT("Street furniture mesh %s missing; run Scripts/create_furniture_assets.py"), *Name);
 		}
 	}
+	PrepareParkedCars();
 	SignMasterMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/World/Furniture/M_SignFace.M_SignFace"), nullptr, LOAD_NoWarn);
 	// Loading a sign texture the first time a tile needs it stalls that frame, so load them all up front.
 	TArray<FAssetData> Textures;
@@ -513,6 +532,11 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 			Furniture.SignalHead = Find(FurnitureAssets::SignalHead);
 			Furniture.SignPlate = Find(FurnitureAssets::SignPlate);
 			Furniture.SignClamp = Find(FurnitureAssets::SignClamp);
+			for (const TSharedPtr<FTrafficVehicleModel>& Model : ParkedCars::GetModels())
+			{
+				Furniture.ParkedModels.Add(Model->bLoaded ? Model.Get() : nullptr);
+			}
+			Furniture.ParkedCollider = ParkedCarCollider;
 			for (const int32 Height : GetSignPoleHeightsCm())
 			{
 				Furniture.SignPoles.Add(Height, Find(*FString::Printf(TEXT("SM_SignPole_%d"), Height)));

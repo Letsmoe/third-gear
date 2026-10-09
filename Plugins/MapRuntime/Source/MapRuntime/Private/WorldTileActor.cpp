@@ -7,6 +7,10 @@
 #include "UDynamicMesh.h"
 #include "TrafficNetwork.h"
 #include "TrafficSubsystem.h"
+#include "AITrafficCar.h"
+#include "AITrafficSubsystem.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "ParkedCars.h"
 #include "WorldFurniture.h"
 #include "WorldTileMesher.h"
 #include "Kismet/KismetMaterialLibrary.h"
@@ -172,13 +176,13 @@ void AWorldTileActor::EnableChunkCollision(int32 Chunk, bool bCookNow)
 }
 
 UInstancedStaticMeshComponent* AWorldTileActor::AddFurnitureInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow,
-	bool bCollision)
+	bool bCollision, int32 CullDistanceCm)
 {
 	if (!Mesh || Transforms.IsEmpty())
 	{
 		return nullptr;
 	}
-	UInstancedStaticMeshComponent* Component = AddInstances(Mesh, Transforms, 0);
+	UInstancedStaticMeshComponent* Component = AddInstances(Mesh, Transforms, CullDistanceCm);
 	Component->SetCastShadow(bCastShadow);
 	if (bCollision)
 	{
@@ -242,9 +246,124 @@ bool AWorldTileActor::AddFurnitureStep(const FWorldFurnitureInstances& Furniture
 			}
 		});
 	}
+	if (!Furniture.ParkedCars.IsEmpty())
+	{
+		Parts.Add([&]() { AddParkedCarColliders(Furniture, Meshes); });
+		for (int32 ModelIndex = 0; ModelIndex < Meshes.ParkedModels.Num(); ++ModelIndex)
+		{
+			Parts.Add([&, ModelIndex]() { AddParkedCarBodies(Furniture, Meshes, ModelIndex); });
+			Parts.Add([&, ModelIndex]() { AddParkedCarGlassAndWheels(Furniture, Meshes, ModelIndex); });
+		}
+	}
 	Parts.Add([&]() { RegisterFurnitureLights(Furniture); });
 	Parts[Step]();
 	return Step + 1 >= Parts.Num();
+}
+
+namespace
+{
+/** Parked cars are drawn out to these distances; beyond them the street's cars are too small to tell from the buildings' shade. */
+constexpr int32 ParkedBodyCullCm = 12000;
+/** Glass, wheels and the shadow of the body only exist this close: they are small, and each is a draw per car and per shadow view. */
+constexpr int32 ParkedDetailCullCm = 4000;
+
+/** tg.ParkedCars.Parts is a bit mask of what parked cars draw (1 body, 2 glass, 4 wheels, 8 body shadow), for measuring what each costs. */
+static TAutoConsoleVariable<int32> CVarParkedParts(TEXT("tg.ParkedCars.Parts"), 15, TEXT("Bit mask of the parked car parts that are built: 1 body, 2 glass, 4 wheels, 8 body shadow."));
+
+bool ParkedPartEnabled(int32 Bit)
+{
+	return (CVarParkedParts.GetValueOnGameThread() & Bit) != 0;
+}
+}
+
+void AWorldTileActor::AddParkedCarColliders(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes)
+{
+	TArray<FTransform> Boxes;
+	for (const FParkedCarPlacement& Car : Furniture.ParkedCars)
+	{
+		if (Meshes.ParkedModels.IsValidIndex(Car.ModelIndex) && Meshes.ParkedModels[Car.ModelIndex])
+		{
+			Boxes.Add(ParkedCars::ColliderTransform(*Meshes.ParkedModels[Car.ModelIndex], Car.Pose));
+		}
+	}
+	if (UInstancedStaticMeshComponent* Component = AddFurnitureInstances(Meshes.ParkedCollider, Boxes, false, true))
+	{
+		Component->SetVisibility(false);
+	}
+}
+
+void AWorldTileActor::AddParkedCarBodies(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes, int32 ModelIndex)
+{
+	const FTrafficVehicleModel* Model = Meshes.ParkedModels[ModelIndex];
+	if (!Model || !Model->Body || !ParkedPartEnabled(1))
+	{
+		return;
+	}
+	TMap<int32, TArray<FTransform>> ByPaint;
+	TArray<FTransform> AllPoses;
+	for (const FParkedCarPlacement& Car : Furniture.ParkedCars)
+	{
+		if (Car.ModelIndex == ModelIndex)
+		{
+			const FTransform Pose = ParkedCars::MeshTransform(*Model, Car.Pose);
+			ByPaint.FindOrAdd(Car.PaintIndex).Add(Pose);
+			AllPoses.Add(Pose);
+		}
+	}
+	for (const TPair<int32, TArray<FTransform>>& Paint : ByPaint)
+	{
+		UInstancedStaticMeshComponent* Component = AddFurnitureInstances(Model->Body, Paint.Value, false, false, ParkedBodyCullCm);
+		if (!Component || Model->PaintSlot == INDEX_NONE)
+		{
+			continue;
+		}
+		if (Model->TrafficPaint)
+		{
+			Component->SetMaterial(Model->PaintSlot, Model->TrafficPaint);
+		}
+		if (UMaterialInstanceDynamic* Instance = Component->CreateDynamicMaterialInstance(Model->PaintSlot))
+		{
+			Instance->SetVectorParameterValue(TEXT("BaseColor"), UAITrafficSubsystem::GetPaintPaletteColor(Paint.Key));
+		}
+	}
+	if (!ParkedPartEnabled(8))
+	{
+		return;
+	}
+	// The body's shadow comes from a second set that draws only into shadow views and only close by.
+	if (UInstancedStaticMeshComponent* ShadowOnly = AddFurnitureInstances(Model->Body, AllPoses, true, false, ParkedDetailCullCm))
+	{
+		ShadowOnly->SetRenderInMainPass(false);
+	}
+}
+
+void AWorldTileActor::AddParkedCarGlassAndWheels(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes, int32 ModelIndex)
+{
+	const FTrafficVehicleModel* Model = Meshes.ParkedModels[ModelIndex];
+	if (!Model)
+	{
+		return;
+	}
+	TArray<FTransform> Poses;
+	for (const FParkedCarPlacement& Car : Furniture.ParkedCars)
+	{
+		if (Car.ModelIndex == ModelIndex)
+		{
+			Poses.Add(ParkedCars::MeshTransform(*Model, Car.Pose));
+		}
+	}
+	if (ParkedPartEnabled(2))
+	{
+		AddFurnitureInstances(Model->Glass, Poses, false, false, ParkedDetailCullCm);
+	}
+	if (!ParkedPartEnabled(4))
+	{
+		return;
+	}
+	for (UStaticMesh* Wheel : Model->Wheels)
+	{
+		AddFurnitureInstances(Wheel, Poses, false, false, ParkedDetailCullCm);
+	}
 }
 
 void AWorldTileActor::RegisterFurnitureLights(const FWorldFurnitureInstances& Furniture)
