@@ -18,7 +18,7 @@ POM_FUNCTION = "/Engine/Functions/Engine_MaterialFunctions01/Texturing/ParallaxO
 # 0.18, concrete slabs 0.25 to 0.35, red brick paving about 0.25, dark red-brown clinker 0.13 to 0.19.
 # section -> (texture folder/set, tile size m, overrides)
 SECTIONS = {
-    "Road_Asphalt": ("Asphalt/Asphalt015", 2.5, {"tint": (0.85, 0.85)}),
+    "Road_Asphalt": ("Asphalt/Asphalt015", 2.5, {"tint": (0.85, 0.85), "roughness_scale": 1.4}),
     "Road_Cobble": ("Cobble/cobblestone_floor_08", 2.0, {"parallax": 0.03}),
     "Road_Pavers": ("Pavers/PavingStones092", 2.0, {"tint": (0.9, 0.9), "parallax": 0.015}),
     "Pavement": ("Pavers/concrete_pavement_02", 2.5, {"tint": (1.35, 1.35), "parallax": 0.012}),
@@ -50,9 +50,9 @@ return float2(inner, saturate(outer - inner)) * above;
 TERRAIN_MASTER = f"{FOLDER}/M_TerrainMaster"
 TERRAIN_LAYERS = {
     "Lawn": ("Generated/lawn", 2.0, (1.0, 1.0, 1.0)),  # generated close-up lawn (Tools/texturegen); falls back to a scan
-    "Meadow": ("Ground/grass_ground", 3.5, (0.72, 1.0, 0.55)),
+    "Meadow": ("Generated/lawn", 3.0, (1.0, 0.92, 0.75)),  # was the dry brown grass_ground scan (issue 1)
     "Field": ("Ground/farm_soil", 3.0, (1.0, 1.0, 1.0)),
-    "Forest": ("Ground/forest_leaves_04", 2.5, (0.8, 0.8, 0.8)),
+    "Forest": ("Generated/lawn_leaf_litter", 2.5, (1.0, 1.0, 1.0)),  # grass with fallen leaves; the old scan was solid orange litter
 }
 
 # Blends four ground layers by vertex colour (R meadow, G field, B forest, none = lawn). Each layer is sampled at two
@@ -86,7 +86,7 @@ eal = unreal.EditorAssetLibrary
 
 
 # Scan used when a generated set has not been imported (Scripts/import_generated_textures.py): generated set -> scan
-GENERATED_FALLBACKS = {"Generated/lawn": "Ground/rocky_terrain_02"}
+GENERATED_FALLBACKS = {"Generated/lawn": "Ground/rocky_terrain_02", "Generated/lawn_leaf_litter": "Ground/forest_leaves_04"}
 
 
 def tex(set_path, kind):
@@ -261,6 +261,8 @@ def build_instance(master, section, set_path, tile_size, opts):
             mel.set_material_instance_texture_parameter_value(
                 mi, kind, unreal.load_asset("/Engine/EngineResources/WhiteSquareTexture"))
     mel.set_material_instance_scalar_parameter_value(mi, "TileSize", tile_size)
+    if "roughness_scale" in opts:
+        mel.set_material_instance_scalar_parameter_value(mi, "RoughnessScale", opts["roughness_scale"])
     if "tint" in opts:
         lo, hi = opts["tint"]
         mel.set_material_instance_scalar_parameter_value(mi, "TintMin", lo)

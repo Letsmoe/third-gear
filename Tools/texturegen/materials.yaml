@@ -59,3 +59,14 @@ materials:
       each tile with a wide flat middle and two narrow ribs, overlapping in regular horizontal rows with the
       side joints offset, matt dark grey with slight colour variation between tiles, a little dust,
       overcast diffuse daylight, flat lighting, no shadows, sharp focus, high resolution
+
+  - name: lawn_leaf_litter
+    seed: 3131
+    albedo_mean: 0.13
+    detail: 0.9
+    roughness_min: 0.7
+    prompt: >-
+      top-down photograph of a shaded green lawn under trees in northern Germany, short grass still mostly green,
+      scattered fallen brown and yellow leaves and a few small twigs lying on the grass, about one fifth of the ground
+      covered by leaves, the rest green grass blades and a little moss,
+      overcast diffuse daylight, flat lighting, no shadows, sharp focus, high resolution macro photography of turf
