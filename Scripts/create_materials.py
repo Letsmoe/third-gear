@@ -14,11 +14,11 @@ TEX = "/Game/Textures"
 POM_FUNCTION = "/Engine/Functions/Engine_MaterialFunctions01/Texturing/ParallaxOcclusionMapping"
 
 # Albedo calibration: the tint multiplies the scan's colour, so tint = wanted reflectance / the scan's mean reflectance
-# (Asphalt015 0.175, concrete_pavement_02 0.207, PavingStones092 0.28, brick_wall_10 0.046). Wanted: worn asphalt 0.12 to
+# (Asphalt015 0.175, asphalt_02 0.117, concrete_pavement_02 0.207, PavingStones092 0.28, brick_wall_10 0.046). Wanted: worn asphalt 0.12 to
 # 0.18, concrete slabs 0.25 to 0.35, red brick paving about 0.25, dark red-brown clinker 0.13 to 0.19.
 # section -> (texture folder/set, tile size m, overrides)
 SECTIONS = {
-    "Road_Asphalt": ("Asphalt/Asphalt015", 2.5, {"tint": (0.85, 0.85), "roughness_scale": 1.4}),
+    "Road_Asphalt": ("Asphalt/asphalt_02", 3.0, {"tint": (1.15, 1.15), "roughness_scale": 1.2, "parallax": 0.01}),
     "Road_Cobble": ("Cobble/cobblestone_floor_08", 2.0, {"parallax": 0.03}),
     "Road_Pavers": ("Pavers/PavingStones092", 2.0, {"tint": (0.9, 0.9), "parallax": 0.015}),
     "Pavement": ("Pavers/concrete_pavement_02", 2.5, {"tint": (1.35, 1.35), "parallax": 0.012}),
