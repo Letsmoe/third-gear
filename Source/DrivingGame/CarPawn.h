@@ -8,6 +8,7 @@
 
 class UCameraComponent;
 class UCarAudioComponent;
+class UCarMirrorsComponent;
 class UCarMovementComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
@@ -74,6 +75,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TArray<TObjectPtr<UStaticMeshComponent>> AttachedMeshes;
+
+	UPROPERTY(VisibleAnywhere, Category = "Components")
+	TObjectPtr<UCarMirrorsComponent> Mirrors;
 
 private:
 	/** Shows a violation for a few seconds next to the dashboard. */
