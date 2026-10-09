@@ -15,8 +15,8 @@ namespace
 TAutoConsoleVariable<int32> CVarHeadlightShadows(TEXT("tg.Headlights.Shadows"), 0,
 	TEXT("Virtual shadow maps for the headlights: 1 = on, 0 = off (a moving light invalidates cached shadow pages every frame)."), ECVF_Default);
 
-TAutoConsoleVariable<int32> CVarHeadlightMegaLights(TEXT("tg.Headlights.MegaLights"), 1,
-	TEXT("Whether the headlight spot lights may use MegaLights (read when the car spawns): 1 = yes, 0 = classic deferred lights."), ECVF_Default);
+TAutoConsoleVariable<int32> CVarHeadlightMegaLights(TEXT("tg.Headlights.MegaLights"), 0,
+	TEXT("Whether the headlight spot lights may use MegaLights (read when the car spawns): 1 = yes, 0 = classic deferred lights. MegaLights has a fixed cost of about 3 ms in stereo as soon as any light uses it, classic costs under 0.5 ms."), ECVF_Default);
 
 TAutoConsoleVariable<float> CVarHeadlightTestWall(TEXT("tg.Headlights.Wall"), 0.f,
 	TEXT("Test wall in metres ahead of the headlamps to photograph the beam pattern on; 0 = none."), ECVF_Default);
