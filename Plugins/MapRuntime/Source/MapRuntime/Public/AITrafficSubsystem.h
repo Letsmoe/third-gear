@@ -74,6 +74,11 @@ private:
 	/** Adds a car now and then while there are fewer than allowed. */
 	void SpawnCars(const FVector& ViewerCm, const FVector2D& ViewerForward);
 
+	bool bLineupDone = false;
+
+	/** Staging for paint screenshots: parks one car per palette colour in two rows in front of the viewer, once. */
+	void SpawnPaintLineup(const FVector& ViewerCm, const FVector2D& ViewerForward);
+
 	/** Whether an outside vehicle such as the player's car is within DistanceM of a point (metres). */
 	bool IsNearExternalVehicle(const FVector& PositionM, float DistanceM) const;
 

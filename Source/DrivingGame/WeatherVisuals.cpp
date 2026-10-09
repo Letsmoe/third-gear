@@ -148,15 +148,10 @@ namespace WeatherVisualsDetail
 		return Illuminance(SunAltitudeDegrees, SunTransmission, CloudCover) / Calibration;
 	}
 
-	/** Parses -WeatherOverride="Name=Value,Name=Value". */
-	TMap<FString, float> ParseOverrides()
+	/** Parses "Name=Value,Name=Value" overrides. */
+	TMap<FString, float> ParseOverrides(const FString& Text)
 	{
 		TMap<FString, float> Result;
-		FString Text;
-		if (!FParse::Value(FCommandLine::Get(), TEXT("WeatherOverride="), Text, /*bShouldStopOnSeparator=*/false))
-		{
-			return Result;
-		}
 		TArray<FString> Pairs;
 		Text.ParseIntoArray(Pairs, TEXT(","));
 		for (const FString& Pair : Pairs)
@@ -169,6 +164,42 @@ namespace WeatherVisualsDetail
 		}
 		return Result;
 	}
+
+	/** The -WeatherOverride="Name=Value,..." of the command line, empty without one. */
+	FString CommandLineOverrides()
+	{
+		FString Text;
+		FParse::Value(FCommandLine::Get(), TEXT("WeatherOverride="), Text, /*bShouldStopOnSeparator=*/false);
+		return Text;
+	}
+
+	/** `Weather.Override Name=Value,...`: replaces the overrides (none clears them) and shows the result at once. */
+	void OverrideWeather(const TArray<FString>& Args, UWorld* World, FOutputDevice& Output)
+	{
+		UWeatherVisualsSubsystem* Visuals = World ? World->GetSubsystem<UWeatherVisualsSubsystem>() : nullptr;
+		if (!Visuals)
+		{
+			Output.Log(TEXT("No weather visuals in this world."));
+			return;
+		}
+		Visuals->SetOverrides(FString::Join(Args, TEXT(",")));
+	}
+
+	FAutoConsoleCommandWithWorldArgsAndOutputDevice OverrideCommand(
+		TEXT("Weather.Override"), TEXT("Weather.Override CloudCover=1,Rain=8,...: replaces the weather overrides (as -WeatherOverride); no arguments clears them."),
+		FConsoleCommandWithWorldArgsAndOutputDeviceDelegate::CreateStatic(&OverrideWeather));
+}
+
+void UWeatherVisualsSubsystem::SetOverrides(const FString& Spec)
+{
+	Overrides = WeatherVisualsDetail::ParseOverrides(Spec);
+	Snap();
+}
+
+void UWeatherVisualsSubsystem::Snap()
+{
+	bHasState = false;
+	SecondsUntilSample = 0.f;
 }
 
 bool UWeatherVisualsSubsystem::ShouldCreateSubsystem(UObject* Outer) const
@@ -181,7 +212,7 @@ void UWeatherVisualsSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 	FindLevelActors();
-	Overrides = WeatherVisualsDetail::ParseOverrides();
+	Overrides = WeatherVisualsDetail::ParseOverrides(WeatherVisualsDetail::CommandLineOverrides());
 	Parameters = LoadObject<UMaterialParameterCollection>(nullptr, WeatherVisualsDetail::ParameterCollectionPath, nullptr, LOAD_NoWarn);
 	if (!Parameters)
 	{

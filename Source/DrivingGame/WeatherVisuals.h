@@ -48,7 +48,7 @@ struct FWeatherVisualState
  * fog layers set from Isobar's visibility, and exposure adapts slowly between day and night.
  *
  * For screenshots and tests, `-WeatherOverride="CloudCover=0.9,Fog=0.6,Rain=4,Snow=0,Wind=8,Thunder=0"` replaces
- * the sampled values.
+ * the sampled values; the console command `Weather.Override` does the same at runtime.
  */
 UCLASS()
 class DRIVINGGAME_API UWeatherVisualsSubsystem : public UTickableWorldSubsystem
@@ -71,6 +71,12 @@ public:
 
 	/** How much of the ground is under snow, 0 to 1. */
 	float GetSnowCover() const { return SnowCover; }
+
+	/** Replaces the overrides ("Name=Value,...", as -WeatherOverride) and jumps to the result without smoothing. */
+	void SetOverrides(const FString& Spec);
+
+	/** Jumps to the current weather on the next tick instead of easing towards it (after a clock change). */
+	void Snap();
 
 	/** Broadcast at every lightning flash. */
 	FOnLightningStrike OnLightning;
