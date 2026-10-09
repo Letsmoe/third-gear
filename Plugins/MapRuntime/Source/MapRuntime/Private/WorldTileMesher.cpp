@@ -581,8 +581,10 @@ void AddMarkingStrip(const FWorldTileData& Tile, const FWorldMarking& Marking, c
 		const FVector2f Left = Point + Side;
 		const FVector2f Right = Point - Side;
 		const float U = Marking.Phase + Distance;
-		const int32 LeftVertex = Builder.AddVertex(ToCm(Left.X, Left.Y, Tile.Grid.RoadAt(Left.X, Left.Y) + MarkingLift), FVector2f(U, 0.f));
-		const int32 RightVertex = Builder.AddVertex(ToCm(Right.X, Right.Y, Tile.Grid.RoadAt(Right.X, Right.Y) + MarkingLift), FVector2f(U, 1.f));
+		// The line direction rides in the red and green vertex colour (0.5 = 0) for the paint wear's tyre tracks.
+		const FColor DirectionColor(FMath::RoundToInt((Direction.X * 0.5f + 0.5f) * 255.f), FMath::RoundToInt((Direction.Y * 0.5f + 0.5f) * 255.f), 0);
+		const int32 LeftVertex = Builder.AddVertex(ToCm(Left.X, Left.Y, Tile.Grid.RoadAt(Left.X, Left.Y) + MarkingLift), FVector2f(U, 0.f), DirectionColor);
+		const int32 RightVertex = Builder.AddVertex(ToCm(Right.X, Right.Y, Tile.Grid.RoadAt(Right.X, Right.Y) + MarkingLift), FVector2f(U, 1.f), DirectionColor);
 		if (PreviousLeft != INDEX_NONE)
 		{
 			Builder.AddQuad(PreviousLeft, LeftVertex, RightVertex, PreviousRight, Material, Up);
