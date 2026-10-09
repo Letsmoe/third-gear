@@ -16,19 +16,20 @@ float DgLeafCellHash(float3 treePosition, float instanceRandom)
 	return DgLeafHash(floor(treePosition / DgLeafCellCm), instanceRandom * 91.7);
 }
 
-// Autumn colour of a tree by its random number, standing in for species: lime and birch yellow, maple orange to red,
+// Autumn colour of a tree by its random number, standing in for species: lime and birch yellow, maple amber to rust,
 // oak ochre brown, plane and chestnut tan to orange.
 float3 DgAutumnPalette(float treeRandom)
 {
 	float3 yellow = float3(0.80, 0.55, 0.06);
-	float3 orange = float3(0.72, 0.24, 0.04);
-	float3 red = float3(0.50, 0.08, 0.04);
+	float3 amber = float3(0.70, 0.34, 0.05);
+	float3 rust = float3(0.46, 0.13, 0.04);
 	float3 ochre = float3(0.42, 0.26, 0.07);
 	float3 tan = float3(0.58, 0.36, 0.08);
-	if (treeRandom < 0.28) return yellow;
-	if (treeRandom < 0.45) return orange;
-	if (treeRandom < 0.55) return red;
-	if (treeRandom < 0.75) return ochre;
+	// Hamburg's street trees are mostly lime, oak, plane and maple: yellow and brown dominate, red is rare.
+	if (treeRandom < 0.40) return yellow;
+	if (treeRandom < 0.50) return amber;
+	if (treeRandom < 0.55) return rust;
+	if (treeRandom < 0.78) return ochre;
 	return tan;
 }
 
