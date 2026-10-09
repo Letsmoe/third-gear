@@ -8,7 +8,7 @@
 set -euo pipefail
 # One Unreal run at a time across worktrees (see lock.sh).
 source "$(dirname "$0")/lock.sh"
-hold_lock gpu "$0" "$@"
+hold_lock gpu-exclusive "$0" "$@"
 
 UE=/mnt/storage/UnrealEngine/5.8.1
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
