@@ -73,6 +73,19 @@ struct FCarSimParams
 	float ComplianceSteerDegPerKN = 0.2f; // front wheels steer out of the corner under lateral load (bushings) -> understeer
 };
 
+/**
+ * How the ground under one wheel changes the tyre model (wet, snow, ice, rough ground), computed on the game thread
+ * from the surface material and the weather. The defaults are dry asphalt.
+ */
+struct FCarWheelSurface
+{
+	float GripScale = 1.f;             // peak friction relative to dry asphalt
+	float PeakSlipScale = 1.f;         // moves the grip peak to more slip (slip ratio and angle)
+	float ShapeCScale = 1.f;           // below 1 the curve falls off less after the peak
+	float ExtraRollingResistance = 0.f; // added rolling resistance coefficient (loose snow)
+	float Aquaplaning = 0.f;           // 0..1 depth of standing water; costs grip at speed
+};
+
 /** Driver controls, written by the game thread every frame. */
 struct FCarDriverInput
 {
@@ -135,6 +148,7 @@ struct FCarSharedState
 	FCriticalSection Lock;
 	FCarDriverInput Input;
 	FCarTelemetry Telemetry;
+	FCarWheelSurface Surface[CarNumWheels];
 	/** Incremented by the game thread to reset the drivetrain (e.g. after a teleport); the physics thread compares. */
 	int32 ResetCounter = 0;
 	bool bResetEngineRunning = true;

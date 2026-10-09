@@ -42,6 +42,7 @@ Tools/wheeltest/wheeltest
 /GeoData/build
 /Content/Vehicles/SportsCar
 /Content/Vehicles/PhysicsMaterials
+/Content/Vehicles/TrafficPaint
 
 # Editor clutter and generated maps; ProvingGround is ours and tracked.
 /Content/Collections

@@ -19,6 +19,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogAITraffic, Log, All);
 
 static TAutoConsoleVariable<int32> CVarSpawnAnywhere(TEXT("tg.TrafficSpawnAnywhere"), 0,
 	TEXT("For staging screenshots: 1 lets cars appear anywhere around the viewer, in view and close by; 2 puts them where the viewer looks, within 55 m of a point 40 m ahead. Normally they only appear out of sight."));
+static TAutoConsoleVariable<int32> CVarPaintLineup(TEXT("tg.TrafficPaintLineup"), 0,
+	TEXT("For paint screenshots: 1 parks one car per palette colour in two rows in front of the viewer, once; the cars do not drive."));
 static TAutoConsoleVariable<int32> CVarHeadlightLights(TEXT("tg.TrafficHeadlights"), 8,
 	TEXT("How many AI cars nearest the viewer get a real headlight at night."));
 static TAutoConsoleVariable<FString> CVarPaintOverride(TEXT("tg.TrafficPaint"), TEXT(""),
@@ -57,19 +59,18 @@ struct FPaintOption
 	float Weight;
 };
 
-/** Colours of new cars in Germany: mostly grey, black, white and silver, with some blue and red. Linear albedo. */
+/** Colours of new cars in Germany (KBA): about a third grey and silver, a quarter black, a sixth white, then blue, red and a few others. Linear albedo. */
 const FPaintOption PaintPalette[] = {
-	{FLinearColor(0.150f, 0.155f, 0.162f), 18.f},   // grey
-	{FLinearColor(0.045f, 0.047f, 0.050f), 14.f},   // anthracite
-	{FLinearColor(0.012f, 0.012f, 0.013f), 18.f},   // black
-	{FLinearColor(0.640f, 0.640f, 0.620f), 20.f},   // white
-	{FLinearColor(0.330f, 0.340f, 0.350f), 10.f},   // silver
-	{FLinearColor(0.010f, 0.022f, 0.075f), 8.f},    // dark blue
-	{FLinearColor(0.300f, 0.012f, 0.010f), 5.f},    // red
-	{FLinearColor(0.012f, 0.040f, 0.022f), 1.5f},   // dark green
-	{FLinearColor(0.330f, 0.270f, 0.190f), 2.f},    // champagne
+	{FLinearColor(0.150f, 0.155f, 0.162f), 17.f},   // grey
+	{FLinearColor(0.330f, 0.340f, 0.350f), 16.f},   // silver
+	{FLinearColor(0.012f, 0.012f, 0.013f), 25.f},   // black
+	{FLinearColor(0.640f, 0.640f, 0.620f), 17.f},   // white
+	{FLinearColor(0.008f, 0.020f, 0.080f), 10.f},   // dark blue
+	{FLinearColor(0.300f, 0.012f, 0.010f), 6.f},    // red
+	{FLinearColor(0.012f, 0.040f, 0.022f), 3.f},    // dark green
+	{FLinearColor(0.070f, 0.035f, 0.025f), 2.f},    // brown
+	{FLinearColor(0.330f, 0.270f, 0.190f), 2.f},    // beige
 	{FLinearColor(0.380f, 0.150f, 0.020f), 1.f},    // orange
-	{FLinearColor(0.070f, 0.035f, 0.025f), 1.5f},   // brown
 };
 
 TSharedPtr<FTrafficVehicleModel> MakeModel(const TCHAR* Folder, const TCHAR* Type, const TCHAR* Tag, float Weight)
@@ -377,6 +378,56 @@ void UAITrafficSubsystem::SpawnCars(const FVector& ViewerCm, const FVector2D& Vi
 	TrySpawnOne(ViewerCm, ViewerForward);
 }
 
+void UAITrafficSubsystem::SpawnPaintLineup(const FVector& ViewerCm, const FVector2D& ViewerForward)
+{
+	constexpr int32 CarsPerRow = 5;
+	constexpr float FirstRowM = 7.f;
+	constexpr float RowSpacingM = 6.f;
+	constexpr float ColumnSpacingM = 3.2f;
+	bLineupDone = true;
+	const int32 PaletteCount = UE_ARRAY_COUNT(PaintPalette);
+	const FVector2D Right(-ViewerForward.Y, ViewerForward.X);
+	const float FacingYaw = FMath::RadiansToDegrees(FMath::Atan2(-ViewerForward.Y, -ViewerForward.X)) + 20.f;
+	for (int32 Index = 0; Index < PaletteCount; ++Index)
+	{
+		const int32 Row = Index / CarsPerRow;
+		const int32 Column = Index % CarsPerRow;
+		const FVector2D Offset = ViewerForward * (FirstRowM + Row * RowSpacingM) + Right * ((Column - (CarsPerRow - 1) * 0.5f) * ColumnSpacingM);
+		FVector Position = ViewerCm + FVector(Offset.X, Offset.Y, 0.0) * 100.0;
+		FHitResult Hit;
+		const FVector Top = Position + FVector(0.0, 0.0, 500.0);
+		if (GetWorld()->LineTraceSingleByChannel(Hit, Top, Position - FVector(0.0, 0.0, 3000.0), ECC_WorldStatic))
+		{
+			Position.Z = Hit.ImpactPoint.Z;
+		}
+		else
+		{
+			Position.Z = ViewerCm.Z - 160.0;
+		}
+		const TSharedPtr<FTrafficVehicleModel>& Model = Models[Index % 4];
+		if (!Model->Load())
+		{
+			continue;
+		}
+		ModelAssets.Empty();
+		for (const TSharedPtr<FTrafficVehicleModel>& Loaded : Models)
+		{
+			if (Loaded->bLoaded)
+			{
+				Loaded->CollectAssets(ModelAssets);
+			}
+		}
+		FActorSpawnParameters Parameters;
+		Parameters.ObjectFlags |= RF_Transient;
+		Parameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AAITrafficCar* Actor = GetWorld()->SpawnActor<AAITrafficCar>(Position, FRotator(0.f, FacingYaw + (Row ? 0.f : 8.f), 0.f), Parameters);
+		if (Actor)
+		{
+			Actor->Initialize(*Model, PaintPalette[Index].Color);
+		}
+	}
+}
+
 void UAITrafficSubsystem::RemoveCar(int32 CarId)
 {
 	if (TObjectPtr<AAITrafficCar>* Actor = CarActors.Find(CarId))
@@ -565,6 +616,10 @@ void UAITrafficSubsystem::Tick(float TickDeltaTime)
 	if (!GetViewer(ViewerCm, ViewerForward))
 	{
 		return;
+	}
+	if (CVarPaintLineup.GetValueOnGameThread() != 0 && !bLineupDone)
+	{
+		SpawnPaintLineup(ViewerCm, ViewerForward);
 	}
 	SecondsSinceSpawn += DeltaTime;
 	TArray<FSimAgent> Agents;

@@ -15,6 +15,7 @@ FOLDER = "/Game/Vegetation/Wind"
 MASTER = f"{FOLDER}/MA_Foliage_Trees_Wind"
 COLLECTION = "/Game/World/MPC_Weather"
 INCLUDE = "/Plugin/MapRuntime/Private/WindSway.ush"
+SEASON_INCLUDE = "/Plugin/MapRuntime/Private/LeafSeason.ush"
 
 # Sway is faded out and the engine stops evaluating it at this camera distance (cm); the streamer sets the matching
 # component WorldPositionOffsetDisableDistance.
@@ -34,8 +35,16 @@ TREE_HLSL = """
 float3 localHeightAxis = LocalUp;
 float worldHeight = length(localHeightAxis) * TreeHeight;
 float2 windDirection = float2(WindX, WindY);
-return DgTreeWind(WorldPosition, LocalPosition, Camera, Seconds, InstanceRandom, WindSpeed * WindStrength,
+return DgTreeWind(WorldPosition, TreePosition, Camera, Seconds, InstanceRandom, WindSpeed * WindStrength,
 	windDirection, TreeHeight, CrownRadius, worldHeight, TrunkBend, BranchSway, LeafFlutter, FadeDistance);
+"""
+
+# Autumn colour and leaf fall (LeafSeason.ush). Only foliage slots of deciduous meshes take part: Deciduous and IsLeaf
+# are material instance parameters.
+COLOUR_HLSL = """
+float cellHash = DgLeafCellHash(TreePosition, InstanceRandom);
+float3 turned = DgLeafAutumnColour(BaseColor, LeafColour, InstanceRandom, cellHash, Deciduous);
+return lerp(BaseColor, turned, IsLeaf);
 """
 
 # Names of the material attributes passed through unchanged.
@@ -67,10 +76,11 @@ def collection_parameter(material, collection, name, x, y):
                       parameter_name=name)
 
 
-def custom_node(material, code, inputs, x, y):
-    """A Custom HLSL node returning a float3, with named inputs and the wind include."""
+def custom_node(material, code, inputs, x, y, output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                includes=(INCLUDE,)):
+    """A Custom HLSL node with named inputs and include files, returning a float3 unless told otherwise."""
     node = expression(material, unreal.MaterialExpressionCustom, x, y, code=code,
-                      output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3, include_file_paths=[INCLUDE])
+                      output_type=output_type, include_file_paths=list(includes))
     entries = []
     for name in inputs:
         entry = unreal.CustomInput()
@@ -112,7 +122,7 @@ def build_wind_graph(material):
     camera = expression(material, unreal.MaterialExpressionCameraPositionWS, x, 400, **tag)
     random = expression(material, unreal.MaterialExpressionPerInstanceRandom, x, 500, **tag)
 
-    inputs = ["WorldPosition", "LocalPosition", "LocalUp", "Seconds", "Camera", "InstanceRandom", "WindSpeed", "WindX",
+    inputs = ["WorldPosition", "TreePosition", "LocalUp", "Seconds", "Camera", "InstanceRandom", "WindSpeed", "WindX",
               "WindY", "WindStrength", "TreeHeight", "CrownRadius", "TrunkBend", "BranchSway", "LeafFlutter", "FadeDistance"]
     sources = [
         world_position, local_position, world_up, seconds, camera, random,
@@ -140,12 +150,42 @@ def build_wind_graph(material):
     for name in ATTRIBUTES:
         if not mel.connect_material_expressions(broken, name, made, name):
             unreal.log_warning(f"tree wind: could not pass {name} through")
+    add_season(material, collection, broken, made, world_position, random, x, tag)
     added = expression(material, unreal.MaterialExpressionAdd, x + 1000, 300, **tag)
     mel.connect_material_expressions(broken, "WorldPositionOffset", added, "A")
     mel.connect_material_expressions(wind, "", added, "B")
     mel.connect_material_expressions(added, "", made, "WorldPositionOffset")
     mel.connect_material_property(made, "", unreal.MaterialProperty.MP_MATERIAL_ATTRIBUTES)
     material.set_editor_property("max_world_position_offset_displacement", MAX_DISPLACEMENT_CM)
+
+
+def add_season(material, collection, broken, made, world_position, random, x, tag):
+    """Replaces the passed-through base colour by the autumn colour. Thinning is not done yet: the crown is a Nanite
+    assembly of a few large leaf cards (about 2800 triangles) without a per-card identity or an honoured opacity mask."""
+    shared = {
+        "TreePosition": world_position, "InstanceRandom": random,
+        "LeafDensity": collection_parameter(material, collection, "LeafDensity", x, 1700),
+        "LeafColour": collection_parameter(material, collection, "LeafColour", x, 1800),
+        "Deciduous": scalar_parameter(material, "Deciduous", 1.0, x, 1900),
+        "IsLeaf": scalar_parameter(material, "IsLeaf", 0.0, x, 2000),
+    }
+    float1 = unreal.CustomMaterialOutputType.CMOT_FLOAT1
+    float3 = unreal.CustomMaterialOutputType.CMOT_FLOAT3
+    colour = custom_node(material, COLOUR_HLSL, ["BaseColor", "LeafColour", "TreePosition", "InstanceRandom", "Deciduous", "IsLeaf"],
+                         x + 600, -800, float3, (SEASON_INCLUDE,))
+    shared_nodes = (colour,)
+    for node, source_name, attribute in ((colour, "BaseColor", "BaseColor"),):
+        node.set_editor_property("desc", "DgSeason")
+        if not mel.connect_material_expressions(broken, attribute, node, source_name):
+            unreal.log_warning(f"tree wind: season node could not read {attribute}")
+    for node in shared_nodes:
+        for name, source in shared.items():
+            if any(entry.get_editor_property("input_name") == name for entry in node.get_editor_property("inputs")):
+                if not mel.connect_material_expressions(source, "", node, name):
+                    unreal.log_warning(f"tree wind: season input {name} not connected")
+    for node, attribute in ((colour, "BaseColor"),):
+        if not mel.connect_material_expressions(node, "", made, attribute):
+            unreal.log_warning(f"tree wind: season node not connected to {attribute}")
 
 
 def create_master():
@@ -177,7 +217,9 @@ def create_instances(master):
             # Slots that carry leaf textures flutter; bark slots do not.
             kind = "foliage" if "oliage" in str(static_material.material_slot_name) else "bark"
             trunk, bough, leaf = weights[kind]
-            for name, value in (("TreeHeight", height), ("CrownRadius", crown), ("TrunkBend", trunk),
+            is_leaf = 1.0 if kind == "foliage" else 0.0
+            deciduous = 0.0 if "Conifer" in mesh_name else 1.0
+            for name, value in (("IsLeaf", is_leaf), ("Deciduous", deciduous), ("TreeHeight", height), ("CrownRadius", crown), ("TrunkBend", trunk),
                                 ("BranchSway", bough), ("LeafFlutter", leaf)):
                 mel.set_material_instance_scalar_parameter_value(instance, name, value)
             mel.update_material_instance(instance)

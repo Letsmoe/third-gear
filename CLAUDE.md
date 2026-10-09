@@ -217,7 +217,9 @@ cache, so shade went black). Gotchas: a triangle (A, B, C) faces along `Cross(C-
    with complex-as-simple collision, then creates `/Game/Maps/<area>` with lighting from `Scripts/world_lighting.py`.
 4. Check visually without a headset: `Scripts/screenshot.sh <map> "x,y,z,pitch,yaw;..."` → `Saved/Screenshots/shot_NN.png`
    (map = name under /Game/Maps or a full package path; env `CMDS="cvar 1,..."` adds console commands; first run after
-   material/foliage changes is slow because shaders compile; env `EXTRA="-SpawnCar"` adds game arguments). Look around on the desktop: `MAP=<map> Scripts/run_desktop.sh`.
+   material/foliage changes is slow because shaders compile; env `EXTRA="-SpawnCar"` adds game arguments). A shot can carry console commands after its fifth number, separated by `|`
+   (`"x,y,z,p,y,Weather.SetTime 20 11|Weather.Override Snow=1"`), so one run covers every view and weather variant;
+   each shot waits for shaders and textures, then `SHOT_SETTLE` seconds (2.5). Look around on the desktop: `MAP=<map> Scripts/run_desktop.sh`.
 Lighting is physically based (sun 75 klx, exposure locked at EV100 13 via unbound PostProcessVolume; needs
 `r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange=True`). Free-fly viewer (`-FreeCam`): WASD/QE, Shift = 50 km/h.
 `build_area.py --reuse` reuses the cached OSM/DEM/road/terrain step (`cache.pkl`, saves ~2 min); `--skip-tiles` only
@@ -294,7 +296,9 @@ rides a camera over the lanes and prints violations by AI cars, collisions betwe
   (clutch capacity = 380 Nm × engagement² between pedal 0.8 and 0.25). Gear only engages with the clutch pressed or
   revs matched (else "grind", stays neutral); reverse only when nearly stopped. Open diff, FWD, 92 % driveline
   efficiency, ABS. Tyres: simplified Pacejka with combined slip (friction ellipse, μx 1.1, μy 0.99, load sensitivity),
-  semi-implicit wheel spin, low-speed clamps (parks without jitter). Suspension forces act along the ground normal
+  semi-implicit wheel spin, low-speed clamps (parks without jitter). Per-wheel surface grip (`CarSurfaceGrip.*`): the ground material under
+  each wheel plus wetness, snow and temperature scale grip, peak slip and rolling drag (wet 0.8, packed snow 0.34, ice 0.12,
+  aquaplaning above 70 km/h on flooded roads); `drive_test.sh -DriveTestSurface=wet|flood|snow|ice` measures them. Suspension forces act along the ground normal
   (Chaos' own version braked the car whenever the body pitched); body never sleeps, no linear damping; aero drag
   0.5·ρ·CdA·v². Compliance steer (0.2°/kN) gives realistic understeer.
 - **FFB**: kingpin torque = −(pneumatic trail, collapsing at the grip limit, + caster trail) × front lateral force,
