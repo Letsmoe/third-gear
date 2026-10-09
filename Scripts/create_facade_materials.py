@@ -211,7 +211,7 @@ float2 Wall = float2(UV.x, -UV.y);
 float BuildingAge = saturate(Age * lerp(0.35, 1.35, DgHash(float2(Variation, 0.37))));
 float Spacing = lerp(2.6, 3.6, Variation);
 FDgFacadeWeathering Weathered = DgFacadeWeather(WeatherAtlas, WeatherAtlasSampler, WeatherMoss, WeatherMossSampler, WeatherFlake,
-	WeatherFlakeSampler, Color, Rough, Wall, Variation, NormalY, BuildingAge, StreakAmount, PlinthAmount, MossAmount, RepairAmount,
+	WeatherFlakeSampler, Color, Rough, Wall, Variation, NormalY, EaveHeight, BuildingAge, StreakAmount, PlinthAmount, MossAmount, RepairAmount,
 	FadeAmount, FlakeAmount, PlinthHeight, Spacing, FloorHeight, RepairColor);
 NormalOut = normalize(float3(Nrm.xy + Weathered.NormalTilt, Nrm.z));
 RoughOut = Weathered.Roughness;
