@@ -622,7 +622,7 @@ private:
 				// Lawn snow is 15 cm deep, so it can stray a few centimetres from a plane without exposing the ground.
 				const float ToleranceScale = Class == ESnowClass::Lawn ? 3.f : 1.f;
 				if (FMath::Abs(Samples.Surface[Index] - Predict(Samples.Surface, Samples, X0, Y0, Size, X, Y)) > SnowSurfaceTolerance * ToleranceScale
-					|| FMath::Abs(Samples.Depth[Index] - Predict(Samples.Depth, Samples, X0, Y0, Size, X, Y)) > SnowDepthTolerance * ToleranceScale
+					|| (bEdgeMatters && FMath::Abs(Samples.Depth[Index] - Predict(Samples.Depth, Samples, X0, Y0, Size, X, Y)) > SnowDepthTolerance)
 					|| (bEdgeMatters && FMath::Abs(EdgeDistances[Index] - Predict(EdgeDistances, Samples, X0, Y0, Size, X, Y)) > SnowEdgeTolerance))
 				{
 					return false;
