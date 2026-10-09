@@ -189,6 +189,7 @@ struct FCarSoundDsp::FImpl
 
 	// --- Configuration ---
 	const float SampleRate;
+	uint32 StemMask = CarSoundStem::All;
 
 	// --- Current inputs and smoothed values ---
 	FCarSoundInputs Inputs;
@@ -326,7 +327,8 @@ struct FCarSoundDsp::FImpl
 	float EngineLevelDb(float LoadFraction) const
 	{
 		const float RpmFraction = FMath::Clamp((Rpm - 700.f) / 5500.f, 0.f, 1.f);
-		return -40.f + 17.f * RpmFraction + 10.f * LoadFraction + 1.5f * (1.f - RpmFraction) * (1.f - LoadFraction);
+		const float IdleBoost = FMath::Pow(1.f - RpmFraction, 6.f);
+		return -40.f + 17.f * RpmFraction + 10.f * LoadFraction + 1.5f * (1.f - RpmFraction) * (1.f - LoadFraction) + 6.f * IdleBoost;
 	}
 
 	/** Recomputes the target amplitude of every partial from rpm, load and combustion state. */
@@ -551,10 +553,10 @@ struct FCarSoundDsp::FImpl
 
 		// Tyre noise power rises roughly with speed^3 to ^4; amplitude with speed^1.5 to ^2.
 		const float RoarSpeed = FMath::Pow(Fraction, 1.5f);
-		const float MidSpeed = FMath::Pow(Fraction, 1.9f);
-		Block.RoarGain = 0.16f * RoarSpeed * (0.9f * Asphalt + 1.7f * Cobble + 1.3f * Pavers + 1.4f * SurfaceMix[3]);
-		Block.MidGain = 0.17f * MidSpeed * (0.9f * Asphalt + 1.5f * Cobble + 1.2f * Pavers) * (1.f - 0.2f * Wet);
-		Block.HissGain = 0.040f * FMath::Pow(Fraction, 2.f) * (0.25f + 2.6f * Wet) * (1.f + 0.4f * Cobble);
+		const float MidSpeed = FMath::Pow(Fraction, 1.5f);
+		Block.RoarGain = 0.10f * RoarSpeed * (0.9f * Asphalt + 1.7f * Cobble + 1.3f * Pavers + 1.4f * SurfaceMix[3]);
+		Block.MidGain = 0.10f * MidSpeed * (0.9f * Asphalt + 1.5f * Cobble + 1.2f * Pavers) * (1.f - 0.2f * Wet);
+		Block.HissGain = 0.025f * FMath::Pow(Fraction, 2.f) * (0.25f + 2.6f * Wet) * (1.f + 0.4f * Cobble);
 		RoadMid[0].SetBandpass(SampleRate, 450.f + 450.f * FMath::Min(Fraction, 1.6f), 0.6f);
 		RoadMid[1].SetBandpass(SampleRate, 470.f + 440.f * FMath::Min(Fraction, 1.6f), 0.6f);
 
@@ -564,8 +566,8 @@ struct FCarSoundDsp::FImpl
 		Block.PaverGain = Pavers * FMath::Pow(FMath::Min(Speed / 14.f, 1.6f), 1.2f);
 
 		const float Wind = FMath::Pow(AirSpeedSmooth / 36.f, 2.6f);
-		Block.WindBodyGain = 0.30f * Wind * WindGust;
-		Block.WindHissGain = 0.060f * Wind * WindGust;
+		Block.WindBodyGain = 0.045f * Wind * WindGust;
+		Block.WindHissGain = 0.009f * Wind * WindGust;
 
 		Block.SquealGain = 0.11f * FMath::Pow(SquealSmooth, 1.3f);
 		Block.ScrubGain = 0.045f * SquealSmooth;
@@ -578,7 +580,7 @@ struct FCarSoundDsp::FImpl
 	}
 
 	/** One stereo sample of tyres on the road and wind. */
-	void RoadAndWindSample(const FRoadBlock& Block, float* OutLeft, float* OutRight)
+	void RoadAndWindSample(const FRoadBlock& Block, float* OutRoad, float* OutWind)
 	{
 		float Impulse = 0.f;
 		if (Block.CobbleGain > 0.001f)
@@ -608,7 +610,6 @@ struct FCarSoundDsp::FImpl
 		const float Squeal = Block.SquealGain * (SquealA.Process(SquealSource) * 6.f + SquealB.Process(SquealSource) * 2.5f)
 			+ Block.ScrubGain * SquealScrub.Process(SquealSource);
 
-		float* Outputs[2] = {OutLeft, OutRight};
 		for (int32 Channel = 0; Channel < 2; ++Channel)
 		{
 			const float White = NoiseGenerators[Channel].Next();
@@ -620,7 +621,8 @@ struct FCarSoundDsp::FImpl
 			const float Wind = WindBody[Channel].Process(WindWhite) * Block.WindBodyGain * 2.f
 				+ WindHiss[Channel].Process(WindWhite) * Block.WindHissGain * 2.f;
 			const float Side = Channel == 0 ? 1.f : 0.92f;
-			*Outputs[Channel] = Road + (CobbleSound + PaverSound) * Side + Wind + Squeal * Side * 0.5f;
+			OutRoad[Channel] = Road + (CobbleSound + PaverSound) * Side + Squeal * Side * 0.5f;
+			OutWind[Channel] = Wind;
 		}
 	}
 
@@ -654,7 +656,7 @@ struct FCarSoundDsp::FImpl
 
 		const float StarterTarget = Inputs.bCranking && !Inputs.bEngineRunning ? 1.f : 0.f;
 		StarterLevel = Approach(StarterLevel, StarterTarget, CoefficientFor(StarterTarget > StarterLevel ? 0.05f : 0.09f, BlockSeconds));
-		Block.StarterGain = StarterLevel * DbToLinear(-35.f);
+		Block.StarterGain = StarterLevel * DbToLinear(-29.f);
 		Block.StarterHz = FMath::Clamp(520.f * Rpm / 250.f, 160.f, 950.f);
 
 		GrindLevel = Approach(GrindLevel, Inputs.bGrinding ? 1.f : 0.f, CoefficientFor(0.03f, BlockSeconds));
@@ -828,13 +830,15 @@ struct FCarSoundDsp::FImpl
 			Noise.High = NoiseHighpass.Process(EventWhite);
 			Noise.Band = NoiseBand.Process(EventWhite) * 2.f;
 
-			float Left = 0.f, Right = 0.f;
-			RoadAndWindSample(RoadBlock, &Left, &Right);
-			const float Voices = VoicesSample(DeltaSeconds, Noise);
-			Engine = EngineHighpass.Process(Engine);
+			float Road[2] = {}, Wind[2] = {};
+			RoadAndWindSample(RoadBlock, Road, Wind);
+			const float OneShots = VoicesSample(DeltaSeconds, Noise) * ((StemMask & CarSoundStem::Events) ? 1.f : 0.f);
+			Engine = EngineHighpass.Process(Engine) * ((StemMask & CarSoundStem::Engine) ? 1.f : 0.f);
+			const float RoadGain = (StemMask & CarSoundStem::Road) ? 1.f : 0.f;
+			const float WindGain = (StemMask & CarSoundStem::Wind) ? 1.f : 0.f;
 
-			OutStereo[2 * Frame] = SoftLimit(Engine + Left + Voices);
-			OutStereo[2 * Frame + 1] = SoftLimit(Engine + Right + Voices);
+			OutStereo[2 * Frame] = SoftLimit(Engine + Road[0] * RoadGain + Wind[0] * WindGain + OneShots);
+			OutStereo[2 * Frame + 1] = SoftLimit(Engine + Road[1] * RoadGain + Wind[1] * WindGain + OneShots);
 		}
 		for (int32 Index = 0; Index < MaxPartials; ++Index)
 		{
@@ -865,6 +869,11 @@ void FCarSoundDsp::SetInputs(const FCarSoundInputs& NewInputs)
 {
 	FScopeLock ScopeLock(&Impl->Lock);
 	Impl->PendingInputs = NewInputs;
+}
+
+void FCarSoundDsp::SetStemMask(uint32 Mask)
+{
+	Impl->StemMask = Mask;
 }
 
 void FCarSoundDsp::PostEvent(ECarSoundEvent Event, float Strength)

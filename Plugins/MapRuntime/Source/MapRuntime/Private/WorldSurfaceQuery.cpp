@@ -9,7 +9,7 @@
 
 FName FindWorldSurfaceName(const FHitResult& Hit)
 {
-	const UDynamicMeshComponent* Component = Cast<UDynamicMeshComponent>(Hit.Component.Get());
+	UDynamicMeshComponent* Component = Cast<UDynamicMeshComponent>(Hit.Component.Get());
 	if (!Component || !Component->GetDynamicMesh())
 	{
 		return NAME_None;

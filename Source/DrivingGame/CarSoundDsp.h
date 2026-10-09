@@ -13,6 +13,16 @@ enum class ECarRoadSurface : uint8
 	Count
 };
 
+/** Parts of the mix, for rendering one of them alone in the offline test. */
+namespace CarSoundStem
+{
+constexpr uint32 Engine = 1;
+constexpr uint32 Road = 2;
+constexpr uint32 Wind = 4;
+constexpr uint32 Events = 8;
+constexpr uint32 All = 15;
+}
+
 /** One-shot sounds the game thread can trigger. */
 enum class ECarSoundEvent : uint8
 {
@@ -76,6 +86,9 @@ public:
 
 	/** Triggers a one-shot sound; Strength 0..1. Safe to call from any thread. */
 	void PostEvent(ECarSoundEvent Event, float Strength = 1.f);
+
+	/** Limits the output to some of the CarSoundStem parts. Only for the offline test; call before Render. */
+	void SetStemMask(uint32 Mask);
 
 	/** Writes NumFrames interleaved stereo frames. */
 	void Render(float* OutStereo, int32 NumFrames);

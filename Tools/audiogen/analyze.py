@@ -6,6 +6,8 @@ Usage:
   analyze.py loop <in.wav>                                     seam check: level and click measure at the loop point
   analyze.py clip <in.wav>                                     peak, clipped samples, RMS
   analyze.py orders <in.wav> <telemetry.csv> <out.png>         engine order tracks over the recorded rpm
+  analyze.py scenes <capture_dir>                              level per scene and stem, from an Unreal -AudioCapture run
+  analyze.py ordercheck <capture_dir> <label>                  do the firing order and its harmonics follow the rpm
 """
 import os
 import sys
@@ -74,6 +76,61 @@ def order_tracks(wav_path, csv_path, out_path):
     figure.savefig(out_path, dpi=80)
 
 
+def load_capture(capture_dir):
+    """Returns the telemetry rows as a structured array and the labels per row."""
+    telemetry = np.genfromtxt(os.path.join(capture_dir, "telemetry.csv"), delimiter=",", names=True, dtype=None, encoding=None)
+    return telemetry
+
+
+def scene_levels(capture_dir):
+    """Prints RMS and peak per scene for each stem, with mean rpm and speed."""
+    telemetry = load_capture(capture_dir)
+    stems = {}
+    for name in ("car", "car_engine", "car_road", "car_wind", "car_events"):
+        path = os.path.join(capture_dir, name + ".wav")
+        if os.path.exists(path):
+            stems[name] = read_wav(path)
+    rate = next(iter(stems.values()))[1]
+    print(f"{'scene':22s} {'sec':>5s} {'rpm':>6s} {'km/h':>6s}  " + "  ".join(f"{name[4:] or 'mix':>7s}" for name in stems) + "   mix peak")
+    for label in dict.fromkeys(telemetry["label"]):
+        rows = np.nonzero(telemetry["label"] == label)[0]
+        start, stop = int(telemetry["time"][rows[0]] * rate), int(telemetry["time"][rows[-1]] * rate)
+        skip = min(int(0.5 * rate), (stop - start) // 3)
+        levels = []
+        for name, (data, _) in stems.items():
+            levels.append(f"{rms_db(data[start + skip:stop]):7.1f}")
+        mix = stems["car"][0][start:stop]
+        print(f"{label:22s} {(stop - start) / rate:5.1f} {telemetry['rpm'][rows].mean():6.0f} {telemetry['speed_kmh'][rows].mean():6.1f}  "
+              + "  ".join(levels) + f"   {np.abs(mix).max():.2f}")
+
+
+def order_check(capture_dir, label):
+    """For 0.4 s windows of the engine stem, compares the level at the predicted firing frequency (order 2) and its
+    harmonics with the median level of the surrounding spectrum. A working engine is clearly above it, at every rpm."""
+    telemetry = load_capture(capture_dir)
+    data, rate = read_wav(os.path.join(capture_dir, "car_engine.wav"))
+    mono = data.mean(axis=1)
+    rows = np.nonzero(telemetry["label"] == label)[0]
+    window = int(0.4 * rate)
+    print(f"{label}: window start s, rpm, firing Hz, level above the local noise floor in dB (order 2 / 4 / 6), strongest peak Hz")
+    for row in rows[:: int(0.5 / (telemetry["time"][1] - telemetry["time"][0]))]:
+        start = int(telemetry["time"][row] * rate)
+        segment = mono[start:start + window]
+        rpm = telemetry["rpm"][row]
+        if len(segment) < window or rpm < 300:
+            continue
+        spectrum = np.abs(np.fft.rfft(segment * np.hanning(len(segment)))) ** 2
+        frequencies = np.fft.rfftfreq(len(segment), 1.0 / rate)
+        floor = np.median(spectrum[(frequencies > 20) & (frequencies < 3000)])
+        above = []
+        for order in (2, 4, 6):
+            target = rpm / 60.0 * order
+            band = (frequencies > target * 0.97) & (frequencies < target * 1.03)
+            above.append(10 * np.log10(spectrum[band].max() / floor + 1e-12) if band.any() else float("nan"))
+        peak = frequencies[(frequencies > 25) & (frequencies < 1500)][np.argmax(spectrum[(frequencies > 25) & (frequencies < 1500)])]
+        print(f"  {telemetry['time'][row]:6.1f}s {rpm:6.0f} rpm  {rpm / 30:6.1f} Hz   {above[0]:6.1f} {above[1]:6.1f} {above[2]:6.1f}   peak {peak:6.1f} Hz")
+
+
 def main():
     command = sys.argv[1]
     if command == "spectrogram":
@@ -84,6 +141,10 @@ def main():
     elif command == "clip":
         for path in sys.argv[2:]:
             clip_check(path)
+    elif command == "scenes":
+        scene_levels(sys.argv[2])
+    elif command == "ordercheck":
+        order_check(sys.argv[2], sys.argv[3])
     elif command == "orders":
         order_tracks(sys.argv[2], sys.argv[3], sys.argv[4])
     else:

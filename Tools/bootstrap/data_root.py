@@ -18,6 +18,7 @@ DEFAULT_TARGET = "/mnt/storage/third-gear"
 
 # Checkout path -> path inside the data root. All of these are listed in .gitignore without a trailing slash.
 CHECKOUT_LINKS = {
+    "Content/Audio": "unreal/Audio",
     "Content/CitySampleVehicles": "unreal/CitySampleVehicles",
     "Content/Textures": "unreal/Textures",
     "Content/Vegetation": "unreal/Vegetation",

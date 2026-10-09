@@ -16,6 +16,7 @@ Most content isn't in this repository: some is third-party, and most is generate
 6. Add the free **City Sample Vehicles** pack to your Fab library, then fetch it with `Tools/asset_fetch/fab_download.py "City Sample Vehicles" <dir>` and move its `Content/CitySampleVehicles` into `Content/`.
 7. Bake the trees with `Scripts/bake_vegetation.py`.
 8. Fetch the geodata as described in `GeoData/REPORT.md`, then build and import a map with `Tools/osmimport/build_area.py`, `Scripts/create_materials.py` and `Scripts/import_osm_area.py`.
+9. Generate the ambience and thunder sounds with `Tools/audiogen/run_audiogen.sh` (Stable Audio Open through a local ComfyUI), then import them with `Scripts/import_audio.py`. The engine, tyre and wind sounds of the car are synthesised in C++ and need no files.
 
 `CLAUDE.md` documents the whole project in detail: the map pipeline, the car physics, the wheel setup and the tools.
 

@@ -18,7 +18,7 @@ class USoundBase;
  *
  * Volumes follow UDrivingPreferences: EngineVolume for the car, AmbienceVolume for the world. With `-nosound` nothing
  * is created, so the headless drive test is unaffected. With `-AudioCapture=<dir>` the car sound is also rendered
- * offline (same DSP, fixed time step) to <dir>/car.wav with a telemetry CSV next to it, for Scripts/audio_test.sh.
+ * offline (same DSP, fixed time step) to <dir>/car.wav (and car_engine.wav, car_road.wav, car_wind.wav, car_events.wav) with a telemetry CSV next to it, for Scripts/audio_test.sh.
  */
 UCLASS(ClassGroup = "Audio", meta = (BlueprintSpawnableComponent))
 class DRIVINGGAME_API UCarAudioComponent : public UActorComponent
@@ -38,11 +38,21 @@ public:
 	/** Plays thunder from a strike this far away; it arrives after distance / speed of sound. */
 	void TriggerThunder(float DistanceMeters);
 
+	/**
+	 * A lightning flash at a world location (UWeatherVisualsSubsystem's OnLightning delegate): thunder follows after
+	 * the distance at the speed of sound, louder for a stronger strike. Once a flash source is bound the component
+	 * stops inventing strikes of its own.
+	 */
+	void HandleLightning(const FVector& WorldLocation, float Strength);
+
 	/** Test hook: pins the road surface and wetness instead of tracing the ground. */
 	void SetForcedSurface(ECarRoadSurface Surface, float InWetness);
 
-	/** Test hook: weather values that replace the weather subsystem's. */
+	/** Test hook: weather values that replace the weather subsystem's (wind blows along +X, towards the east). */
 	void SetForcedWeather(float PrecipitationMmPerHour, float WindMps, float GustMps, float ThunderActivity, float SunAltitudeDegrees);
+
+	/** Tells the component that real lightning strikes arrive through HandleLightning. */
+	void SetLightningFromWeather(bool bEnabled) { bLightningFromWeather = bEnabled; }
 
 	/** Label stored with every captured sample, so a recording can be cut into scenes. */
 	void SetCaptureLabel(const FString& Label) { CaptureLabel = Label; }
@@ -72,8 +82,11 @@ private:
 	{
 		float PrecipitationMmPerHour = 0.f;
 		float WindMps = 0.f;
-		float WindFromDegrees = 0.f;
+		FVector2D WindVelocityMps = FVector2D::ZeroVector; // Unreal frame: x east, y south
 		float GustMps = 0.f;
+		float SnowFraction = 0.f;
+		float RoadWetness = 0.f;
+	bool bLightningFromWeather = false;
 		float ThunderActivity = 0.f;
 		float SunAltitudeDegrees = 30.f;
 	};
@@ -86,13 +99,13 @@ private:
 	FWeatherNow SampleWeather();
 	void UpdateSurface(float DeltaTime);
 	FCarSoundEnvironment BuildEnvironment(const FWeatherNow& Weather);
-	void UpdateWetness(const FWeatherNow& Weather, float DeltaTime);
 	void UpdateAmbience(const FWeatherNow& Weather, float SpeedMps, float DeltaTime);
 	void UpdateThunder(const FWeatherNow& Weather, float DeltaTime);
 	void PlayThunder(const FPendingThunder& Thunder);
 	void FeedCarSound(const FCarTelemetry& Telemetry, const FCarSoundEnvironment& Environment, float DeltaTime);
 	void CaptureFrame(const FCarTelemetry& Telemetry, const FCarSoundInputs& Inputs, float DeltaTime);
 	void WriteCapture();
+	static void WriteWav(const FString& Path, const TArray<int16>& Samples);
 	FAmbienceLayer* FindLayer(const FString& AssetName);
 	ACarPawn* GetCar() const;
 
@@ -114,6 +127,7 @@ private:
 	ECarRoadSurface TracedSurface = ECarRoadSurface::Asphalt;
 	bool bSurfaceForced = false;
 	float RoadWetness = 0.f;
+	bool bLightningFromWeather = false;
 	float WeatherSampleCountdown = 0.f;
 	FWeatherNow CachedWeather;
 	bool bWeatherForced = false;
@@ -123,8 +137,14 @@ private:
 
 	// Offline capture (-AudioCapture=<dir>).
 	FString CaptureDirectory;
-	TUniquePtr<FCarSoundDsp> CaptureDsp;
-	TArray<int16> CapturedSamples;
+	/** One offline renderer per stem, so the recording can also be analysed engine, road, wind and one-shots apart. */
+	struct FCaptureStem
+	{
+		FString Name;
+		TUniquePtr<FCarSoundDsp> Dsp;
+		TArray<int16> Samples;
+	};
+	TArray<FCaptureStem> CaptureStems;
 	TArray<FString> CaptureRows;
 	FString CaptureLabel = TEXT("run");
 	double CaptureTime = 0.0;

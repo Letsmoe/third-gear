@@ -20,6 +20,7 @@
 #include "AudioDevice.h"
 #include "Sound/SoundBase.h"
 #include "WeatherSubsystem.h"
+#include "WeatherVisuals.h"
 #include "WorldSurfaceQuery.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCarAudio, Log, All);
@@ -88,7 +89,15 @@ void UCarAudioComponent::BeginPlay()
 	bAudioAvailable = FApp::CanEverRenderAudio() && Device != nullptr;
 	if (!CaptureDirectory.IsEmpty())
 	{
-		CaptureDsp = MakeUnique<FCarSoundDsp>(CaptureSampleRate);
+		const TPair<const TCHAR*, uint32> Stems[] = {{TEXT("car"), CarSoundStem::All}, {TEXT("car_engine"), CarSoundStem::Engine},
+			{TEXT("car_road"), CarSoundStem::Road}, {TEXT("car_wind"), CarSoundStem::Wind}, {TEXT("car_events"), CarSoundStem::Events}};
+		for (const TPair<const TCHAR*, uint32>& Stem : Stems)
+		{
+			FCaptureStem& Capture = CaptureStems.AddDefaulted_GetRef();
+			Capture.Name = Stem.Key;
+			Capture.Dsp = MakeUnique<FCarSoundDsp>(CaptureSampleRate);
+			Capture.Dsp->SetStemMask(Stem.Value);
+		}
 	}
 	PreferencesHandle = UDrivingPreferences::OnChanged().AddUObject(this, &UCarAudioComponent::ApplyPreferences);
 }
@@ -96,7 +105,7 @@ void UCarAudioComponent::BeginPlay()
 void UCarAudioComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	UDrivingPreferences::OnChanged().Remove(PreferencesHandle);
-	if (CaptureDsp)
+	if (!CaptureStems.IsEmpty())
 	{
 		WriteCapture();
 	}
@@ -122,6 +131,7 @@ void UCarAudioComponent::SetForcedWeather(float PrecipitationMmPerHour, float Wi
 	bWeatherForced = true;
 	CachedWeather.PrecipitationMmPerHour = PrecipitationMmPerHour;
 	CachedWeather.WindMps = WindMps;
+	CachedWeather.WindVelocityMps = FVector2D(WindMps, 0.f);
 	CachedWeather.GustMps = GustMps;
 	CachedWeather.ThunderActivity = ThunderActivity;
 	CachedWeather.SunAltitudeDegrees = SunAltitudeDegrees;
@@ -200,19 +210,25 @@ UCarAudioComponent::FWeatherNow UCarAudioComponent::SampleWeather()
 	{
 		return CachedWeather;
 	}
+	FWeatherNow Now = CachedWeather;
+	// Rain, wind, thunder and road wetness come smoothed from the weather visuals; the sun's height from the weather itself.
+	if (const UWeatherVisualsSubsystem* Visuals = GetWorld() ? GetWorld()->GetSubsystem<UWeatherVisualsSubsystem>() : nullptr)
+	{
+		const FWeatherVisualState& State = Visuals->GetState();
+		Now.PrecipitationMmPerHour = State.RainMillimetresPerHour;
+		Now.SnowFraction = State.SnowFraction;
+		Now.WindVelocityMps = FVector2D(State.Wind.X, State.Wind.Y);
+		Now.WindMps = State.Wind.Size();
+		Now.GustMps = State.GustMetresPerSecond;
+		Now.ThunderActivity = State.ThunderActivity;
+		Now.RoadWetness = Visuals->GetWetness();
+	}
 	const UWeatherSubsystem* Weather = GetWorld() ? GetWorld()->GetSubsystem<UWeatherSubsystem>() : nullptr;
 	FIsobarPointWeather Point;
-	if (!Weather || !Weather->SampleAt(GetOwner()->GetActorLocation(), Point))
+	if (Weather && Weather->SampleAt(GetOwner()->GetActorLocation(), Point))
 	{
-		return CachedWeather;
+		Now.SunAltitudeDegrees = static_cast<float>(Point.SunAltitudeDegrees);
 	}
-	FWeatherNow Now;
-	Now.PrecipitationMmPerHour = static_cast<float>(Point.PrecipitationRateMillimetresPerHour);
-	Now.WindMps = static_cast<float>(Point.WindSpeedMetersPerSecond);
-	Now.WindFromDegrees = static_cast<float>(Point.WindFromBearingDegrees);
-	Now.GustMps = static_cast<float>(Point.GustSpeedMetersPerSecond);
-	Now.ThunderActivity = static_cast<float>(Point.ThunderActivity);
-	Now.SunAltitudeDegrees = static_cast<float>(Point.SunAltitudeDegrees);
 	return Now;
 }
 
@@ -239,18 +255,6 @@ void UCarAudioComponent::UpdateSurface(float DeltaTime)
 	}
 }
 
-void UCarAudioComponent::UpdateWetness(const FWeatherNow& Weather, float DeltaTime)
-{
-	if (bSurfaceForced)
-	{
-		return;
-	}
-	// Roads soak within a minute of rain and take about ten minutes to dry; the weather visuals will own this later.
-	const float Target = SmoothRamp(Weather.PrecipitationMmPerHour, 0.05f, 2.f);
-	const float TimeConstant = Target > RoadWetness ? 30.f : 600.f;
-	RoadWetness += (Target - RoadWetness) * (1.f - FMath::Exp(-DeltaTime / TimeConstant));
-}
-
 FCarSoundEnvironment UCarAudioComponent::BuildEnvironment(const FWeatherNow& Weather)
 {
 	FCarSoundEnvironment Environment;
@@ -258,12 +262,10 @@ FCarSoundEnvironment UCarAudioComponent::BuildEnvironment(const FWeatherNow& Wea
 	{
 		Environment.SurfaceWeights[Surface] = SurfaceWeights[Surface];
 	}
-	Environment.Wetness = RoadWetness;
+	Environment.Wetness = bSurfaceForced ? RoadWetness : Weather.RoadWetness;
 	Environment.bIndicatorOn = bIndicatorActive;
 
-	// Wind blows towards (from + 180 degrees); map x is east and y is south.
-	const float From = FMath::DegreesToRadians(Weather.WindFromDegrees);
-	const FVector WindWorld(-FMath::Sin(From) * Weather.WindMps, FMath::Cos(From) * Weather.WindMps, 0.f);
+	const FVector WindWorld(Weather.WindVelocityMps.X, Weather.WindVelocityMps.Y, 0.f);
 	const AActor* Car = GetOwner();
 	Environment.WindLocalMps = FVector2D(FVector::DotProduct(WindWorld, Car->GetActorForwardVector()), FVector::DotProduct(WindWorld, Car->GetActorRightVector()));
 
@@ -290,12 +292,15 @@ void UCarAudioComponent::FeedCarSound(const FCarTelemetry& Telemetry, const FCar
 			CarSynth->GetDsp()->PostEvent(Request.Event, Request.Strength);
 		}
 	}
-	if (CaptureDsp)
+	if (!CaptureStems.IsEmpty())
 	{
-		CaptureDsp->SetInputs(Inputs);
-		for (const FCarSoundEventRequest& Request : Events)
+		for (const FCaptureStem& Stem : CaptureStems)
 		{
-			CaptureDsp->PostEvent(Request.Event, Request.Strength);
+			Stem.Dsp->SetInputs(Inputs);
+			for (const FCarSoundEventRequest& Request : Events)
+			{
+				Stem.Dsp->PostEvent(Request.Event, Request.Strength);
+			}
 		}
 		CaptureFrame(Telemetry, Inputs, DeltaTime);
 	}
@@ -306,14 +311,15 @@ void UCarAudioComponent::CaptureFrame(const FCarTelemetry& Telemetry, const FCar
 	CaptureFrameCarry += DeltaTime * CaptureSampleRate;
 	const int32 Frames = FMath::FloorToInt(CaptureFrameCarry);
 	CaptureFrameCarry -= Frames;
-	TArray<float> Block;
-	Block.SetNumZeroed(Frames * 2);
-	CaptureDsp->Render(Block.GetData(), Frames);
-	const int32 First = CapturedSamples.Num();
-	CapturedSamples.AddUninitialized(Block.Num());
-	for (int32 Index = 0; Index < Block.Num(); ++Index)
+	for (FCaptureStem& Stem : CaptureStems)
 	{
-		CapturedSamples[First + Index] = static_cast<int16>(FMath::Clamp(Block[Index], -1.f, 1.f) * 32767.f);
+		TArray<float> Block;
+		Block.SetNumZeroed(Frames * 2);
+		Stem.Dsp->Render(Block.GetData(), Frames);
+		for (const float Sample : Block)
+		{
+			Stem.Samples.Add(static_cast<int16>(FMath::Clamp(Sample, -1.f, 1.f) * 32767.f));
+		}
 	}
 	CaptureTime += DeltaTime;
 	CaptureRows.Add(FString::Printf(TEXT("%.3f,%.1f,%.2f,%d,%.3f,%.3f,%.3f,%.3f,%d,%d,%.3f,%.3f,%s"), CaptureTime, Telemetry.EngineRpm,
@@ -321,10 +327,9 @@ void UCarAudioComponent::CaptureFrame(const FCarTelemetry& Telemetry, const FCar
 		Telemetry.bEngineRunning ? 1 : 0, Telemetry.bCranking ? 1 : 0, Telemetry.Clutch, Telemetry.LoadN[0], *CaptureLabel));
 }
 
-void UCarAudioComponent::WriteCapture()
+void UCarAudioComponent::WriteWav(const FString& Path, const TArray<int16>& Samples)
 {
-	IFileManager::Get().MakeDirectory(*CaptureDirectory, true);
-	const int32 DataBytes = CapturedSamples.Num() * sizeof(int16);
+	const int32 DataBytes = Samples.Num() * sizeof(int16);
 	TArray<uint8> File;
 	auto Append = [&File](const void* Data, int32 Size) { File.Append(static_cast<const uint8*>(Data), Size); };
 	const uint32 RiffSize = 36 + DataBytes, FormatSize = 16, SampleRate = CaptureSampleRate, ByteRate = CaptureSampleRate * 4;
@@ -332,8 +337,17 @@ void UCarAudioComponent::WriteCapture()
 	const uint32 DataSize = DataBytes;
 	Append("RIFF", 4); Append(&RiffSize, 4); Append("WAVEfmt ", 8); Append(&FormatSize, 4); Append(&PcmFormat, 2); Append(&Channels, 2);
 	Append(&SampleRate, 4); Append(&ByteRate, 4); Append(&BlockAlign, 2); Append(&Bits, 2); Append("data", 4); Append(&DataSize, 4);
-	Append(CapturedSamples.GetData(), DataBytes);
-	FFileHelper::SaveArrayToFile(File, *FPaths::Combine(CaptureDirectory, TEXT("car.wav")));
+	Append(Samples.GetData(), DataBytes);
+	FFileHelper::SaveArrayToFile(File, *Path);
+}
+
+void UCarAudioComponent::WriteCapture()
+{
+	IFileManager::Get().MakeDirectory(*CaptureDirectory, true);
+	for (const FCaptureStem& Stem : CaptureStems)
+	{
+		WriteWav(FPaths::Combine(CaptureDirectory, Stem.Name + TEXT(".wav")), Stem.Samples);
+	}
 
 	FString Csv = TEXT("time,rpm,speed_kmh,gear,throttle,load,boost,squeal,running,cranking,clutch,load_fl,label\n");
 	Csv += FString::Join(CaptureRows, TEXT("\n"));
@@ -345,7 +359,7 @@ void UCarAudioComponent::WriteCapture()
 
 void UCarAudioComponent::UpdateAmbience(const FWeatherNow& Weather, float SpeedMps, float DeltaTime)
 {
-	const float Precipitation = SmoothedPrecipitation;
+	const float Precipitation = SmoothedPrecipitation * (1.f - Weather.SnowFraction); // snow falls silently
 	const float Heavy = SmoothRamp(Precipitation, 2.5f, 12.f);
 	const float Light = SmoothRamp(Precipitation, 0.05f, 1.2f) * (1.f - Heavy);
 	const float Day = SmoothRamp(Weather.SunAltitudeDegrees, -3.f, 8.f);
@@ -393,7 +407,7 @@ void UCarAudioComponent::TriggerThunder(float DistanceMeters)
 	const bool bClose = DistanceMeters < 2500.f;
 	const bool bMid = DistanceMeters < 7000.f;
 	const TCHAR* Kind = bClose ? TEXT("close") : bMid ? TEXT("mid") : TEXT("far");
-	const TCHAR* Variants = bMid && !bClose ? TEXT("abcd") : TEXT("ab");
+	const TCHAR* Variants = bMid && !bClose ? TEXT("bcd") : TEXT("ab"); // thunder_mid_a is a flat noise bed, not used
 	const int32 VariantCount = FCString::Strlen(Variants);
 	FPendingThunder Thunder;
 	Thunder.AssetName = FString::Printf(TEXT("thunder_%s_%c"), Kind, Variants[Random.RandRange(0, VariantCount - 1)]);
@@ -404,9 +418,19 @@ void UCarAudioComponent::TriggerThunder(float DistanceMeters)
 	PendingThunder.Add(Thunder);
 }
 
+void UCarAudioComponent::HandleLightning(const FVector& WorldLocation, float Strength)
+{
+	const float Distance = FVector::Dist(WorldLocation, GetOwner()->GetActorLocation()) / 100.f;
+	TriggerThunder(Distance);
+	if (!PendingThunder.IsEmpty())
+	{
+		PendingThunder.Last().Volume = FMath::Clamp(PendingThunder.Last().Volume * FMath::Clamp(Strength, 0.3f, 1.5f), 0.1f, 1.f);
+	}
+}
+
 void UCarAudioComponent::UpdateThunder(const FWeatherNow& Weather, float DeltaTime)
 {
-	if (Weather.ThunderActivity > 0.01f)
+	if (Weather.ThunderActivity > 0.01f && !bLightningFromWeather)
 	{
 		NextThunderSeconds -= DeltaTime;
 		if (NextThunderSeconds <= 0.f)
@@ -457,7 +481,7 @@ void UCarAudioComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	ACarPawn* Car = GetCar();
-	if (!Car || DeltaTime <= 0.f || (!bAudioAvailable && !CaptureDsp))
+	if (!Car || DeltaTime <= 0.f || (!bAudioAvailable && CaptureStems.IsEmpty()))
 	{
 		return;
 	}
@@ -482,7 +506,6 @@ void UCarAudioComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	SmoothedPrecipitation += (CachedWeather.PrecipitationMmPerHour - SmoothedPrecipitation) * (1.f - FMath::Exp(-DeltaTime / 2.f));
 
 	UpdateSurface(DeltaTime);
-	UpdateWetness(CachedWeather, DeltaTime);
 	const FCarTelemetry Telemetry = Car->GetTelemetry();
 	FeedCarSound(Telemetry, BuildEnvironment(CachedWeather), DeltaTime);
 	if (bAudioAvailable)

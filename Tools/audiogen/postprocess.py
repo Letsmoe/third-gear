@@ -50,13 +50,13 @@ def crossfade_loop(body, fade_samples):
     return looped
 
 
-def make_loop(raw_path, out_path):
+def make_loop(raw_path, out_path, highpass_hz=40.0):
     """Writes a seamless loop and returns the level step across the loop point in dB."""
     samples = decode(raw_path)
     body = samples[int(TRIM_HEAD_SECONDS * SAMPLE_RATE):len(samples) - int(TRIM_TAIL_SECONDS * SAMPLE_RATE)]
     fade_samples = int(CROSSFADE_SECONDS * SAMPLE_RATE)
     # Filter before folding: filtering the finished loop would start the filters from rest at the seam.
-    body = highpass_lowpass(body, 40.0, 16000.0)
+    body = highpass_lowpass(body, highpass_hz, 16000.0)
     body = match_head_to_tail(body, min(len(body) // 4, 8 * SAMPLE_RATE))
     looped = crossfade_loop(body, fade_samples)
     looped *= 10.0 ** ((LOOP_TARGET_RMS_DB - rms_db(looped)) / 20.0)
@@ -95,7 +95,9 @@ def main():
             print(f"{sound['id']}: no raw take, skipped")
             continue
         if sound["kind"] == "loop":
-            step_db = make_loop(candidates[-1], os.path.join(audio_root, "loops", sound["id"] + ".wav"))
+            # Birdsong has nothing below 1 kHz; the model's low bed there is only rumble.
+            highpass_hz = 600.0 if sound["id"].startswith("birds") else 40.0
+            step_db = make_loop(candidates[-1], os.path.join(audio_root, "loops", sound["id"] + ".wav"), highpass_hz)
             print(f"{sound['id']}: loop, level step across the loop point {step_db:+.2f} dB")
         else:
             seconds = make_oneshot(candidates[-1], os.path.join(audio_root, "oneshots", sound["id"] + ".wav"))
