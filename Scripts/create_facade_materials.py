@@ -111,7 +111,7 @@ FACADES = {
     # Kit materials by typology class (typology.md).
     "Facade_ClinkerDeepRed": dict(set="ms:brick_facade_efa35b96", tile=(2, 2), value=0.58, hue=-0.012, saturation=1.1,
                                   parallax=0.012, tint=(0.8, 1.15)),
-    "Facade_ClinkerYellowBrown": dict(set="ms:brick_facade_56f913a0", tile=(2, 2), hue=0.058, saturation=1.05, value=0.82,
+    "Facade_ClinkerYellowBrown": dict(set="ms:brick_facade_56f913a0", tile=(2, 2), hue=0.05, saturation=0.72, value=0.8,
                                       parallax=0.006, tint=(0.8, 1.15)),
     "Facade_BrickGruenderzeit": dict(set="ms:brick_wall_5d318a8f", tile=(4, 2), value=1.0, saturation=1.1, parallax=0.012,
                                      tint=(0.75, 1.15)),
