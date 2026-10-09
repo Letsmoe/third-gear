@@ -105,6 +105,8 @@ private:
 	TWeakObjectPtr<UExponentialHeightFogComponent> Fog;
 	TWeakObjectPtr<APostProcessVolume> PostProcess;
 	TWeakObjectPtr<ARainEffect> Rain;
+	/** Falling autumn leaves: the rain's streak mesh with M_FallingLeaves. */
+	TWeakObjectPtr<ARainEffect> Leaves;
 	TWeakObjectPtr<ADirectionalLight> FlashLight;
 	double SecondsSinceStrike = 1000.0;
 	float StrikeStrength = 0.f;

@@ -25,8 +25,8 @@ public:
 
 	virtual void Tick(float DeltaSeconds) override;
 
-	/** Builds the streak mesh with the given material; call once after spawning. */
-	void Initialise(UMaterialInterface* Material);
+	/** Builds the streak mesh with the given material and number of streaks; call once after spawning. */
+	void Initialise(UMaterialInterface* Material, int32 StreakCount = 12000);
 
 private:
 	UPROPERTY()

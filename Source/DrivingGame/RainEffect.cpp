@@ -10,8 +10,6 @@
 
 namespace RainEffectDetail
 {
-	/** Streaks in the mesh; the material shows a share of them that grows with the rain rate. */
-	constexpr int32 StreakCount = 12000;
 	/** The rain box around the viewer, cm; must match BoxSize in Scripts/create_rain_material.py. */
 	constexpr float BoxHorizontalCm = 2400.f;
 	constexpr float BoxVerticalCm = 1200.f;
@@ -65,14 +63,14 @@ ARainEffect::ARainEffect()
 	Streaks->SetCanEverAffectNavigation(false);
 }
 
-void ARainEffect::Initialise(UMaterialInterface* Material)
+void ARainEffect::Initialise(UMaterialInterface* Material, int32 StreakCount)
 {
 	using namespace UE::Geometry;
 	FDynamicMesh3 Mesh;
 	Mesh.EnableAttributes();
 	Mesh.Attributes()->SetNumUVLayers(3);
 	FRandomStream Random(1712);
-	for (int32 Index = 0; Index < RainEffectDetail::StreakCount; ++Index)
+	for (int32 Index = 0; Index < StreakCount; ++Index)
 	{
 		const FVector3f Start(Random.FRand() - 0.5f, Random.FRand() - 0.5f, Random.FRand() - 0.5f);
 		RainEffectDetail::AddStreak(Mesh, Start, Random.FRand());
