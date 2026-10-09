@@ -13,6 +13,8 @@ case $MAP in /*) MAP_PATH=$MAP ;; *) MAP_PATH=/Game/Maps/$MAP ;; esac
 OUT="$ROOT/Saved/Screenshots"
 mkdir -p "$OUT"
 MARKER=$(mktemp)
+# Desktop render: skip the OpenXR runtime (see run_desktop.sh)
+export XR_RUNTIME_JSON=/nonexistent/openxr_runtime.json
 
 timeout 900 "$UE/Engine/Binaries/Linux/UnrealEditor" "$ROOT/DrivingGame.uproject" "$MAP_PATH" -game -RenderOffscreen \
 	-nosound -unattended -log=screenshot.log -Shots="$SHOTS" -ShotDelay=20 ${EXTRA:-} \
