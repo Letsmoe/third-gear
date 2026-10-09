@@ -6,6 +6,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "WorldFurniture.h"
+#include "WorldSnow.h"
 #include "WorldTileData.h"
 
 using namespace UE::Geometry;
@@ -580,8 +581,10 @@ void AddMarkingStrip(const FWorldTileData& Tile, const FWorldMarking& Marking, c
 		const FVector2f Left = Point + Side;
 		const FVector2f Right = Point - Side;
 		const float U = Marking.Phase + Distance;
-		const int32 LeftVertex = Builder.AddVertex(ToCm(Left.X, Left.Y, Tile.Grid.RoadAt(Left.X, Left.Y) + MarkingLift), FVector2f(U, 0.f));
-		const int32 RightVertex = Builder.AddVertex(ToCm(Right.X, Right.Y, Tile.Grid.RoadAt(Right.X, Right.Y) + MarkingLift), FVector2f(U, 1.f));
+		// The line direction rides in the red and green vertex colour (0.5 = 0) for the paint wear's tyre tracks.
+		const FColor DirectionColor(FMath::RoundToInt((Direction.X * 0.5f + 0.5f) * 255.f), FMath::RoundToInt((Direction.Y * 0.5f + 0.5f) * 255.f), 0);
+		const int32 LeftVertex = Builder.AddVertex(ToCm(Left.X, Left.Y, Tile.Grid.RoadAt(Left.X, Left.Y) + MarkingLift), FVector2f(U, 0.f), DirectionColor);
+		const int32 RightVertex = Builder.AddVertex(ToCm(Right.X, Right.Y, Tile.Grid.RoadAt(Right.X, Right.Y) + MarkingLift), FVector2f(U, 1.f), DirectionColor);
 		if (PreviousLeft != INDEX_NONE)
 		{
 			Builder.AddQuad(PreviousLeft, LeftVertex, RightVertex, PreviousRight, Material, Up);
@@ -805,7 +808,7 @@ void BuildPlants(const FWorldTileData& Tile, EWorldTileDetail Detail, const FWor
 /** tg.Furniture 0 leaves lamps, signal poles and signs out, to measure what they cost. */
 static TAutoConsoleVariable<int32> CVarFurniture(TEXT("tg.Furniture"), 1, TEXT("1 builds street furniture (lamps, signals, signs), 0 leaves it out."));
 
-FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDetail Detail, const FWorldMeshingContext& Context)
+FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDetail Detail, const FWorldMeshingContext& Context, bool bBuildSnow)
 {
 	FWorldTileMeshes Meshes;
 	Meshes.Detail = Detail;
@@ -828,6 +831,11 @@ FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDeta
 	{
 		Meshes.Furniture = MakeShared<FWorldFurnitureInstances>();
 		BuildWorldFurniture(Tile, *Meshes.Furniture);
+	}
+	if (bBuildSnow && Detail == EWorldTileDetail::Near && !FParse::Param(FCommandLine::Get(), TEXT("NoSnowMesh")))
+	{
+		Meshes.Snow = MakeShared<FWorldSnowMeshes>();
+		BuildWorldSnow(Tile, Meshes, *Meshes.Snow);
 	}
 	const int32 PerSide = Settings.ChunksPerSide;
 	const FVector2f ChunkSize = Tile.Size * MetresToCm / float(PerSide);

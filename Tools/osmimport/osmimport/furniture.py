@@ -31,6 +31,13 @@ from . import roads
 JUNCTION_MERGE_DISTANCE = 30.0
 APPROACH_SEARCH_DISTANCE = 90.0
 STOP_LINE_MIN_SETBACK = 5.0
+# Two stop lines on one carriageway closer than this along the travel direction are one signal group (OSM maps
+# a signal per carriageway, per direction or per pole, often a few metres apart, plus the arm's own stop line).
+SAME_GROUP_ALONG = 25.0
+SAME_GROUP_ACROSS = 4.0
+# Closer than this, stop lines on one carriageway are one group even when the way is split or the junctions differ.
+SAME_GROUP_ANY_WAY_ALONG = 12.0
+SAME_GROUP_DOT = 0.9
 POLE_SETBACK = 0.75
 KERB_CLEARANCE = 0.55
 LAMP_SPACING = 36.0
@@ -183,6 +190,7 @@ class FurnitureBuilder:
         self.junctions = []
         self.signs = []
         self.lamps = []
+        self.zebras = []  # zebra crossings on a road: dict with x, y, direction (unit, along the road), width
         self.heads = []   # poles carrying signal heads: dict with approach, x, y, yaw, height, side
         self._road_tree = STRtree([self.graph.lines[w.id] for w in ways])
         self._road_ways = ways
@@ -340,6 +348,7 @@ class FurnitureBuilder:
         for node in junction_signals:
             clusters.setdefault(find(node), [])
 
+        pending = []
         for cluster_key, approaches in sorted(clusters.items(), key=lambda item: str(item[0])):
             junction = Junction(id=len(self.junctions), x=0.0, y=0.0)
             crossing = isinstance(cluster_key, tuple)
@@ -372,12 +381,60 @@ class FurnitureBuilder:
                 identity = (approach.way.id, approach.travel)
                 unique.setdefault(identity, approach)
             junction.approaches = list(unique.values())
+            pending.append(junction)
+
+        self._merge_stacked_approaches(pending)
+        for junction in pending:
             if len(junction.approaches) < 1:
                 continue
             junction.id = len(self.junctions)
             self._assign_phases(junction)
             self.junctions.append(junction)
         return self.junctions
+
+    @staticmethod
+    def _follows_on_carriageway(first, second, max_along=SAME_GROUP_ALONG):
+        """True when the second stop line lies ahead of the first on the same carriageway, within max_along."""
+        dot = first.direction[0] * second.direction[0] + first.direction[1] * second.direction[1]
+        if dot < SAME_GROUP_DOT:
+            return False
+        offset_x = second.stop_xy[0] - first.stop_xy[0]
+        offset_y = second.stop_xy[1] - first.stop_xy[1]
+        along = offset_x * first.direction[0] + offset_y * first.direction[1]
+        across = offset_x * first.direction[1] - offset_y * first.direction[0]
+        return 0.0 <= along <= max_along and abs(across) <= SAME_GROUP_ACROSS
+
+    @staticmethod
+    def _preferred_stop_line(first, second):
+        """Which of two stacked approaches to keep: the one OSM maps explicitly, else the one nearer the junction."""
+        if first.explicit != second.explicit:
+            return first if first.explicit else second
+        return second
+
+    def _merge_stacked_approaches(self, junctions):
+        """Keeps one signal and stop line where several follow each other on one carriageway.
+
+        Within SAME_GROUP_ALONG the approaches must share a way or a junction; on different ways of different
+        junctions only SAME_GROUP_ANY_WAY_ALONG counts, so junctions that merely lie close together keep their signals."""
+        owners = [(junction, approach) for junction in junctions for approach in junction.approaches]
+        dropped = set()
+        for i, (junction_a, a) in enumerate(owners):
+            for junction_b, b in owners[i + 1:]:
+                if id(a) in dropped or id(b) in dropped:
+                    continue
+                max_along = SAME_GROUP_ALONG
+                if a.way.id != b.way.id and junction_a is not junction_b:
+                    max_along = SAME_GROUP_ANY_WAY_ALONG
+                if self._follows_on_carriageway(a, b, max_along):
+                    first, second = a, b
+                elif self._follows_on_carriageway(b, a, max_along):
+                    first, second = b, a
+                else:
+                    continue
+                keep = self._preferred_stop_line(first, second)
+                dropped.add(id(second if keep is first else first))
+        for junction in junctions:
+            junction.approaches = [a for a in junction.approaches if id(a) not in dropped]
 
     def signal_timing(self, junction):
         """Phase list [{green, amber, clearance}] in seconds. A junction with a single vehicle phase gets a phase without approaches."""
@@ -503,9 +560,28 @@ class FurnitureBuilder:
             elif tags.get("highway") == "crossing" and tags.get("crossing") in {"zebra", "marked"} \
                     or tags.get("crossing_ref") == "zebra":
                 names = ["Zeichen_350"]
+                self._add_zebra(point)
             if not names:
                 continue
             self._place_point_sign(point, names)
+
+    def _add_zebra(self, point):
+        """Records a zebra crossing's centre, the road direction there and the carriageway width, for the stripes.
+        Nodes on a road junction are skipped; there is no single crossing direction."""
+        entries = self.graph.at_node.get(point.id)
+        if entries:
+            if self.graph.is_junction(point.id):
+                return
+            way, index = entries[0]
+            s = self.graph.node_s(way, index)
+        else:
+            found = self.nearest_way(point.x, point.y, max_distance=6.0)
+            if found is None:
+                return
+            way, s, _ = found
+        position, direction = self.graph.point_and_direction(way, s, +1)
+        self.zebras.append({"x": float(position[0]), "y": float(position[1]), "direction": (float(direction[0]), float(direction[1])),
+                            "width": float(self.graph.widths[way.id])})
 
     def _names_from_tags(self, tags):
         """Graphic names for traffic_sign=DE:250,1020-30[...] values we can show."""

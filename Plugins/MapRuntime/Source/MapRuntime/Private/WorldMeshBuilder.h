@@ -29,6 +29,8 @@ public:
 	int32 NumTriangles() const { return Triangles.Num(); }
 	bool IsEmpty() const { return Triangles.IsEmpty(); }
 	const FVector3f& GetPosition(int32 Vertex) const { return Positions[Vertex]; }
+	const FIntVector3& GetTriangle(int32 Triangle) const { return Triangles[Triangle]; }
+	int32 GetTriangleMaterial(int32 Triangle) const { return TriangleMaterials[Triangle]; }
 
 	/**
 	 * Builds the dynamic mesh: smooth per-vertex normals from the triangles around each vertex, tangents from the

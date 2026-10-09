@@ -4,6 +4,7 @@
 # Usage: Scripts/profile_gpu.sh <label> ["console cmd, console cmd"] [extra args...]
 #   MAP=<map name> (default ProvingGround; Streamed needs -Region=bergedorf_core as an extra argument)
 #   WARMUP=<seconds> (default 25), RES=<WxH> (default 5056x2704 = Quest 3 via Steam Link, both eyes)
+#   DEPTH and MIN_MS limit the printed pass tree (default 10 and 0.3 ms).
 # Run with the VR game closed, otherwise both compete for the GPU.
 set -euo pipefail
 # One Unreal run at a time across worktrees (see lock.sh).
@@ -22,6 +23,6 @@ timeout 300 "$UE/Engine/Binaries/Linux/UnrealEditor" "$ROOT/DrivingGame.uproject
 	-RenderOffscreen -emulatestereo -nosound -unattended -log="gpu_$LABEL.log" -ProfileGPUAfter="$WARMUP" \
 	-ExecCmds="r.SetRes ${RES}w, r.ProfileGPU.ShowUI 0${CMDS:+, $CMDS}" "$@" >/dev/null 2>&1 || true
 
-# ProfileGPU prints an indented tree; keep the frame total and the passes up to two levels deep.
-grep -E 'LogRHI: +([0-9.]+%|.*Total GPU Time|.*GPU Profile for)' "$LOG" | sed -E 's/^\[[^]]*\]\[[^]]*\]LogRHI: //' \
-	| awk -v label="$LABEL" 'BEGIN{print "== " label " =="} /^ {0,6}[0-9]/ || /Total|Profile/ {print}' | head -60
+# Summarise the ProfileGPU table: frame time, then passes down to the scene's main stages that take at least 0.3 ms.
+echo "== $LABEL =="
+python3 -I "$ROOT/Scripts/parse_profilegpu.py" "$LOG" "${DEPTH:-10}" "${MIN_MS:-0.3}" | head -60

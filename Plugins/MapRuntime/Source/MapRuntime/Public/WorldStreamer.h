@@ -95,6 +95,8 @@ private:
 		int32 FailedDetail = INDEX_NONE;
 		/** Low-detail surroundings (horizon/horizon.json): always shown at far detail, never unloaded. */
 		bool bHorizon = false;
+		/** The shown actor has a snow layer; tiles meshed while there was no snow don't, and get one when it starts. */
+		bool bHasSnowMesh = false;
 		TWeakObjectPtr<AWorldTileActor> Actor;
 	};
 
@@ -157,6 +159,9 @@ private:
 	void UpdateGrass(const FVector& Location);
 
 	TArray<FTileState> Tiles;
+
+	/** Snow cover is above zero, so near tiles are meshed with their snow layer. */
+	bool bSnowWanted = false;
 	FString WorldDir;
 	TSharedPtr<class FJsonObject> Start;
 	TSharedPtr<FWorldStreamerShared> Shared;

@@ -2,14 +2,14 @@
 
   UnrealEditor-Cmd DrivingGame.uproject -run=pythonscript -script=Scripts/import_grass_models.py -unattended -nosplash
 
-The glTF files are in <data root>/raw_assets/polyhaven (see Data/raw_assets.md); each holds several tufts of different
+The glTF files are in <data root>/raw_assets/polyhaven (see Data/raw_assets.md); each holds several tufts or plants of different
 shape as separate meshes.
 """
 import os
 
 import unreal
 
-SOURCES = ["grass_medium_01", "grass_medium_02"]
+SOURCES = ["grass_medium_01", "grass_medium_02", "dandelion_01", "celandine_01", "weed_plant_02"]
 DESTINATION = "/Game/Grass/Imported"
 
 

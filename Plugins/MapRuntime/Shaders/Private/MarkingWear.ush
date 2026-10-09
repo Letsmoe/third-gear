@@ -1,0 +1,36 @@
+#pragma once
+// Worn road paint, shared by every marking material (create_materials.py add_marking_wear): zebra bars, lane lines,
+// edge lines and stop lines all go through this one function. Needs TerrainNoise.ush (DgValueNoise).
+
+/**
+ * Wear masks of road paint at one pixel.
+ * WorldCm   world position in cm. LineUV  the marking's UV, x = metres along the line, y = 0..1 across it.
+ * Returns x = dirt, y = chipped away (asphalt shows), z = tyre polish. NormalTilt gets a small bump gradient.
+ * LineDirection is the line's direction in the vertex colour's red and green (0.5 = 0), written by the mesher.
+ * Tyre tracks are bands about 0.4 m wide, 1.6 m apart, repeating every 3.2 m across the line, so they run along lane
+ * lines and zebra bars (a stop line only gets the band that happens to cross it).
+ */
+float3 DgMarkingWearMasks(float2 WorldCm, float2 LineUV, float2 LineDirection, out float2 NormalTilt)
+{
+	float2 metres = WorldCm * 0.01;
+	float2 axis = normalize(LineDirection * 2.0 - 1.0 + float2(1e-4, 0));
+	float lateral = dot(metres, float2(-axis.y, axis.x));
+	float band = abs(frac(lateral / 3.2) - 0.5) * 3.2;  // distance from the lane centre in metres
+	float track = 1.0 - smoothstep(0.15, 0.35, abs(band - 0.8));
+	track *= 0.5 + 0.5 * DgValueNoise(metres * 1.3);
+
+	float patch = DgValueNoise(metres * 0.7) * 0.6 + DgValueNoise(metres * 2.3) * 0.4;
+	float fine = DgValueNoise(metres * 17.0) * 0.55 + DgValueNoise(metres * 43.0) * 0.45;
+	float edge = saturate(abs(LineUV.y * 2.0 - 1.0));
+	edge = smoothstep(0.55, 1.0, edge + (fine - 0.5) * 0.5);  // ragged edge
+
+	float dirt = saturate((patch - 0.2) * 1.4) * 0.55 + fine * 0.12;
+	float chipNoise = fine * 0.6 + DgValueNoise(metres * 95.0) * 0.4;
+	float chip = smoothstep(0.72 - edge * 0.22 - track * 0.08, 0.80 - edge * 0.22 - track * 0.08, chipNoise);
+	chip = saturate(chip + edge * 0.35 * smoothstep(0.35, 0.6, fine));
+
+	float2 bumpSample = metres * 60.0;
+	NormalTilt = float2(DgValueNoise(bumpSample + 7.3) - DgValueNoise(bumpSample - 7.3),
+	                    DgValueNoise(bumpSample.yx + 3.1) - DgValueNoise(bumpSample.yx - 3.1)) * (0.5 + chip * 1.5);
+	return float3(dirt, chip, track);
+}

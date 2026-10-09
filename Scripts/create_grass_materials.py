@@ -18,8 +18,13 @@ TEXTURES = "/Game/Grass/Imported/{pack}/{pack}_2k/Textures"
 
 # kind -> (texture pack, tint, fade start cm, fade end cm, mesh height cm that the sway is scaled by)
 KINDS = {
-    "Lawn": ("grass_medium_01", (2.0, 2.3, 1.2), 900.0, 1450.0, 14.0),
+    "Lawn": ("grass_medium_01", (2.0, 2.3, 1.2), 1500.0, 2900.0, 14.0),
+    "LawnDense": ("grass_medium_01", (2.0, 2.3, 1.2), 500.0, 780.0, 10.0),
     "Meadow": ("grass_medium_02", (2.2, 2.4, 1.2), 2400.0, 4400.0, 26.0),
+    "MeadowTall": ("grass_medium_01", (2.2, 2.4, 1.2), 2400.0, 3900.0, 40.0),
+    "Dandelion": ("dandelion_01", (1.0, 1.0, 1.0), 1500.0, 2400.0, 20.0),
+    "Celandine": ("celandine_01", (1.0, 1.0, 1.0), 1500.0, 2400.0, 20.0),
+    "Weeds": ("weed_plant_02", (1.4, 1.5, 1.0), 800.0, 1150.0, 10.0),
 }
 
 WIND_HLSL = """
