@@ -15,6 +15,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "RainEffect.h"
 #include "WeatherSubsystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWeatherVisuals, Log, All);
@@ -58,6 +59,15 @@ namespace WeatherVisualsDetail
 	 * atmosphere that lights a real sky, so the clear sky came out about two stops darker than sunlit asphalt.
 	 */
 	constexpr float ClearSkyGain = 1.8f;
+
+	const TCHAR* RainMaterialPath = TEXT("/Game/World/Materials/M_RainStreaks.M_RainStreaks");
+
+	/** At full thunder activity a strike every eight seconds on average; strikes land 1 to 10 km away. */
+	constexpr float StrikesPerSecondAtFullActivity = 0.12f;
+	constexpr float NearestStrikeMeters = 1000.f;
+	constexpr float FarthestStrikeMeters = 10000.f;
+	/** Illuminance of a close flash on the ground, lux: about as bright as an overcast day for an instant. */
+	constexpr float FlashLux = 15000.f;
 
 	const TCHAR* ParameterCollectionPath = TEXT("/Game/World/MPC_Weather.MPC_Weather");
 
@@ -136,9 +146,86 @@ void UWeatherVisualsSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	{
 		UE_LOG(LogWeatherVisuals, Warning, TEXT("%s missing; run Scripts/create_weather_parameters.py"), WeatherVisualsDetail::ParameterCollectionPath);
 	}
+	SpawnEffects();
 	UE_LOG(LogWeatherVisuals, Log, TEXT("Weather visuals: sun %s, atmosphere %s, fog %s, post process %s, %d overrides"),
 		Sun.IsValid() ? TEXT("yes") : TEXT("no"), Atmosphere.IsValid() ? TEXT("yes") : TEXT("no"),
 		Fog.IsValid() ? TEXT("yes") : TEXT("no"), PostProcess.IsValid() ? TEXT("yes") : TEXT("no"), Overrides.Num());
+}
+
+void UWeatherVisualsSubsystem::SpawnEffects()
+{
+	UWorld* World = GetWorld();
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.ObjectFlags |= RF_Transient;
+	if (UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, WeatherVisualsDetail::RainMaterialPath, nullptr, LOAD_NoWarn))
+	{
+		ARainEffect* Effect = World->SpawnActor<ARainEffect>(SpawnParameters);
+		Effect->Initialise(Material);
+		Effect->SetActorHiddenInGame(true);
+		Rain = Effect;
+	}
+	else
+	{
+		UE_LOG(LogWeatherVisuals, Warning, TEXT("%s missing; run Scripts/create_rain_material.py"), WeatherVisualsDetail::RainMaterialPath);
+	}
+	ADirectionalLight* Flash = World->SpawnActor<ADirectionalLight>(SpawnParameters);
+	UDirectionalLightComponent* Component = Cast<UDirectionalLightComponent>(Flash->GetLightComponent());
+	Component->SetMobility(EComponentMobility::Movable);
+	Component->SetIntensity(0.f);
+	Component->SetCastShadows(false);
+	Component->SetAtmosphereSunLight(false);
+	Component->SetLightColor(FLinearColor(0.85f, 0.9f, 1.f));
+	FlashLight = Flash;
+}
+
+float UWeatherVisualsSubsystem::FlashLevel() const
+{
+	// Return strokes of one flash: a bright first stroke, then one or two weaker ones.
+	const float Time = float(SecondsSinceStrike);
+	const float Pulses[3][2] = {{0.f, 1.f}, {0.09f, 0.6f}, {0.21f, 0.8f}};
+	float Level = 0.f;
+	for (const auto& Pulse : Pulses)
+	{
+		const float Age = Time - Pulse[0];
+		if (Age >= 0.f)
+		{
+			Level = FMath::Max(Level, Pulse[1] * FMath::Exp(-Age / 0.035f));
+		}
+	}
+	return Level * StrikeStrength;
+}
+
+void UWeatherVisualsSubsystem::UpdateLightning(float DeltaTime)
+{
+	SecondsSinceStrike += DeltaTime;
+	const float Rate = Current.ThunderActivity * WeatherVisualsDetail::StrikesPerSecondAtFullActivity;
+	if (Rate > 0.f && LightningRandom.FRand() < Rate * DeltaTime)
+	{
+		FVector Viewer;
+		const UWeatherSubsystem* Weather = GetWorld()->GetSubsystem<UWeatherSubsystem>();
+		if (Weather && Weather->FindViewerLocation(Viewer))
+		{
+			// Closer strikes as the storm gets more active; strength falls with distance.
+			const float Closeness = LightningRandom.FRand() * Current.ThunderActivity;
+			const float DistanceMeters = FMath::Lerp(WeatherVisualsDetail::FarthestStrikeMeters, WeatherVisualsDetail::NearestStrikeMeters, Closeness);
+			const float Bearing = LightningRandom.FRandRange(0.f, 2.f * PI);
+			const FVector Strike = Viewer + FVector(FMath::Cos(Bearing), FMath::Sin(Bearing), 0.f) * DistanceMeters * 100.f;
+			StrikeStrength = FMath::Clamp(WeatherVisualsDetail::NearestStrikeMeters * 2.f / DistanceMeters, 0.15f, 1.f);
+			SecondsSinceStrike = 0.0;
+			if (ADirectionalLight* Flash = FlashLight.Get())
+			{
+				// Light from the strike's direction, from above the cloud base.
+				const FVector FromStrike = (Viewer - Strike).GetSafeNormal2D() + FVector(0.f, 0.f, -0.6f);
+				Flash->SetActorRotation(FromStrike.Rotation());
+			}
+			UE_LOG(LogWeatherVisuals, Log, TEXT("Lightning %.0f m away, strength %.2f"), DistanceMeters, StrikeStrength);
+			OnLightning.Broadcast(Strike, StrikeStrength);
+		}
+	}
+	if (ADirectionalLight* Flash = FlashLight.Get())
+	{
+		Cast<UDirectionalLightComponent>(Flash->GetLightComponent())->SetIntensity(WeatherVisualsDetail::FlashLux * FlashLevel());
+	}
 }
 
 void UWeatherVisualsSubsystem::FindLevelActors()
@@ -187,6 +274,7 @@ void UWeatherVisualsSubsystem::Tick(float DeltaTime)
 		return;
 	}
 	Smooth(DeltaTime);
+	UpdateLightning(DeltaTime);
 	ApplySun();
 	ApplySky();
 	ApplyFog();
@@ -264,11 +352,11 @@ void UWeatherVisualsSubsystem::Smooth(float DeltaTime)
 	Current.ThunderActivity = FMath::Lerp(Current.ThunderActivity, Target.ThunderActivity, Alpha);
 	Current.TemperatureCelsius = FMath::Lerp(Current.TemperatureCelsius, Target.TemperatureCelsius, Alpha);
 
-	const float Rain = Current.RainMillimetresPerHour * (1.f - Current.SnowFraction);
+	const float RainRate = Current.RainMillimetresPerHour * (1.f - Current.SnowFraction);
 	const float Snow = Current.RainMillimetresPerHour * Current.SnowFraction;
-	if (Rain > 0.05f)
+	if (RainRate > 0.05f)
 	{
-		Wetness += DeltaTime * Rain / WeatherVisualsDetail::SoakSecondsPerMillimetreHour;
+		Wetness += DeltaTime * RainRate / WeatherVisualsDetail::SoakSecondsPerMillimetreHour;
 	}
 	else
 	{
@@ -282,7 +370,7 @@ void UWeatherVisualsSubsystem::Smooth(float DeltaTime)
 	}
 	else if (Current.TemperatureCelsius > 1.f)
 	{
-		SnowCover -= DeltaTime * (Current.TemperatureCelsius + Rain) / WeatherVisualsDetail::MeltSeconds;
+		SnowCover -= DeltaTime * (Current.TemperatureCelsius + RainRate) / WeatherVisualsDetail::MeltSeconds;
 	}
 	SnowCover = FMath::Clamp(SnowCover, 0.f, 1.f);
 }
@@ -336,7 +424,9 @@ void UWeatherVisualsSubsystem::ApplySky()
 	// cloud absorbs and reflects back up (an overcast day has about 40 % of a clear day's light).
 	const float DeckTransmission = FMath::Lerp(1.f, WeatherVisualsDetail::OvercastSunTransmission, Overcast);
 	const float SkyGain = WeatherVisualsDetail::ClearSkyGain * FMath::Lerp(1.f, WeatherVisualsDetail::OvercastDiffuseShare / DeckTransmission, Overcast);
-	Component->SetSkyLuminanceFactor(FLinearColor(SkyGain, SkyGain, SkyGain));
+	// A flash lights the cloud deck from inside.
+	const float Flash = 1.f + 40.f * FlashLevel();
+	Component->SetSkyLuminanceFactor(FLinearColor(SkyGain, SkyGain, SkyGain) * Flash);
 }
 
 void UWeatherVisualsSubsystem::ApplyFog()
@@ -379,6 +469,11 @@ void UWeatherVisualsSubsystem::ApplyExposure()
 
 void UWeatherVisualsSubsystem::ApplyMaterialParameters()
 {
+	if (ARainEffect* Effect = Rain.Get())
+	{
+		// Translucent streaks cost fill rate, so the mesh is hidden whenever it isn't raining.
+		Effect->SetActorHiddenInGame(Current.RainMillimetresPerHour * (1.f - Current.SnowFraction) < 0.05f);
+	}
 	if (!Parameters)
 	{
 		return;

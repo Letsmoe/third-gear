@@ -26,6 +26,8 @@ public class DrivingGame : ModuleRules
 			"ChaosVehiclesCore",
 			"MapRuntime",
 			"Isobar",
+			"GeometryCore",
+			"GeometryFramework",
 		});
 	}
 }
