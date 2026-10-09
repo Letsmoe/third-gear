@@ -1,0 +1,49 @@
+// Seasonal look of deciduous foliage (Custom nodes in the tree wind master, include "/Plugin/MapRuntime/Private/LeafSeason.ush").
+// LeafDensity (1 full summer crown, 0 bare) and LeafColour (0 green, 1 fully turned) come from MPC_Weather.
+#pragma once
+
+// Foliage is divided into cells of this size (world space, before sway): each is kept or dropped as a whole.
+static const float DgLeafCellCm = 26.0;
+
+float DgLeafHash(float3 cell, float seed)
+{
+	return frac(sin(dot(cell + seed, float3(12.9898, 78.233, 37.719))) * 43758.5453);
+}
+
+// Hash of the leaf cell that contains a point of the tree (world space, before sway), 0..1.
+float DgLeafCellHash(float3 treePosition, float instanceRandom)
+{
+	return DgLeafHash(floor(treePosition / DgLeafCellCm), instanceRandom * 91.7);
+}
+
+// Autumn colour of a tree by its random number, standing in for species: lime and birch yellow, maple orange to red,
+// oak ochre brown, plane and chestnut tan to orange.
+float3 DgAutumnPalette(float treeRandom)
+{
+	float3 yellow = float3(0.80, 0.55, 0.06);
+	float3 orange = float3(0.72, 0.24, 0.04);
+	float3 red = float3(0.50, 0.08, 0.04);
+	float3 ochre = float3(0.42, 0.26, 0.07);
+	float3 tan = float3(0.58, 0.36, 0.08);
+	if (treeRandom < 0.28) return yellow;
+	if (treeRandom < 0.45) return orange;
+	if (treeRandom < 0.55) return red;
+	if (treeRandom < 0.75) return ochre;
+	return tan;
+}
+
+// Leaf albedo during the colouring. The texture's own detail is kept as brightness; turning starts at a different
+// moment for each tree and for each patch of it, so a crown goes through green, green and yellow, then colour.
+float3 DgLeafAutumnColour(float3 summerColour, float leafColour, float instanceRandom, float cellHash, float deciduous)
+{
+	float treeRandom = frac(instanceRandom * 13.7);
+	float treeDelay = 0.35 * frac(instanceRandom * 5.1);
+	float progress = saturate((leafColour * 1.35 - treeDelay) + (cellHash - 0.5) * 0.45 * saturate(leafColour * 3.0));
+	progress = saturate(progress * deciduous);
+	float brightness = dot(summerColour, float3(0.3, 0.55, 0.15));
+	float3 turned = DgAutumnPalette(treeRandom) * (0.4 + brightness * 7.0);
+	// Between green and the final colour the leaf passes through a yellow-green.
+	float3 yellowGreen = summerColour * float3(1.5, 1.3, 0.45) + float3(0.03, 0.02, 0.0);
+	float3 halfway = lerp(summerColour, yellowGreen, smoothstep(0.0, 0.35, progress));
+	return lerp(halfway, turned, smoothstep(0.3, 0.8, progress));
+}
