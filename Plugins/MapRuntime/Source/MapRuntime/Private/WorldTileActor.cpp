@@ -1,4 +1,5 @@
 #include "WorldTileActor.h"
+#include "WorldSnow.h"
 
 #include "Components/DynamicMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -310,10 +311,7 @@ void AWorldTileActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-namespace
-{
-/** Snow cover (0 to 1) published by the weather in /Game/World/MPC_Weather; 0 when it isn't there. */
-float ReadSnowCover(UWorld* World)
+float ReadWorldSnowCover(UWorld* World)
 {
 	static TWeakObjectPtr<UMaterialParameterCollection> Collection;
 	if (!Collection.IsValid())
@@ -329,6 +327,8 @@ float ReadSnowCover(UWorld* World)
 	return Cover;
 }
 
+namespace
+{
 /** Cover above which the snow layer is drawn. */
 constexpr float SnowShownAbove = 0.004f;
 /** The snow layer is drawn out to this distance, cm; beyond it the ground material's snow texture shows. */
@@ -346,7 +346,7 @@ void AWorldTileActor::AddSnowChunk(UE::Geometry::FDynamicMesh3&& Mesh, const FBo
 	{
 		return;
 	}
-	bSnowShown = ReadSnowCover(GetWorld()) > SnowShownAbove;
+	bSnowShown = ReadWorldSnowCover(GetWorld()) > SnowShownAbove;
 	Component->SetCullDistance(SnowDrawDistanceCm);
 	Component->SetVisibility(bSnowShown);
 	SnowChunks.Add(Component);
@@ -356,7 +356,7 @@ void AWorldTileActor::AddSnowChunk(UE::Geometry::FDynamicMesh3&& Mesh, const FBo
 void AWorldTileActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	const bool bShown = ReadSnowCover(GetWorld()) > SnowShownAbove;
+	const bool bShown = ReadWorldSnowCover(GetWorld()) > SnowShownAbove;
 	if (bShown == bSnowShown)
 	{
 		return;

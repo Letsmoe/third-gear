@@ -22,6 +22,11 @@ struct FWorldSnowMeshes
 	FVector2f ChunkSizeCm = FVector2f::ZeroVector;
 };
 
+class UWorld;
+
+/** Snow cover (0 to 1) published by the weather in /Game/World/MPC_Weather; 0 when it isn't there. Game thread only. */
+float ReadWorldSnowCover(UWorld* World);
+
 /**
  * Builds the snow layer from the tile's data and its already built ground and building meshes: the ground heights
  * are rasterised into a 1 m grid, the snow surface is that grid plus a class dependent depth, smoothed so kerbs and

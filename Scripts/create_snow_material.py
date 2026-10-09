@@ -25,7 +25,12 @@ eal = unreal.EditorAssetLibrary
 # Vertex shader: from the full-depth surface down to the ground. Depth in metres = R * 255 * 0.005, offset in cm.
 WPO_HLSL = """
 float depth_cm = VertexDepth * 127.5;
-return float3(0, 0, -(1.0 - saturate(Cover)) * depth_cm);
+float lowering_cm = (1.0 - saturate(Cover)) * depth_cm;
+// Towards the draw distance of the layer (180 m, WorldTileActor.cpp) it sinks onto the ground, which has its own snow, so it fades out without a pop.
+float distance_cm = length(WorldPos - CameraPos);
+float sink = smoothstep(13000.0, 17500.0, distance_cm);
+lowering_cm = lerp(lowering_cm, max(depth_cm - 0.5, 0.0), sink);
+return float3(0, 0, -lowering_cm);
 """
 
 # Pixel shader. Heights below are in cm, positions in cm; p is in metres.
@@ -151,9 +156,11 @@ def build():
 
     wpo = expr(m, unreal.MaterialExpressionCustom, -600, -600, code=WPO_HLSL, description="SnowDepth",
                output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3,
-               inputs=[custom_input("VertexDepth"), custom_input("Cover")])
+               inputs=[custom_input("VertexDepth"), custom_input("Cover"), custom_input("WorldPos"), custom_input("CameraPos")])
     link(vertex_color, "R", wpo, "VertexDepth")
     link(cover, "", wpo, "Cover")
+    link(expr(m, unreal.MaterialExpressionWorldPosition, -1200, -800), "", wpo, "WorldPos")
+    link(expr(m, unreal.MaterialExpressionCameraPositionWS, -1200, -900), "", wpo, "CameraPos")
     mel.connect_material_property(wpo, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
 
     pixel = expr(m, unreal.MaterialExpressionCustom, -600, 0, code=SNOW_HLSL, description="SnowSurface",

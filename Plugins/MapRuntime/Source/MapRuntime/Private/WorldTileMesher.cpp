@@ -608,7 +608,7 @@ void BuildPlants(const FWorldTileData& Tile, EWorldTileDetail Detail, const FWor
 /** tg.Furniture 0 leaves lamps, signal poles and signs out, to measure what they cost. */
 static TAutoConsoleVariable<int32> CVarFurniture(TEXT("tg.Furniture"), 1, TEXT("1 builds street furniture (lamps, signals, signs), 0 leaves it out."));
 
-FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDetail Detail, const FWorldMeshingContext& Context)
+FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDetail Detail, const FWorldMeshingContext& Context, bool bBuildSnow)
 {
 	FWorldTileMeshes Meshes;
 	Meshes.Detail = Detail;
@@ -632,7 +632,7 @@ FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDeta
 		Meshes.Furniture = MakeShared<FWorldFurnitureInstances>();
 		BuildWorldFurniture(Tile, *Meshes.Furniture);
 	}
-	if (Detail == EWorldTileDetail::Near && !FParse::Param(FCommandLine::Get(), TEXT("NoSnowMesh")))
+	if (bBuildSnow && Detail == EWorldTileDetail::Near && !FParse::Param(FCommandLine::Get(), TEXT("NoSnowMesh")))
 	{
 		Meshes.Snow = MakeShared<FWorldSnowMeshes>();
 		BuildWorldSnow(Tile, Meshes, *Meshes.Snow);

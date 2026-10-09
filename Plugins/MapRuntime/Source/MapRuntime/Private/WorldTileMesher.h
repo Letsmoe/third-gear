@@ -75,4 +75,4 @@ struct FWorldTileMeshes
  * Builds all meshes and instance transforms of a tile, including the dynamic meshes. Pure function of its inputs;
  * meant for worker threads.
  */
-FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDetail Detail, const FWorldMeshingContext& Context);
+FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDetail Detail, const FWorldMeshingContext& Context, bool bBuildSnow = false);

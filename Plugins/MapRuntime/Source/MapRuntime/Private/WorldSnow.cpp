@@ -1,5 +1,7 @@
 #include "WorldSnow.h"
 
+#include "HAL/PlatformTime.h"
+
 #include "WorldMeshBuilder.h"
 #include "WorldTileData.h"
 #include "WorldTileMesher.h"
@@ -17,6 +19,14 @@ constexpr float SnowWallReach = 7.f;
 /** The least snow on any covered surface, metres. */
 constexpr float SnowMinimumDepth = 0.035f;
 constexpr float SnowMaximumDepth = 1.2f;
+/** How far below the ground the skirt at the edge of the snow reaches, metres. */
+constexpr float SnowSkirtDrop = 0.03f;
+/** Snow depth above the base depth that smoothing may bring in from higher neighbours, metres. */
+constexpr float SnowOverhangAllowance = 0.03f;
+/** The ground is sampled this many times per snow cell along each axis when checking that it stays covered. */
+constexpr int32 SnowFineSteps = 4;
+/** The snow surface keeps at least this far above the ground everywhere between the vertices, metres. */
+constexpr float SnowClearance = 0.03f;
 /** Vertex colour scales. */
 constexpr float SnowDepthPerColorStep = 0.005f;
 constexpr float SnowEdgeDistancePerColorStep = 0.02f;
@@ -428,26 +438,6 @@ float WallDriftDepth(float Distance, const FVector2f& Outward)
 	return (0.35f * Lee + 0.04f) * FMath::Exp(-Distance / 1.5f);
 }
 
-/** The highest ground height among a sample and its eight neighbours that carry ground. */
-float HighestGroundAround(const FSnowSamples& Samples, int32 X, int32 Y)
-{
-	float Highest = FMath::Max(Samples.Ground[Samples.Index(X, Y)], Samples.Terrain[Samples.Index(X, Y)]);
-	for (int32 OffsetY = -1; OffsetY <= 1; ++OffsetY)
-	{
-		for (int32 OffsetX = -1; OffsetX <= 1; ++OffsetX)
-		{
-			const int32 NeighbourX = FMath::Clamp(X + OffsetX, 0, Samples.CountX - 1);
-			const int32 NeighbourY = FMath::Clamp(Y + OffsetY, 0, Samples.CountY - 1);
-			const int32 Neighbour = Samples.Index(NeighbourX, NeighbourY);
-			if (Samples.Class[Neighbour] != ESnowClass::None && Samples.Class[Neighbour] != ESnowClass::Water)
-			{
-				Highest = FMath::Max(Highest, FMath::Max(Samples.Ground[Neighbour], Samples.Terrain[Neighbour]));
-			}
-		}
-	}
-	return Highest;
-}
-
 /** The snow surface and depth: class dependent depth, smoothed so edges round off, plus ridges and drifts. */
 void ComputeSnowSurface(const FWorldTileData& Tile, FSnowSamples& Samples)
 {
@@ -486,9 +476,10 @@ void ComputeSnowSurface(const FWorldTileData& Tile, FSnowSamples& Samples)
 	{
 		for (int32 X = 0; X < Samples.CountX; ++X)
 		{
-			// The ground between two samples can be higher than both (a kerb top); keep the surface above it.
+			// Depth over ground that drops away (blurred in from a higher neighbour) is capped, so the snow never hangs over a drop.
 			const int32 Index = Samples.Index(X, Y);
-			Smoothed[Index] = FMath::Max(Smoothed[Index], HighestGroundAround(Samples, X, Y) + SnowMinimumDepth);
+			const float Limit = Samples.Ground[Index] + SnowBaseDepth(Samples.Class[Index]) * 1.2f + SnowOverhangAllowance;
+			Smoothed[Index] = FMath::Min(Smoothed[Index], Limit);
 		}
 	}
 	for (int32 Index = 0; Index < Total; ++Index)
@@ -505,6 +496,184 @@ void ComputeSnowSurface(const FWorldTileData& Tile, FSnowSamples& Samples)
 		Samples.Surface[Index] = Samples.Ground[Index] + Samples.Depth[Index];
 		const bool bNoSnow = Class == ESnowClass::None || Class == ESnowClass::Water;
 		Samples.bSkip[Index] = bNoSnow || Samples.WallDistance[Index] < -2.5f;
+	}
+}
+
+/** The ground height on a grid SnowFineSteps times finer than the snow cells, kerb tops included. */
+struct FSnowFineGround
+{
+	int32 CountX = 0;
+	int32 CountY = 0;
+	TArray<float> Height;
+};
+
+/** Raises Heights wherever a triangle of the ground covers a fine grid point above it. */
+void RasterizeFineTriangle(const FVector3f& A, const FVector3f& B, const FVector3f& C, FSnowFineGround& Fine)
+{
+	const FVector3f Face = FVector3f::CrossProduct(B - A, C - A);
+	const float FaceLength = Face.Size();
+	if (FaceLength < 1e-3f || FMath::Abs(Face.Z) / FaceLength < 0.2f)
+	{
+		return;
+	}
+	const float Spacing = SnowCellMetres / float(SnowFineSteps);
+	const FVector2f PointA = FVector2f(A.X, A.Y) / SnowMetresToCm;
+	const FVector2f PointB = FVector2f(B.X, B.Y) / SnowMetresToCm;
+	const FVector2f PointC = FVector2f(C.X, C.Y) / SnowMetresToCm;
+	const float Determinant = (PointB.X - PointA.X) * (PointC.Y - PointA.Y) - (PointC.X - PointA.X) * (PointB.Y - PointA.Y);
+	if (FMath::Abs(Determinant) < 1e-9f)
+	{
+		return;
+	}
+	const int32 MinX = FMath::Max(0, FMath::CeilToInt(FMath::Min3(PointA.X, PointB.X, PointC.X) / Spacing));
+	const int32 MaxX = FMath::Min(Fine.CountX - 1, FMath::FloorToInt(FMath::Max3(PointA.X, PointB.X, PointC.X) / Spacing));
+	const int32 MinY = FMath::Max(0, FMath::CeilToInt(FMath::Min3(PointA.Y, PointB.Y, PointC.Y) / Spacing));
+	const int32 MaxY = FMath::Min(Fine.CountY - 1, FMath::FloorToInt(FMath::Max3(PointA.Y, PointB.Y, PointC.Y) / Spacing));
+	for (int32 Y = MinY; Y <= MaxY; ++Y)
+	{
+		for (int32 X = MinX; X <= MaxX; ++X)
+		{
+			const FVector2f Point(X * Spacing, Y * Spacing);
+			const float WeightB = ((Point.X - PointA.X) * (PointC.Y - PointA.Y) - (PointC.X - PointA.X) * (Point.Y - PointA.Y)) / Determinant;
+			const float WeightC = ((PointB.X - PointA.X) * (Point.Y - PointA.Y) - (Point.X - PointA.X) * (PointB.Y - PointA.Y)) / Determinant;
+			const float WeightA = 1.f - WeightB - WeightC;
+			const float Epsilon = -1e-4f;
+			if (WeightA < Epsilon || WeightB < Epsilon || WeightC < Epsilon)
+			{
+				continue;
+			}
+			float& Height = Fine.Height[Y * Fine.CountX + X];
+			Height = FMath::Max(Height, (A.Z * WeightA + B.Z * WeightB + C.Z * WeightC) / SnowMetresToCm);
+		}
+	}
+}
+
+/** Raises the fine grid point nearest to a ground position (cm) to its height. */
+void RaiseFineGroundPoint(const FVector3f& Position, FSnowFineGround& Fine)
+{
+	const float Spacing = SnowCellMetres / float(SnowFineSteps);
+	const int32 X = FMath::RoundToInt(Position.X / SnowMetresToCm / Spacing);
+	const int32 Y = FMath::RoundToInt(Position.Y / SnowMetresToCm / Spacing);
+	if (X < 0 || Y < 0 || X >= Fine.CountX || Y >= Fine.CountY)
+	{
+		return;
+	}
+	float& Height = Fine.Height[Y * Fine.CountX + X];
+	Height = FMath::Max(Height, Position.Z / SnowMetresToCm);
+}
+
+/**
+ * Raises the fine grid along the edges of a triangle. A kerb top is narrower than a fine grid step and a kerb face
+ * is vertical, so neither is caught by the fill of RasterizeFineTriangle; their edges are.
+ */
+void RaiseFineGroundAlongEdges(const FVector3f& A, const FVector3f& B, const FVector3f& C, FSnowFineGround& Fine)
+{
+	const FVector3f Corners[3] = {A, B, C};
+	const float StepCm = SnowCellMetres * SnowMetresToCm / float(SnowFineSteps) * 0.5f;
+	for (int32 Edge = 0; Edge < 3; ++Edge)
+	{
+		const FVector3f& From = Corners[Edge];
+		const FVector3f& To = Corners[(Edge + 1) % 3];
+		const int32 Steps = FMath::Max(1, FMath::CeilToInt(FVector2f::Distance(FVector2f(From.X, From.Y), FVector2f(To.X, To.Y)) / StepCm));
+		for (int32 Step = 0; Step <= Steps; ++Step)
+		{
+			RaiseFineGroundPoint(FMath::Lerp(From, To, float(Step) / Steps), Fine);
+		}
+	}
+}
+
+/** Fine ground heights from all ground triangles, kerbs included; -1e9 where there is no ground. */
+void RasterizeFineGround(const FWorldTileMeshes& Meshes, const FSnowSamples& Samples, FSnowFineGround& Fine)
+{
+	Fine.CountX = (Samples.CountX - 1) * SnowFineSteps + 1;
+	Fine.CountY = (Samples.CountY - 1) * SnowFineSteps + 1;
+	Fine.Height.Init(-1e9f, Fine.CountX * Fine.CountY);
+	const FWorldMeshBuilder& Ground = Meshes.Ground;
+	for (int32 Triangle = 0; Triangle < Ground.NumTriangles(); ++Triangle)
+	{
+		const FIntVector3& Corners = Ground.GetTriangle(Triangle);
+		RasterizeFineTriangle(Ground.GetPosition(Corners.X), Ground.GetPosition(Corners.Y), Ground.GetPosition(Corners.Z), Fine);
+		RaiseFineGroundAlongEdges(Ground.GetPosition(Corners.X), Ground.GetPosition(Corners.Y), Ground.GetPosition(Corners.Z), Fine);
+	}
+}
+
+/** Barycentric weights of a point (U, V in 0..1) in a cell on its two triangles, as the mesher splits the cell. */
+void SnowCellWeights(int32 CellX, int32 CellY, float U, float V, float OutWeights[4])
+{
+	// Corners in the order 00, 10, 11, 01.
+	if (((CellX + CellY) & 1) == 0)
+	{
+		if (U >= V)
+		{
+			OutWeights[0] = 1.f - U; OutWeights[1] = U - V; OutWeights[2] = V; OutWeights[3] = 0.f;
+		}
+		else
+		{
+			OutWeights[0] = 1.f - V; OutWeights[1] = 0.f; OutWeights[2] = U; OutWeights[3] = V - U;
+		}
+	}
+	else if (U + V <= 1.f)
+	{
+		OutWeights[0] = 1.f - U - V; OutWeights[1] = U; OutWeights[2] = 0.f; OutWeights[3] = V;
+	}
+	else
+	{
+		OutWeights[0] = 0.f; OutWeights[1] = 1.f - V; OutWeights[2] = U + V - 1.f; OutWeights[3] = 1.f - U;
+	}
+}
+
+/**
+ * Raises the snow surface where the ground between its vertices would poke through: a kerb top, a bump the 1 m grid
+ * misses. Every ground point on a finer grid is compared with the surface interpolated from the cell's vertices; a
+ * shortfall is made up by moving the cell's vertices by the least amount, weighted by their share in that point.
+ * The kerb ends up as a ramp instead of a step that is filled level. Only raises, so the points already
+ * checked stay covered, and one pass is enough.
+ */
+void KeepSnowAboveGround(const FSnowFineGround& Fine, FSnowSamples& Samples)
+{
+	for (int32 CellY = 0; CellY < Samples.CountY - 1; ++CellY)
+	{
+		for (int32 CellX = 0; CellX < Samples.CountX - 1; ++CellX)
+		{
+			const int32 Corners[4] = {Samples.Index(CellX, CellY), Samples.Index(CellX + 1, CellY), Samples.Index(CellX + 1, CellY + 1), Samples.Index(CellX, CellY + 1)};
+			if (Samples.bSkip[Corners[0]] && Samples.bSkip[Corners[1]] && Samples.bSkip[Corners[2]] && Samples.bSkip[Corners[3]])
+			{
+				continue;
+			}
+			for (int32 FineY = 0; FineY <= SnowFineSteps; ++FineY)
+			{
+				for (int32 FineX = 0; FineX <= SnowFineSteps; ++FineX)
+				{
+					const float Ground = Fine.Height[(CellY * SnowFineSteps + FineY) * Fine.CountX + CellX * SnowFineSteps + FineX];
+					if (Ground < -1e8f)
+					{
+						continue;
+					}
+					float Weights[4];
+					SnowCellWeights(CellX, CellY, float(FineX) / SnowFineSteps, float(FineY) / SnowFineSteps, Weights);
+					float Interpolated = 0.f;
+					float WeightSquares = 0.f;
+					for (int32 Corner = 0; Corner < 4; ++Corner)
+					{
+						Interpolated += Weights[Corner] * Samples.Surface[Corners[Corner]];
+						WeightSquares += Weights[Corner] * Weights[Corner];
+					}
+					const float Shortfall = Ground + SnowClearance - Interpolated;
+					if (Shortfall <= 0.f)
+					{
+						continue;
+					}
+					for (int32 Corner = 0; Corner < 4; ++Corner)
+					{
+						Samples.Surface[Corners[Corner]] += Shortfall * Weights[Corner] / WeightSquares;
+					}
+				}
+			}
+		}
+	}
+	for (int32 Index = 0; Index < Samples.Surface.Num(); ++Index)
+	{
+		Samples.Depth[Index] = FMath::Min(Samples.Surface[Index] - Samples.Ground[Index], SnowMaximumDepth);
 	}
 }
 
@@ -595,6 +764,61 @@ private:
 		{
 			Builder.AddTriangle(V00, V10, V01, 0, Up);
 			Builder.AddTriangle(V10, V11, V01, 0, Up);
+		}
+		EmitSkirts(X0, Y0);
+	}
+
+	/** True when no snow is meshed in the cell: outside the tile, or a cell without snow. */
+	bool IsCellOpen(int32 X, int32 Y) const
+	{
+		return X < 0 || Y < 0 || X >= Samples.CountX - 1 || Y >= Samples.CountY - 1 || IsBlockEmpty(X, Y, 1);
+	}
+
+	/**
+	 * Closes the edge of a cell that borders no snow with a skirt down to the ground. Tiles are meshed apart, and
+	 * their snow surfaces differ by a few centimetres at the shared border; without a skirt the ground shows
+	 * through as a thin dark crack. The skirt's lower vertices have depth zero, so they stay on the ground.
+	 */
+	void EmitSkirt(int32 XA, int32 YA, int32 XB, int32 YB, const FVector3f& Outward)
+	{
+		const int32 TopA = VertexAt(XA, YA);
+		const int32 TopB = VertexAt(XB, YB);
+		const int32 BottomA = SkirtBottom(XA, YA);
+		const int32 BottomB = SkirtBottom(XB, YB);
+		Builder.AddQuad(TopA, TopB, BottomB, BottomA, 0, Outward);
+	}
+
+	/** A vertex under a sample, on the ground with no snow depth. */
+	int32 SkirtBottom(int32 X, int32 Y)
+	{
+		const int32 Index = Samples.Index(X, Y);
+		const FVector3f Position(X * SnowCellMetres * SnowMetresToCm, Y * SnowCellMetres * SnowMetresToCm, (Samples.Ground[Index] - SnowSkirtDrop) * SnowMetresToCm);
+		const FVector2f UV(float(Tile.Origin.X) + X * SnowCellMetres, float(Tile.Origin.Y) + Y * SnowCellMetres);
+		FColor Color = SnowVertexColor(Samples, Index);
+		Color.R = 0;
+		return Builder.AddVertex(Position, UV, Color);
+	}
+
+	/** The skirts of every side of a cell that has no snow next to it. */
+	void EmitSkirts(int32 X0, int32 Y0)
+	{
+		const int32 X1 = X0 + 1;
+		const int32 Y1 = Y0 + 1;
+		if (IsCellOpen(X0 - 1, Y0))
+		{
+			EmitSkirt(X0, Y0, X0, Y1, FVector3f(-1.f, 0.f, 0.f));
+		}
+		if (IsCellOpen(X0 + 1, Y0))
+		{
+			EmitSkirt(X1, Y0, X1, Y1, FVector3f(1.f, 0.f, 0.f));
+		}
+		if (IsCellOpen(X0, Y0 - 1))
+		{
+			EmitSkirt(X0, Y0, X1, Y0, FVector3f(0.f, -1.f, 0.f));
+		}
+		if (IsCellOpen(X0, Y0 + 1))
+		{
+			EmitSkirt(X0, Y1, X1, Y1, FVector3f(0.f, 1.f, 0.f));
 		}
 	}
 
@@ -741,6 +965,7 @@ void BuildRoofSnow(const FWorldTileData& Tile, const FWorldTileMeshes& Meshes, F
 
 void BuildWorldSnow(const FWorldTileData& Tile, const FWorldTileMeshes& Meshes, FWorldSnowMeshes& Out)
 {
+	const double StartSeconds = FPlatformTime::Seconds();
 	FSnowSamples Samples;
 	InitSamples(Tile, Samples);
 	RasterizeGround(Meshes, Samples);
@@ -751,10 +976,14 @@ void BuildWorldSnow(const FWorldTileData& Tile, const FWorldTileMeshes& Meshes, 
 		StampBuildingWalls(Building, Samples);
 	}
 	ComputeSnowSurface(Tile, Samples);
+	FSnowFineGround FineGround;
+	RasterizeFineGround(Meshes, Samples, FineGround);
+	KeepSnowAboveGround(FineGround, Samples);
 
 	FWorldMeshBuilder Snow;
 	FSnowGridMesher(Tile, Samples, Snow).Build();
 	BuildRoofSnow(Tile, Meshes, Snow);
+
 
 	// Near tiles have 4 x 4 ground chunks (WorldTileMesher.cpp); the snow follows them.
 	const int32 PerSide = 4;
@@ -767,4 +996,14 @@ void BuildWorldSnow(const FWorldTileData& Tile, const FWorldTileMeshes& Meshes, 
 		const int32 Row = FMath::Clamp(FMath::FloorToInt(Centroid.Y / ChunkSize.Y), 0, PerSide - 1);
 		return Row * PerSide + Column;
 	});
+
+	int64 Triangles = 0;
+	int64 Bytes = 0;
+	for (const FDynamicMesh3& Chunk : Out.Chunks)
+	{
+		Triangles += Chunk.TriangleCount();
+		Bytes += Chunk.GetByteCount();
+	}
+	UE_LOG(LogTemp, Log, TEXT("SNOWMESH tile origin %.0f,%.0f: %lld triangles, %.1f MB, built in %.0f ms"), Tile.Origin.X, Tile.Origin.Y,
+		Triangles, double(Bytes) / (1024.0 * 1024.0), (FPlatformTime::Seconds() - StartSeconds) * 1000.0);
 }
