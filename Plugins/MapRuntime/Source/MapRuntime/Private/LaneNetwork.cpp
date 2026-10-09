@@ -62,7 +62,7 @@ void ReadConflicts(const TArray<TSharedPtr<FJsonValue>>& Entries, FTrafficLane& 
 		Conflict.EndMeters = float(Fields[2]->AsNumber());
 		Conflict.OtherStartMeters = float(Fields[3]->AsNumber());
 		Conflict.OtherEndMeters = float(Fields[4]->AsNumber());
-		Conflict.bYield = Fields[5]->AsNumber() > 0.5;
+		Conflict.YieldKind = int32(Fields[5]->AsNumber());
 	}
 }
 

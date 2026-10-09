@@ -588,15 +588,20 @@ class LaneBuilder:
                 lane.control = "signal"
 
     def _yields_to(self, a, b):
-        """Whether connection a has to give way to connection b where their paths meet."""
+        """How connection a has to treat connection b where their paths meet.
+
+        Returns None when they are never in the way of each other, else (a gives way, strict). A strict relation comes from
+        different priority levels or the left turn rule and never flips; the right before left tie is not strict, because
+        around a junction it can run in a circle and then the car that arrived first has to go.
+        """
         if a.phase >= 0 and b.phase >= 0 and a.level == LEVEL_SIGNAL and b.level == LEVEL_SIGNAL:
             if a.phase != b.phase:
                 return None     # never green together
         if a.level != b.level:
-            return a.level < b.level
+            return a.level < b.level, True
         left_a, left_b = a.turn < 0, b.turn < 0
         if left_a != left_b:
-            return left_a                    # a left turn gives way to oncoming straight and right turns
+            return left_a, True              # a left turn gives way to oncoming straight and right turns
         direction_a = self._end_direction(self.lanes[a.from_lane], True)
         direction_b = self._end_direction(self.lanes[b.from_lane], True)
         arm_b = -direction_b
@@ -604,8 +609,8 @@ class LaneBuilder:
         if a.level == LEVEL_PRIORITY and not (a.roundabout and b.roundabout):
             return None
         if abs(side) > 0.25:
-            return side > 0.0                # right before left: b comes from a's right
-        return a.id > b.id
+            return side > 0.0, False         # right before left: b comes from a's right
+        return a.id > b.id, False
 
     def find_conflicts(self):
         """Pairs of connections at a node whose paths come closer than a car width."""
@@ -628,11 +633,13 @@ class LaneBuilder:
                     columns = np.where(close.any(axis=0))[0]
                     a_range = (max(along_a[rows[0]] - CONFLICT_MARGIN, 0.0), min(along_a[rows[-1]] + CONFLICT_MARGIN, along_a[-1]))
                     b_range = (max(along_b[columns[0]] - CONFLICT_MARGIN, 0.0), min(along_b[columns[-1]] + CONFLICT_MARGIN, along_b[-1]))
-                    a_yields = self._yields_to(a, b)
-                    if a_yields is None:
+                    relation = self._yields_to(a, b)
+                    if relation is None:
                         continue
-                    a.conflicts.append((b.id, a_range, b_range, 1 if a_yields else 0))
-                    b.conflicts.append((a.id, b_range, a_range, 0 if a_yields else 1))
+                    a_yields, strict = relation
+                    kind = 2 if strict else 1       # 0 would be: does not give way
+                    a.conflicts.append((b.id, a_range, b_range, kind if a_yields else 0))
+                    b.conflicts.append((a.id, b_range, a_range, 0 if a_yields else kind))
 
     # ------------------------------------------------------------ connectivity
 

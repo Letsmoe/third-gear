@@ -8,6 +8,7 @@
 
 class AAITrafficCar;
 class AWorldStreamer;
+class USpotLightComponent;
 struct FTrafficVehicleModel;
 
 /** Rule violations of AI cars since the start, for the traffic test (there should be none). */
@@ -67,6 +68,7 @@ private:
 	void RemoveCar(int32 CarId);
 	void UpdateActors();
 	void ReportNewViolations();
+	void UpdateHeadlightPool(const FVector& ViewerCm, bool bNight);
 
 	FLaneNetwork Lanes;
 	FAITrafficSimulation Simulation;
@@ -97,4 +99,10 @@ private:
 	TMap<int32, int32> ReportedViolations;
 	FAITrafficViolationTotals RemovedTotals;
 	TWeakObjectPtr<AWorldStreamer> Streamer;
+
+	/** A few real spot lights moved to the headlights of the cars nearest the viewer at night; the rest only glow. */
+	UPROPERTY(Transient)
+	TObjectPtr<AActor> LightHolder;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<USpotLightComponent>> HeadlightPool;
 };

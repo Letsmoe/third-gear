@@ -15,8 +15,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogTrafficTest, Log, All);
 
 namespace
 {
-constexpr float ReportIntervalSeconds = 10.f;
-constexpr float CameraHeightCm = 300.f;
+constexpr float TrafficTestReportIntervalSeconds = 10.f;
+constexpr float TrafficTestCameraHeightCm = 300.f;
 }
 
 ATrafficTestRunner::ATrafficTestRunner()
@@ -90,7 +90,7 @@ void ATrafficTestRunner::MoveViewer(float DeltaSeconds)
 	const FTrafficLane& Lane = Lanes.GetLane(ViewerLane);
 	const FVector Position = Lanes.PositionAt(Lane, ViewerS) * 100.0;
 	const FVector2D Direction = Lanes.DirectionAt(Lane, ViewerS);
-	Controller->GetPawn()->SetActorLocation(Position + FVector(0.0, 0.0, CameraHeightCm), false, nullptr, ETeleportType::TeleportPhysics);
+	Controller->GetPawn()->SetActorLocation(Position + FVector(0.0, 0.0, TrafficTestCameraHeightCm), false, nullptr, ETeleportType::TeleportPhysics);
 	Controller->SetControlRotation(FRotator(-5.0, FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X)), 0.0));
 }
 
@@ -175,7 +175,7 @@ void ATrafficTestRunner::Tick(float DeltaSeconds)
 	CarSampleSum += Traffic->GetCarCount();
 	++CarSamples;
 	MaxCars = FMath::Max(MaxCars, Traffic->GetCarCount());
-	if (SecondsSinceReport >= ReportIntervalSeconds)
+	if (SecondsSinceReport >= TrafficTestReportIntervalSeconds)
 	{
 		SecondsSinceReport = 0.f;
 		ReportProgress();

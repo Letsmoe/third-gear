@@ -30,6 +30,8 @@ constexpr int32 RouteLanesAhead = 6;
 constexpr int32 RouteLanesBehind = 3;
 constexpr float ComfortStopDecelerationMs2 = 3.0f;
 constexpr float HardStopDecelerationMs2 = 6.0f;
+constexpr float AmberStopDecelerationMs2 = 3.5f;
+constexpr float AmberReactionSeconds = 0.7f;
 
 float Square(float Value)
 {
@@ -375,6 +377,8 @@ void FAITrafficSimulation::AddAgentObstacles(const FSimCar& Car, const TArray<FS
 		float HalfLength;
 		float HalfWidth;
 		int32 Id;
+		/** Whether to also test where it will be when the car gets there: outside vehicles aren't bound by the lanes. */
+		bool bPredict;
 	};
 	TArray<FTarget, TInlineAllocator<8>> Targets;
 	const FVector2D MyPosition(Car.FrontAxleM);
@@ -382,7 +386,7 @@ void FAITrafficSimulation::AddAgentObstacles(const FSimCar& Car, const TArray<FS
 	{
 		if (FVector2D::Distance(Agent.Position, MyPosition) < AgentCheckRangeM)
 		{
-			Targets.Add({Agent.Position, Agent.Forward, Agent.Velocity, Agent.HalfLengthM, Agent.HalfWidthM, -1});
+			Targets.Add({Agent.Position, Agent.Forward, Agent.Velocity, Agent.HalfLengthM, Agent.HalfWidthM, -1, true});
 		}
 	}
 	for (const TSharedPtr<FSimCar>& OtherPtr : Cars)
@@ -392,7 +396,7 @@ void FAITrafficSimulation::AddAgentObstacles(const FSimCar& Car, const TArray<FS
 		{
 			continue;
 		}
-		Targets.Add({Other.BodyCenter(), Other.Heading, Other.Heading * Other.SpeedMs, Other.LengthM * 0.5f, Other.WidthM * 0.5f, Other.Id});
+		Targets.Add({Other.BodyCenter(), Other.Heading, Other.Heading * Other.SpeedMs, Other.LengthM * 0.5f, Other.WidthM * 0.5f, Other.Id, false});
 	}
 	if (Targets.IsEmpty())
 	{
@@ -405,9 +409,13 @@ void FAITrafficSimulation::AddAgentObstacles(const FSimCar& Car, const TArray<FS
 		const FVector2D Point(PointOnRoute(Car, Car.FrontOverhangM + Distance));
 		const FVector2D PathDirection = (Point - Previous).GetSafeNormal();
 		Previous = Point;
+		const float ArrivalSeconds = FMath::Min(Distance / FMath::Max(Car.SpeedMs, 2.f), 4.f);
 		for (const FTarget& Target : Targets)
 		{
-			if (!PointInRectangle(Point, Target.Center, Target.Forward, Target.HalfLength + 0.3f, Target.HalfWidth + MyHalfWidth + 0.15f))
+			const bool bHitsNow = PointInRectangle(Point, Target.Center, Target.Forward, Target.HalfLength + 0.3f, Target.HalfWidth + MyHalfWidth + 0.15f);
+			const bool bHitsLater = Target.bPredict && Target.Velocity.SizeSquared() > 1.0
+				&& PointInRectangle(Point, Target.Center + Target.Velocity * ArrivalSeconds, Target.Forward, Target.HalfLength + 0.3f, Target.HalfWidth + MyHalfWidth + 0.15f);
+			if (!bHitsNow && !bHitsLater)
 			{
 				continue;
 			}
@@ -463,6 +471,9 @@ void FAITrafficSimulation::ScanLaneCurves(const FSimCar& Car, int32 Slot, const 
 bool FAITrafficSimulation::MustStopForSignal(float GapM, float SpeedMs, int32 ApproachId, double TrafficTimeSeconds) const
 {
 	const FSignalState Now = Signals->GetApproachState(ApproachId, TrafficTimeSeconds);
+	// The same fairness test the rule checker applies: from the first sight of amber, a driver who reacts in
+	// AmberReactionSeconds and brakes with AmberStopDecelerationMs2 has to be able to stop before the line.
+	const bool bCouldStopFairly = GapM >= SpeedMs * AmberReactionSeconds + Square(SpeedMs) / (2.f * AmberStopDecelerationMs2);
 	const bool bCanStopComfortably = GapM >= Square(SpeedMs) / (2.f * ComfortStopDecelerationMs2);
 	const bool bCanStopHard = GapM >= Square(SpeedMs) / (2.f * HardStopDecelerationMs2);
 	switch (Now.Aspect)
@@ -471,7 +482,7 @@ bool FAITrafficSimulation::MustStopForSignal(float GapM, float SpeedMs, int32 Ap
 	case ESignalAspect::RedAmber:
 		return true;
 	case ESignalAspect::Amber:
-		return bCanStopComfortably;
+		return bCouldStopFairly || bCanStopComfortably;
 	case ESignalAspect::Green:
 		break;
 	}
@@ -484,7 +495,7 @@ bool FAITrafficSimulation::MustStopForSignal(float GapM, float SpeedMs, int32 Ap
 	return false;
 }
 
-void FAITrafficSimulation::ScanLaneSignals(const FSimCar& Car, int32 Slot, const FTrafficLane& Lane, double TrafficTimeSeconds, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const
+void FAITrafficSimulation::ScanLaneSignals(FSimCar& Car, int32 Slot, const FTrafficLane& Lane, double TrafficTimeSeconds, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const
 {
 	for (const FLaneStopLine& Stop : Lane.Stops)
 	{
@@ -493,7 +504,18 @@ void FAITrafficSimulation::ScanLaneSignals(const FSimCar& Car, int32 Slot, const
 		{
 			continue;
 		}
-		if (MustStopForSignal(Gap, Car.SpeedMs, Stop.ApproachId, TrafficTimeSeconds))
+		bool bStop = false;
+		if (Car.LatchedStopApproach == Stop.ApproachId)
+		{
+			bStop = Signals->GetApproachState(Stop.ApproachId, TrafficTimeSeconds).Aspect != ESignalAspect::Green;
+			Car.LatchedStopApproach = bStop ? Stop.ApproachId : INDEX_NONE;
+		}
+		else
+		{
+			bStop = MustStopForSignal(Gap, Car.SpeedMs, Stop.ApproachId, TrafficTimeSeconds);
+			Car.LatchedStopApproach = bStop ? Stop.ApproachId : Car.LatchedStopApproach;
+		}
+		if (bStop)
 		{
 			Obstacles.Add({Gap + StopLineMarginM, 0.f, StopLineMinGapM, 0.f, TEXT("signal")});
 		}
@@ -552,7 +574,6 @@ bool FAITrafficSimulation::ConflictBlocks(const FSimCar& Car, const FLaneConflic
 	{
 		return false;
 	}
-	const bool bPatient = Car.WaitSeconds > PatientSeconds;
 	for (const FClaim& Claim : *Others)
 	{
 		const FSimCar& Other = *Claim.Car;
@@ -574,9 +595,12 @@ bool FAITrafficSimulation::ConflictBlocks(const FSimCar& Car, const FLaneConflic
 				BlockerId = Other.Id;
 				return true;    // standing in the shared area
 			}
+			// A car that has right of way always goes first; among equals (right before left) the one that arrived first does.
 			const bool bArrivedFirst = Other.WaitSeconds > Car.WaitSeconds + 0.2f
 				|| (FMath::Abs(Other.WaitSeconds - Car.WaitSeconds) <= 0.2f && Other.Id < Car.Id);
-			if (StartDistance < 6.f && bArrivedFirst && !bPatient)
+			const bool bGoesFirst = Conflict.YieldKind == 2 || bArrivedFirst;
+			const float PatienceSeconds = Conflict.YieldKind == 2 ? 2.f * PatientSeconds : PatientSeconds;
+			if (StartDistance < 6.f && bGoesFirst && Car.WaitSeconds < PatienceSeconds)
 			{
 				BlockerId = Other.Id;
 				return true;
@@ -594,7 +618,7 @@ bool FAITrafficSimulation::ConflictBlocks(const FSimCar& Car, const FLaneConflic
 	return false;
 }
 
-bool FAITrafficSimulation::IsExitCongested(const FSimCar& Car, const FTrafficLane& Connection) const
+bool FAITrafficSimulation::IsExitCongested(const FSimCar& Car, const FTrafficLane& Connection, int32& BlockerId) const
 {
 	const TArray<FOccupant>* Occupants = Occupancy.Find(Connection.ToLane);
 	if (!Occupants)
@@ -606,6 +630,7 @@ bool FAITrafficSimulation::IsExitCongested(const FSimCar& Car, const FTrafficLan
 	{
 		if (Other.Car != &Car && Other.RearS < SpaceNeeded && Other.Car->SpeedMs < 3.f)
 		{
+			BlockerId = Other.Car->Id;
 			return true;
 		}
 	}
@@ -651,14 +676,14 @@ bool FAITrafficSimulation::IsConnectionBlocked(FSimCar& Car, int32 Slot, const T
 		}
 		MaxSpeed = FMath::Max(Slowest, 2.5f);
 	}
-	if (IsExitCongested(Car, Connection) && Car.WaitSeconds < CongestionPatientSeconds)
+	if (IsExitCongested(Car, Connection, BlockerId) && Car.WaitSeconds < CongestionPatientSeconds)
 	{
 		Reason = TEXT("exit blocked");
 		return true;
 	}
 	for (const FLaneConflict& Conflict : Connection.Conflicts)
 	{
-		if (!Conflict.bYield)
+		if (!Conflict.Yields())
 		{
 			continue;
 		}
@@ -849,7 +874,9 @@ bool FAITrafficSimulation::IsLegitimateWait(const FSimCar& Car)
 	for (int32 Hop = 0; Hop < 24; ++Hop)
 	{
 		const FString Reason(Head->StopReason);
-		if (Reason == TEXT("car ahead") && Head->StopBlockerId >= 0)
+		const bool bWaitsForCar = Reason == TEXT("car ahead") || Reason == TEXT("right of way") || Reason == TEXT("exit blocked")
+			|| Reason == TEXT("vehicle in the way");
+		if (bWaitsForCar && Head->StopBlockerId >= 0)
 		{
 			const FSimCar* Next = FindCar(Head->StopBlockerId);
 			if (!Next || Next == Head)
@@ -861,7 +888,7 @@ bool FAITrafficSimulation::IsLegitimateWait(const FSimCar& Car)
 		}
 		if (Reason == TEXT("vehicle in the way") || Reason == TEXT("agent"))
 		{
-			return Head->StopBlockerId < 0;     // held up by the player or another outside vehicle
+			return true;                        // held up by the player or another outside vehicle
 		}
 		if (Reason == TEXT("signal"))
 		{

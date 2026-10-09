@@ -2,6 +2,8 @@
 
 #include "AITrafficCar.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Components/SceneComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
@@ -17,6 +19,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogAITraffic, Log, All);
 
 static TAutoConsoleVariable<int32> CVarSpawnAnywhere(TEXT("tg.TrafficSpawnAnywhere"), 0,
 	TEXT("1 lets cars appear in view and close to the viewer (staging screenshots); normally they only appear out of sight."));
+static TAutoConsoleVariable<int32> CVarHeadlightLights(TEXT("tg.TrafficHeadlights"), 8,
+	TEXT("How many AI cars nearest the viewer get a real headlight at night."));
 static TAutoConsoleVariable<int32> CVarTrafficCars(TEXT("tg.TrafficCars"), 30, TEXT("How many AI cars the traffic aims for around the viewer."));
 
 namespace
@@ -37,6 +41,11 @@ constexpr float BlinkPeriodSeconds = 0.7f;
 constexpr float NightHeadlightFactor = 0.35f;
 constexpr float StuckRemoveSeconds = 150.f;
 constexpr float RuleCheckDelaySeconds = 0.5f;
+constexpr float HeadlightRangeM = 110.f;
+constexpr float HeadlightIntensityCandela = 9000.f;
+constexpr float HeadlightAttenuationCm = 5500.f;
+constexpr float HeadlightForwardCm = 80.f;
+constexpr float HeadlightHeightCm = 68.f;
 
 struct FPaintOption
 {
@@ -382,6 +391,65 @@ void UAITrafficSubsystem::UpdateActors()
 	}
 }
 
+void UAITrafficSubsystem::UpdateHeadlightPool(const FVector& ViewerCm, bool bNight)
+{
+	const int32 Wanted = bNight ? CVarHeadlightLights.GetValueOnGameThread() : 0;
+	if (Wanted <= 0 && HeadlightPool.IsEmpty())
+	{
+		return;
+	}
+	if (!LightHolder && Wanted > 0)
+	{
+		LightHolder = GetWorld()->SpawnActor<AActor>();
+		USceneComponent* Root = NewObject<USceneComponent>(LightHolder, TEXT("Root"));
+		LightHolder->SetRootComponent(Root);
+		Root->RegisterComponent();
+	}
+	while (LightHolder && HeadlightPool.Num() < Wanted)
+	{
+		USpotLightComponent* Light = NewObject<USpotLightComponent>(LightHolder);
+		Light->SetMobility(EComponentMobility::Movable);
+		Light->SetupAttachment(LightHolder->GetRootComponent());
+		Light->SetIntensityUnits(ELightUnits::Candelas);
+		Light->SetIntensity(HeadlightIntensityCandela);
+		Light->SetLightColor(FLinearColor(1.f, 0.93f, 0.82f));
+		Light->SetAttenuationRadius(HeadlightAttenuationCm);
+		Light->SetOuterConeAngle(38.f);
+		Light->SetInnerConeAngle(10.f);
+		Light->SetSourceRadius(4.f);
+		Light->SetCastShadows(false);
+		Light->RegisterComponent();
+		Light->SetVisibility(false);
+		HeadlightPool.Add(Light);
+	}
+	// The cars nearest the viewer within range get the lights, nearest first.
+	TArray<TPair<float, const FSimCar*>> Candidates;
+	const FVector2D Viewer = FVector2D(ViewerCm) * 0.01;
+	for (const TSharedPtr<FSimCar>& Car : Simulation.GetCars())
+	{
+		const float Distance = float(FVector2D::Distance(Car->BodyCenter(), Viewer));
+		if (bNight && Distance < HeadlightRangeM)
+		{
+			Candidates.Emplace(Distance, Car.Get());
+		}
+	}
+	Candidates.Sort([](const TPair<float, const FSimCar*>& A, const TPair<float, const FSimCar*>& B) { return A.Key < B.Key; });
+	for (int32 Index = 0; Index < HeadlightPool.Num(); ++Index)
+	{
+		USpotLightComponent* Light = HeadlightPool[Index];
+		if (!Candidates.IsValidIndex(Index) || Index >= Wanted)
+		{
+			Light->SetVisibility(false);
+			continue;
+		}
+		const FSimCar& Car = *Candidates[Index].Value;
+		const FVector Forward(Car.Heading.X, Car.Heading.Y, 0.0);
+		const FVector Position = Car.FrontAxleM * 100.0 + Forward * (Car.FrontOverhangM * 100.0 + HeadlightForwardCm) + FVector(0.0, 0.0, HeadlightHeightCm);
+		Light->SetWorldLocationAndRotation(Position, FRotator(-1.5f + FMath::RadiansToDegrees(Car.PitchRadians), FMath::RadiansToDegrees(FMath::Atan2(float(Car.Heading.Y), float(Car.Heading.X))), 0.f));
+		Light->SetVisibility(true);
+	}
+}
+
 void UAITrafficSubsystem::ReportNewViolations()
 {
 	for (const TPair<int32, TObjectPtr<AAITrafficCar>>& Entry : CarActors)
@@ -447,5 +515,6 @@ void UAITrafficSubsystem::Tick(float DeltaTime)
 	SpawnCars(ViewerCm, ViewerForward);
 	Simulation.Step(FMath::Min(DeltaTime, 0.1f), Traffic->GetTrafficTime(), Agents);
 	UpdateActors();
+	UpdateHeadlightPool(ViewerCm, Traffic->GetNightFactor() > NightHeadlightFactor);
 	ReportNewViolations();
 }

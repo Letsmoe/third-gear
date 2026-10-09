@@ -59,6 +59,8 @@ struct FSimCar
 	float StopHoldSeconds = 0.f;
 	bool bStopSatisfied = false;
 	int32 ClaimedConnection = INDEX_NONE;
+	/** Signal the car has decided to stop for; it keeps that decision until the light is green, even though speeding up changes the sums. */
+	int32 LatchedStopApproach = INDEX_NONE;
 	bool bBrakeLight = false;
 	/** -1 left, 0 none, +1 right. */
 	int32 TurnSignal = 0;
@@ -160,11 +162,11 @@ private:
 	float DesiredSpeed(const FSimCar& Car) const;
 	void ScanRoute(FSimCar& Car, double TrafficTimeSeconds, float DeltaSeconds, const TArray<FSimAgent>& Agents, TArray<FObstacle, TInlineAllocator<48>>& Obstacles);
 	void ScanLaneCurves(const FSimCar& Car, int32 Slot, const FTrafficLane& Lane, float Horizon, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const;
-	void ScanLaneSignals(const FSimCar& Car, int32 Slot, const FTrafficLane& Lane, double TrafficTimeSeconds, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const;
+	void ScanLaneSignals(FSimCar& Car, int32 Slot, const FTrafficLane& Lane, double TrafficTimeSeconds, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const;
 	bool MustStopForSignal(float GapM, float SpeedMs, int32 ApproachId, double TrafficTimeSeconds) const;
 	void ScanJunctionEntry(FSimCar& Car, int32 Slot, float GapToLineM, float DeltaSeconds, TArray<FObstacle, TInlineAllocator<48>>& Obstacles, const TArray<FSimAgent>& Agents);
 	bool IsConnectionBlocked(FSimCar& Car, int32 Slot, const TArray<FSimAgent>& Agents, const TCHAR*& Reason, int32& BlockerId) const;
-	bool IsExitCongested(const FSimCar& Car, const FTrafficLane& Connection) const;
+	bool IsExitCongested(const FSimCar& Car, const FTrafficLane& Connection, int32& BlockerId) const;
 	bool IsBlockedByAgent(const FSimCar& Car, const FTrafficLane& Connection, float EnterSeconds, float ExitSeconds, const TArray<FSimAgent>& Agents) const;
 	bool ConflictBlocks(const FSimCar& Car, const FLaneConflict& Conflict, float MyEnterSeconds, float MyExitSeconds, int32& BlockerId) const;
 	void AddLeadCars(const FSimCar& Car, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const;

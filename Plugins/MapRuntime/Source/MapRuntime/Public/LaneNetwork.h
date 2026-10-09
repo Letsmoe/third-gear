@@ -35,8 +35,9 @@ struct FLaneConflict
 	float EndMeters = 0.f;
 	float OtherStartMeters = 0.f;
 	float OtherEndMeters = 0.f;
-	/** The owner of this entry has to give way to OtherLane. */
-	bool bYield = false;
+	/** 0 the owner has right of way, 1 it gives way by the right before left tie, 2 it gives way strictly (priority level or left turn). */
+	int32 YieldKind = 0;
+	bool Yields() const { return YieldKind > 0; }
 };
 
 /**
