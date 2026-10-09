@@ -19,6 +19,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogAITraffic, Log, All);
 
 static TAutoConsoleVariable<int32> CVarSpawnAnywhere(TEXT("tg.TrafficSpawnAnywhere"), 0,
 	TEXT("For staging screenshots: 1 lets cars appear anywhere around the viewer, in view and close by; 2 puts them where the viewer looks, within 55 m of a point 40 m ahead. Normally they only appear out of sight."));
+static TAutoConsoleVariable<int32> CVarPaintLineup(TEXT("tg.TrafficPaintLineup"), 0,
+	TEXT("For paint screenshots: 1 parks one car per palette colour in two rows in front of the viewer, once; the cars do not drive."));
 static TAutoConsoleVariable<int32> CVarHeadlightLights(TEXT("tg.TrafficHeadlights"), 8,
 	TEXT("How many AI cars nearest the viewer get a real headlight at night."));
 static TAutoConsoleVariable<FString> CVarPaintOverride(TEXT("tg.TrafficPaint"), TEXT(""),
@@ -376,6 +378,56 @@ void UAITrafficSubsystem::SpawnCars(const FVector& ViewerCm, const FVector2D& Vi
 	TrySpawnOne(ViewerCm, ViewerForward);
 }
 
+void UAITrafficSubsystem::SpawnPaintLineup(const FVector& ViewerCm, const FVector2D& ViewerForward)
+{
+	constexpr int32 CarsPerRow = 5;
+	constexpr float FirstRowM = 7.f;
+	constexpr float RowSpacingM = 6.f;
+	constexpr float ColumnSpacingM = 3.2f;
+	bLineupDone = true;
+	const int32 PaletteCount = UE_ARRAY_COUNT(PaintPalette);
+	const FVector2D Right(-ViewerForward.Y, ViewerForward.X);
+	const float FacingYaw = FMath::RadiansToDegrees(FMath::Atan2(-ViewerForward.Y, -ViewerForward.X)) + 20.f;
+	for (int32 Index = 0; Index < PaletteCount; ++Index)
+	{
+		const int32 Row = Index / CarsPerRow;
+		const int32 Column = Index % CarsPerRow;
+		const FVector2D Offset = ViewerForward * (FirstRowM + Row * RowSpacingM) + Right * ((Column - (CarsPerRow - 1) * 0.5f) * ColumnSpacingM);
+		FVector Position = ViewerCm + FVector(Offset.X, Offset.Y, 0.0) * 100.0;
+		FHitResult Hit;
+		const FVector Top = Position + FVector(0.0, 0.0, 500.0);
+		if (GetWorld()->LineTraceSingleByChannel(Hit, Top, Position - FVector(0.0, 0.0, 3000.0), ECC_WorldStatic))
+		{
+			Position.Z = Hit.ImpactPoint.Z;
+		}
+		else
+		{
+			Position.Z = ViewerCm.Z - 160.0;
+		}
+		const TSharedPtr<FTrafficVehicleModel>& Model = Models[Index % 4];
+		if (!Model->Load())
+		{
+			continue;
+		}
+		ModelAssets.Empty();
+		for (const TSharedPtr<FTrafficVehicleModel>& Loaded : Models)
+		{
+			if (Loaded->bLoaded)
+			{
+				Loaded->CollectAssets(ModelAssets);
+			}
+		}
+		FActorSpawnParameters Parameters;
+		Parameters.ObjectFlags |= RF_Transient;
+		Parameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AAITrafficCar* Actor = GetWorld()->SpawnActor<AAITrafficCar>(Position, FRotator(0.f, FacingYaw + (Row ? 0.f : 8.f), 0.f), Parameters);
+		if (Actor)
+		{
+			Actor->Initialize(*Model, PaintPalette[Index].Color);
+		}
+	}
+}
+
 void UAITrafficSubsystem::RemoveCar(int32 CarId)
 {
 	if (TObjectPtr<AAITrafficCar>* Actor = CarActors.Find(CarId))
@@ -564,6 +616,10 @@ void UAITrafficSubsystem::Tick(float TickDeltaTime)
 	if (!GetViewer(ViewerCm, ViewerForward))
 	{
 		return;
+	}
+	if (CVarPaintLineup.GetValueOnGameThread() != 0 && !bLineupDone)
+	{
+		SpawnPaintLineup(ViewerCm, ViewerForward);
 	}
 	SecondsSinceSpawn += DeltaTime;
 	TArray<FSimAgent> Agents;
