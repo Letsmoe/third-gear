@@ -14,6 +14,7 @@ namespace
 /** A second press of "reset" within this time confirms it. */
 constexpr double ResetConfirmSeconds = 4.0;
 
+const FString RegionHamburg = TEXT("hamburg");
 const FString RegionBergedorfCore = TEXT("bergedorf_core");
 const FString RegionBergedorfTest = TEXT("bergedorf_test");
 
@@ -258,6 +259,8 @@ FMenuPage FMenuPages::BuildRegionPage(bool bFreeCamera)
 {
 	FMenuPage Page;
 	Page.Title = bFreeCamera ? TEXT("Free camera: choose a region") : TEXT("Drive: choose a region");
+	AddAction(Page, TEXT("Hamburg"), TEXT("The whole city, starting in Bergedorf. Traffic takes about half a minute to load."),
+		[this, bFreeCamera]() { Host.StartDrive(RegionHamburg, bFreeCamera); });
 	AddAction(Page, TEXT("Bergedorf"), TEXT("The town centre and its surroundings, 2 by 2 km. Takes a little longer to load."),
 		[this, bFreeCamera]() { Host.StartDrive(RegionBergedorfCore, bFreeCamera); });
 	AddAction(Page, TEXT("Bergedorf test area"), TEXT("A 500 m patch of the town. Loads quickly."),
