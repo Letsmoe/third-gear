@@ -4,17 +4,12 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "UDynamicMesh.h"
+#include "WorldTileMesher.h"
 
 namespace
 {
 constexpr float TrunkColliderHeightCm = 400.f;
 
-/** Shortest distance from a point to a rectangle (0 inside). */
-double DistanceToBox(const FBox2D& Box, const FVector2D& Point)
-{
-	const FVector2D Clamped(FMath::Clamp(Point.X, Box.Min.X, Box.Max.X), FMath::Clamp(Point.Y, Box.Min.Y, Box.Max.Y));
-	return FVector2D::Distance(Clamped, Point);
-}
 }
 
 AWorldTileActor::AWorldTileActor()
@@ -131,7 +126,7 @@ int32 AWorldTileActor::FindChunkNeedingCollision(const FVector2D& LocationCm, do
 	OutDistanceCm = RadiusCm;
 	for (int32 Chunk = 0; Chunk < GroundChunks.Num(); ++Chunk)
 	{
-		const double Distance = DistanceToBox(GroundChunkBounds[Chunk], LocationCm);
+		const double Distance = DistanceToBox2D(GroundChunkBounds[Chunk], LocationCm);
 		if (!GroundChunkHasCollision[Chunk] && Distance <= OutDistanceCm)
 		{
 			Best = Chunk;

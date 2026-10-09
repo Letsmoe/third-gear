@@ -97,12 +97,6 @@ FString FindWorldDir(const FString& Region)
 	return FPaths::ConvertRelativePathToFull(FPaths::Combine(DataRoot, TEXT("world"), Region));
 }
 
-/** Shortest distance from a point to a rectangle (0 inside). */
-double DistanceToBox(const FBox2D& Box, const FVector2D& Point)
-{
-	const FVector2D Clamped(FMath::Clamp(Point.X, Box.Min.X, Box.Max.X), FMath::Clamp(Point.Y, Box.Min.Y, Box.Max.Y));
-	return FVector2D::Distance(Clamped, Point);
-}
 }
 
 AWorldStreamer::AWorldStreamer()
@@ -217,7 +211,7 @@ bool AWorldStreamer::GetStartTransform(FTransform& OutTransform)
 
 int32 AWorldStreamer::WantedDetail(const FTileState& Tile, const FVector2D& Location) const
 {
-	const double Distance = DistanceToBox(Tile.Bounds, Location);
+	const double Distance = DistanceToBox2D(Tile.Bounds, Location);
 	if (Distance < NearDistance)
 	{
 		return int32(EWorldTileDetail::Near);
@@ -459,7 +453,7 @@ void AWorldStreamer::UpdateWanted(const FVector& Location)
 			Order.Add(Index);
 		}
 	}
-	Order.Sort([&](int32 A, int32 B) { return DistanceToBox(Tiles[A].Bounds, Viewer) < DistanceToBox(Tiles[B].Bounds, Viewer); });
+	Order.Sort([&](int32 A, int32 B) { return DistanceToBox2D(Tiles[A].Bounds, Viewer) < DistanceToBox2D(Tiles[B].Bounds, Viewer); });
 	for (const int32 Index : Order)
 	{
 		if (BuildsInFlight >= MaxBuildsInFlight)
@@ -560,7 +554,7 @@ void AWorldStreamer::Tick(float DeltaSeconds)
 		const int32 First = SpawnJobs.Num() > 0 && SpawnJobs[0]->NextStep > 0 ? 1 : 0;
 		Algo::Sort(MakeArrayView(SpawnJobs).Slice(First, SpawnJobs.Num() - First), [&](const TSharedPtr<FTileSpawnJob>& A, const TSharedPtr<FTileSpawnJob>& B)
 		{
-			return DistanceToBox(Tiles[A->Build->TileIndex].Bounds, Viewer) < DistanceToBox(Tiles[B->Build->TileIndex].Bounds, Viewer);
+			return DistanceToBox2D(Tiles[A->Build->TileIndex].Bounds, Viewer) < DistanceToBox2D(Tiles[B->Build->TileIndex].Bounds, Viewer);
 		});
 	}
 	RunSpawnJobs(SpawnBudgetMs / 1000.0, /*bCookNow=*/false);

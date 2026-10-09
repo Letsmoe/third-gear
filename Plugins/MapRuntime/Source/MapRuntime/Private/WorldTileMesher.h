@@ -16,6 +16,12 @@ enum class EWorldTileDetail : uint8
 	Far = 2,
 };
 
+/** Shortest distance from a point to a rectangle, 0 inside. */
+inline double DistanceToBox2D(const FBox2D& Box, const FVector2D& Point)
+{
+	return FMath::Sqrt(Box.ComputeSquaredDistanceToPoint(Point));
+}
+
 /** What the mesher needs to know about the game's assets; filled on the game thread, read by workers. */
 struct FWorldMeshingContext
 {
