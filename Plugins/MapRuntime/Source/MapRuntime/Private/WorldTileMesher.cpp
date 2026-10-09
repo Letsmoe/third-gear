@@ -6,6 +6,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "WorldFurniture.h"
+#include "WorldKitBuildings.h"
 #include "WorldSnow.h"
 #include "WorldTileData.h"
 
@@ -742,7 +743,7 @@ void BuildGabledRoof(const FWorldBuilding& Building, int32 RoofMaterial, int32 F
 	AddGable(Corners[1], Corners[2], RidgeB);
 }
 
-void BuildBuilding(const FWorldTileData& Tile, const FWorldBuilding& Building, FWorldTileMeshes& Meshes)
+void BuildBuilding(const FWorldTileData& Tile, const FWorldBuilding& Building, FWorldTileMeshes& Meshes, FWorldMeshBuilder& Target)
 {
 	if (Building.Footprint.Rings.IsEmpty() || Building.Footprint.Rings[0].Num() < 3)
 	{
@@ -755,16 +756,41 @@ void BuildBuilding(const FWorldTileData& Tile, const FWorldBuilding& Building, F
 	const FColor Color(Building.Tint, Building.Variation, 0, 255);
 	for (const TArray<FVector2f>& Ring : Building.Footprint.Rings)
 	{
-		BuildWalls(Building, Ring, FacadeMaterial, Color, Meshes.Buildings);
+		BuildWalls(Building, Ring, FacadeMaterial, Color, Target);
 	}
 	if (Building.RoofShape == EWorldRoofShape::Gabled)
 	{
-		BuildGabledRoof(Building, RoofMaterial, FacadeMaterial, Color, Meshes.Buildings);
+		BuildGabledRoof(Building, RoofMaterial, FacadeMaterial, Color, Target);
 	}
 	else
 	{
-		BuildFlatRoof(Tile, Building, RoofMaterial, Meshes.Buildings);
+		BuildFlatRoof(Tile, Building, RoofMaterial, Target);
 	}
+}
+
+/**
+ * Building from the kit: wall and decoration instances, generated roof, and the extruded shell as invisible collision.
+ * Replaces BuildBuilding for the buildings IsKitBuilding accepts.
+ */
+void BuildKitVersion(const FWorldTileData& Tile, const FWorldBuilding& Building, FWorldTileMeshes& Meshes)
+{
+	if (!Meshes.Kit)
+	{
+		Meshes.Kit = MakeShared<FWorldKitInstances>();
+	}
+	const FString Facade = Tile.Names.IsValidIndex(Building.Facade) ? Tile.Names[Building.Facade] : FString(TEXT("Facade_Plaster"));
+	FKitRoofMaterials Materials;
+	Materials.RoofTiles = MaterialSlot(Meshes, TEXT("Roof_Tiles"));
+	Materials.RoofFlat = MaterialSlot(Meshes, TEXT("Roof_Flat"));
+	Materials.Gable = MaterialSlot(Meshes, Facade);
+	float FlatRoofZ = 0.f;
+	if (BuildKitBuilding(Tile, Building, Materials, *Meshes.Kit, Meshes.KitRoofs, FlatRoofZ))
+	{
+		FWorldBuilding Flat = Building;
+		Flat.EaveHeight = FlatRoofZ - Building.BaseZ;
+		BuildFlatRoof(Tile, Flat, Materials.RoofFlat, Meshes.KitRoofs);
+	}
+	BuildBuilding(Tile, Building, Meshes, Meshes.KitCollision);
 }
 
 // --- plants ---------------------------------------------------------------------------------------------------
@@ -805,6 +831,9 @@ void BuildPlants(const FWorldTileData& Tile, EWorldTileDetail Detail, const FWor
 }
 }
 
+/** tg.KitBuildings 0 keeps the plain extruded buildings, to compare what the kit costs. */
+static TAutoConsoleVariable<int32> CVarKitBuildings(TEXT("tg.KitBuildings"), 1, TEXT("1 builds near buildings from the building kit, 0 extrudes the footprints."));
+
 /** tg.Furniture 0 leaves lamps, signal poles and signs out, to measure what they cost. */
 static TAutoConsoleVariable<int32> CVarFurniture(TEXT("tg.Furniture"), 1, TEXT("1 builds street furniture (lamps, signals, signs), 0 leaves it out."));
 
@@ -822,9 +851,16 @@ FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDeta
 			BuildMarking(Tile, Marking, Meshes);
 		}
 	}
+	const bool bKitBuildings = Detail == EWorldTileDetail::Near && CVarKitBuildings.GetValueOnAnyThread() != 0
+		&& !FParse::Param(FCommandLine::Get(), TEXT("NoKitBuildings"));
 	for (const FWorldBuilding& Building : Tile.Buildings)
 	{
-		BuildBuilding(Tile, Building, Meshes);
+		if (bKitBuildings && IsKitBuilding(Building))
+		{
+			BuildKitVersion(Tile, Building, Meshes);
+			continue;
+		}
+		BuildBuilding(Tile, Building, Meshes, Meshes.Buildings);
 	}
 	BuildPlants(Tile, Detail, Context, Meshes);
 	if (Detail == EWorldTileDetail::Near && !Tile.Pois.IsEmpty() && CVarFurniture.GetValueOnAnyThread() != 0 && !FParse::Param(FCommandLine::Get(), TEXT("NoFurniture")))
@@ -849,5 +885,13 @@ FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDeta
 	});
 	Meshes.MarkingsMesh = Meshes.Markings.ToDynamicMesh();
 	Meshes.BuildingsMesh = Meshes.Buildings.ToDynamicMesh();
+	if (!Meshes.KitRoofs.IsEmpty())
+	{
+		Meshes.KitRoofsMesh = Meshes.KitRoofs.ToDynamicMesh();
+	}
+	if (!Meshes.KitCollision.IsEmpty())
+	{
+		Meshes.KitCollisionMesh = Meshes.KitCollision.ToDynamicMesh();
+	}
 	return Meshes;
 }

@@ -18,6 +18,7 @@ pointing from the street into the building's back; W and D are its extents along
 side unless the building is part of a row, then it runs along the row.
 """
 import math
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -43,6 +44,8 @@ CLASS_NAMES = [
     "shed_garage",             # 11 garage, shed, carport, outbuilding
     "industrial_hall",         # 12
     "public",                  # 13 school, church, station and other institutional buildings
+    "retail_centre",           # 14 shopping centre, department store, supermarket, DIY store
+    "halftimbered_town",       # 15 historic half-timbered town house of the old centre (Sachsentor)
 ]
 CLASS_ID = {name: index for index, name in enumerate(CLASS_NAMES)}
 
@@ -91,6 +94,8 @@ COMMERCIAL_TAGS = {"retail", "commercial", "office", "supermarket", "kiosk", "ma
 FARM_TAGS = {"farm", "barn", "farm_auxiliary", "stable", "cowshed", "sty", "livestock"}
 RESIDENTIAL_TAGS = {"house", "detached", "semidetached_house", "terrace", "apartments", "residential", "yes",
                     "dormitory", "bungalow", "duplex", "semi", "townhouse", "villa", "block"}
+BIG_SHOP_VALUES = {"mall", "supermarket", "department_store", "doityourself", "trade", "wholesale", "furniture",
+                   "electronics", "garden_centre"}
 SHOP_AMENITIES = {"restaurant", "cafe", "fast_food", "bank", "pharmacy", "bar", "pub", "post_office", "dentist",
                   "doctors", "ice_cream", "biergarten", "marketplace", "bureau_de_change"}
 
@@ -100,6 +105,7 @@ CLASS_PITCH = {
     "terraced": (30, 45), "semidetached": (35, 50), "detached_postwar": (30, 45), "villa": (45, 58),
     "commercial_groundfloor": (35, 48), "vierlande_farmhouse": (48, 55), "shed_garage": (18, 28),
     "public": (35, 50), "modern": (20, 28), "slab_block": (3, 5), "industrial_hall": (3, 8),
+    "retail_centre": (3, 5), "halftimbered_town": (45, 55),
 }
 # class -> (storey height m, ground floor height m, plinth above terrain m)
 CLASS_STOREY = {
@@ -108,6 +114,7 @@ CLASS_STOREY = {
     "detached_postwar": (2.75, 2.75, 0.4), "villa": (3.4, 3.6, 0.8), "modern": (2.8, 2.8, 0.2),
     "commercial_groundfloor": (3.2, 4.0, 0.1), "vierlande_farmhouse": (2.3, 2.3, 0.5), "shed_garage": (2.8, 2.8, 0.1),
     "industrial_hall": (7.0, 7.0, 0.6), "public": (3.5, 3.8, 0.5),
+    "retail_centre": (4.5, 5.0, 0.2), "halftimbered_town": (2.9, 3.2, 0.5),
 }
 
 # Estate detection: this many identical footprints nearby mean a planned estate.
@@ -160,6 +167,9 @@ def _parse_year(value):
     """First four-digit year in a start_date value such as '1898', '1890-1905' or 'C19'; None if there is none."""
     if not value:
         return None
+    century = re.match(r"^\s*~?C(\d\d)\s*$", str(value))
+    if century:
+        return (int(century.group(1)) - 1) * 100 + 50
     digits = ""
     for character in str(value):
         if character.isdigit():
@@ -516,6 +526,9 @@ def _decide_class(facts: _Facts):
     amenity = tags.get("amenity")
     shop = "shop" in tags or amenity in SHOP_AMENITIES or "office" in tags
 
+    big_shop = tags.get("shop") in BIG_SHOP_VALUES or facts.landuse == "retail"
+    if big_shop and facts.area >= 450 and tag not in OUTBUILDING_TAGS and tag not in PUBLIC_TAGS:
+        return "retail_centre", flags, tag_bits | (TAG_CLASS if tag != "yes" else 0)
     if tag in OUTBUILDING_TAGS:
         return "shed_garage", flags, tag_bits | TAG_CLASS
     if tag in PUBLIC_TAGS or amenity in PUBLIC_AMENITIES:
@@ -540,7 +553,9 @@ def _decide_class(facts: _Facts):
 
 def _commercial_or_hall(facts, flags, tag_bits):
     """Retail, commercial and office buildings: big single storey sheds are halls, the rest shop-and-office houses."""
-    big = facts.area >= 500 and (facts.levels or 1) <= 2
+    big = facts.area >= 500 and (facts.levels or 1) <= 3
+    if big and facts.building_tag in {"retail", "supermarket", "mall"}:
+        return "retail_centre", flags, tag_bits
     if big or facts.area >= 1200:
         return "industrial_hall", flags, tag_bits
     return "commercial_groundfloor", flags | FLAG_SHOP_GROUND_FLOOR, tag_bits
@@ -595,6 +610,9 @@ def _residential(facts, shop, flags, tag_bits):
     if tag in {"semidetached_house", "duplex", "semi"}:
         return "semidetached", flags, tag_bits | TAG_CLASS
 
+    if _is_old_town_house(facts):
+        return "halftimbered_town", flags | (FLAG_SHOP_GROUND_FLOOR if shop or _shop_street_frontage(facts) else 0), tag_bits
+
     if shop or _shop_street_frontage(facts):
         return "commercial_groundfloor", flags | FLAG_SHOP_GROUND_FLOOR, tag_bits
 
@@ -625,6 +643,20 @@ def _residential(facts, shop, flags, tag_bits):
         return _apartment_or_big_house(facts, flags, tag_bits, heritage)
 
     return _detached_or_villa(facts, flags, tag_bits, heritage)
+
+
+def _is_old_town_house(facts):
+    """Half-timbered town house of the old centre: dated before 1870, or a low gabled house in a closed front on a
+    pedestrian street (the Sachsentor type, which is mostly undated in OSM)."""
+    if facts.area > 320 or facts.area < 50:
+        return False
+    if facts.year is not None and facts.year < 1870:
+        return facts.is_urban or facts.near_pedestrian
+    if not (facts.near_pedestrian and (facts.is_attached or facts.row_size >= 2)):
+        return False
+    low = (facts.levels or 2) <= 3
+    pitched = facts.tags.get("roof:shape") in {None, "gabled", "hipped"}
+    return low and pitched and facts.year is None and facts.uniform(18) < 0.7
 
 
 def _shop_street_frontage(facts):
@@ -778,6 +810,8 @@ ROOF_PRIORS = {
     "shed_garage": [("flat", 79), ("gabled", 11), ("skillion", 7), ("hipped", 3)],
     "industrial_hall": [("flat", 77), ("gabled", 19), ("skillion", 4)],
     "public": [("flat", 70), ("gabled", 20), ("hipped", 10)],
+    "retail_centre": [("flat", 92), ("gabled", 8)],
+    "halftimbered_town": [("gabled", 70), ("hipped", 25), ("half_hipped", 5)],
 }
 
 # class -> (storey weights, attic habitable probability)
@@ -797,6 +831,8 @@ STOREY_PRIORS = {
     "shed_garage": ([(1, 1)], 0.0),
     "industrial_hall": ([(1, 1)], 0.0),
     "public": ([(1, 5), (2, 9), (3, 4), (4, 5), (5, 3)], 0.2),
+    "retail_centre": ([(1, 6), (2, 3), (3, 1)], 0.0),
+    "halftimbered_town": ([(2, 6), (3, 3)], 0.95),
 }
 
 

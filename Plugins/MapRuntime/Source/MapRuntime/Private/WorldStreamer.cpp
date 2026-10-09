@@ -22,6 +22,7 @@
 #include "TrafficSubsystem.h"
 #include "GrassField.h"
 #include "WorldFurniture.h"
+#include "WorldKitBuildings.h"
 #include "WorldSnow.h"
 #include "WorldTileActor.h"
 #include "WorldTileData.h"
@@ -65,6 +66,8 @@ struct FTileSpawnJob
 	double LongestStepSeconds = 0.0;
 	/** Next part of the street furniture to add (see AWorldTileActor::AddFurnitureStep). */
 	int32 FurnitureStep = 0;
+	/** Next group of building kit pieces to add (see AddKitInstancesStep). */
+	int32 KitStep = 0;
 };
 
 /** State shared with worker tasks, which may still finish after the streamer is gone. */
@@ -489,6 +492,14 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 	else if (Step == ChunkSteps + 2)
 	{
 		Actor->AddBuildings(MoveTemp(Meshes.BuildingsMesh), Job.Materials, bNear, bCookNow);
+		if (Meshes.KitRoofsMesh.TriangleCount() > 0)
+		{
+			Actor->AddBuildings(MoveTemp(Meshes.KitRoofsMesh), Job.Materials, false, false);
+		}
+		if (Meshes.KitCollisionMesh.TriangleCount() > 0)
+		{
+			Actor->AddBuildings(MoveTemp(Meshes.KitCollisionMesh), Job.Materials, true, bCookNow, /*bVisible=*/false);
+		}
 	}
 	else if (Step <= ChunkSteps + 2 + PlantSteps)
 	{
@@ -504,7 +515,11 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 	}
 	else if (Step == ChunkSteps + 3 + PlantSteps)
 	{
-		if (Meshes.Furniture)
+		if (Meshes.Kit && !AddKitInstancesStep(*Actor, *Meshes.Kit, Job.KitStep++))
+		{
+			--Job.NextStep; // more kit pieces to add: come back to this step
+		}
+		else if (Meshes.Furniture)
 		{
 			FFurnitureMeshes Furniture;
 			const auto Find = [this](const TCHAR* Name) { const TObjectPtr<UStaticMesh>* Mesh = FurnitureMeshes.Find(Name); return Mesh ? Mesh->Get() : nullptr; };
