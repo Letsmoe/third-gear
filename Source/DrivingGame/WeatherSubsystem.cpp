@@ -5,6 +5,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
+#include "WeatherVisuals.h"
 #include "IsobarClimate.h"
 #include "IsobarElevationSource.h"
 #include "IsobarTime.h"
@@ -58,12 +59,17 @@ namespace
 		return Setup;
 	}
 
+	/** Weather seconds of a 1-based day of the year and an hour, clamped to the calendar. */
+	double SecondsAt(int32 DayOfYear, double Hour)
+	{
+		const int32 Day = FMath::Clamp(DayOfYear, 1, IsobarDaysPerYear);
+		return static_cast<double>(IsobarSecondsAt(Day - 1, FMath::Clamp(Hour, 0.0, 23.99)));
+	}
+
 	/** Start time from the command line: a 1-based day of the year and an hour. */
 	double StartSecondsFromCommandLine()
 	{
-		const int32 Day = FMath::Clamp(static_cast<int32>(CommandLineDouble(TEXT("WeatherDay="), 172.0)), 1, IsobarDaysPerYear);
-		const double Hour = FMath::Clamp(CommandLineDouble(TEXT("WeatherHour="), 12.0), 0.0, 23.99);
-		return static_cast<double>(IsobarSecondsAt(Day - 1, Hour));
+		return SecondsAt(static_cast<int32>(CommandLineDouble(TEXT("WeatherDay="), 172.0)), CommandLineDouble(TEXT("WeatherHour="), 12.0));
 	}
 
 	UWeatherSubsystem* FindSubsystem(UWorld* World)
@@ -113,6 +119,23 @@ namespace
 		PrintWeather(Args, World, Output);
 	}
 
+	/** `Weather.SetTime <day> <hour>`: restarts the weather at a 1-based day of the year and an hour. */
+	void SetWeatherTime(const TArray<FString>& Args, UWorld* World, FOutputDevice& Output)
+	{
+		UWeatherSubsystem* Subsystem = FindSubsystem(World);
+		if (!Subsystem || Args.Num() < 2)
+		{
+			Output.Log(TEXT("Usage: Weather.SetTime <day of year 1-365> <hour>"));
+			return;
+		}
+		Subsystem->RestartAt(FCString::Atoi(*Args[0]), FCString::Atod(*Args[1]));
+		PrintWeather(Args, World, Output);
+	}
+
+	FAutoConsoleCommandWithWorldArgsAndOutputDevice SetTimeCommand(
+		TEXT("Weather.SetTime"), TEXT("Weather.SetTime <day> <hour>: restarts the weather at that day of the year and hour."),
+		FConsoleCommandWithWorldArgsAndOutputDeviceDelegate::CreateStatic(&SetWeatherTime));
+
 	FAutoConsoleCommandWithWorldArgsAndOutputDevice PrintCommand(
 		TEXT("Weather.Print"), TEXT("Prints the weather at the car or camera."),
 		FConsoleCommandWithWorldArgsAndOutputDeviceDelegate::CreateStatic(&PrintWeather));
@@ -140,12 +163,32 @@ void UWeatherSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		return;
 	}
 
-	WeatherSeconds = StartSecondsFromCommandLine();
 	TimeScale = CommandLineDouble(TEXT("WeatherTimeScale="), 1.0);
+	StartWeather(StartSecondsFromCommandLine());
+	UE_LOG(LogWeather, Log, TEXT("Weather: %s, seed %u"), *Setup.Climate.Name, Setup.MasterSeed);
+}
+
+void UWeatherSubsystem::StartWeather(double StartSeconds)
+{
+	FString Error;
+	FIsobarWeatherSetup Setup = MakeHamburgSetup(Error);
+	if (!Error.IsEmpty())
+	{
+		return;
+	}
+	WeatherSeconds = StartSeconds;
 	Setup.StartSeconds = static_cast<int64>(WeatherSeconds);
 	Weather = MakeUnique<FIsobarWeather>(Setup);
 	KeepTerrainAroundViewer();
-	UE_LOG(LogWeather, Log, TEXT("Weather: %s, seed %u"), *Setup.Climate.Name, Setup.MasterSeed);
+}
+
+void UWeatherSubsystem::RestartAt(int32 DayOfYear, double Hour)
+{
+	StartWeather(SecondsAt(DayOfYear, Hour));
+	if (UWeatherVisualsSubsystem* Visuals = GetWorld()->GetSubsystem<UWeatherVisualsSubsystem>())
+	{
+		Visuals->Snap();
+	}
 }
 
 void UWeatherSubsystem::Deinitialize()

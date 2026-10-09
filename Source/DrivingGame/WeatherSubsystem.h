@@ -17,7 +17,8 @@
  * Owns the weather clock. It starts at a day and hour from the command line
  * (`-WeatherDay=` 1-365, `-WeatherHour=`, defaults midsummer noon), advances with
  * game time times `-WeatherTimeScale=`, and is seeded by `-WeatherSeed=`. Nothing
- * is drawn yet; rain, sky and road surfaces read from here later (#15, #8, #25).
+ * is drawn yet; rain, sky and road surfaces read from here later (#15, #8, #25). `Weather.SetTime <day> <hour>`
+ * restarts it at another time, for screenshots of several times of day in one run.
  */
 UCLASS()
 class DRIVINGGAME_API UWeatherSubsystem : public UTickableWorldSubsystem
@@ -39,6 +40,9 @@ public:
 	/** Moves the weather clock forward, running every weather step on the way. */
 	void SkipHours(double Hours);
 
+	/** Starts the weather afresh at a 1-based day of the year and an hour, earlier or later than now. */
+	void RestartAt(int32 DayOfYear, double Hour);
+
 	/** Weather time in seconds since the first of January, 00:00 local solar time. */
 	double GetWeatherSeconds() const;
 
@@ -46,6 +50,9 @@ public:
 	bool FindViewerLocation(FVector& OutLocation) const;
 
 private:
+	/** Creates the Isobar weather starting at the given weather seconds. */
+	void StartWeather(double StartSeconds);
+
 	/** Brings the terrain tiles around the viewer in and lets distant ones go. */
 	void KeepTerrainAroundViewer();
 
