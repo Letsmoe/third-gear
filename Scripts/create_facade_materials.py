@@ -23,6 +23,8 @@ cm = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cm)  # only the helpers: the build itself runs under __main__ there
 mel, eal, expr, link, scalar, custom_input = cm.mel, cm.eal, cm.expr, cm.link, cm.scalar, cm.custom_input
 
+# FACADE_WEATHERING=0 builds the instances with the weathering layer off (before and after pictures).
+WEATHERING_ON = os.environ.get("FACADE_WEATHERING", "1") != "0"
 FOLDER = "/Game/World/Facades"
 MASTER = f"{FOLDER}/M_FacadeMaster"
 BOARD_FOLDER = f"{FOLDER}/Board"
@@ -35,9 +37,23 @@ WEATHERING_FOLDER = f"{MEGASCANS}/Weathering"
 MAP_KINDS = ("BaseColor", "Normal", "Roughness", "AO")
 
 WALL_UV_HLSL = """
-// Wall space in metres: the mesher's UV already is (u along the wall, -height). The material board's cubes have no such UV,
-// so with Board 1 it maps world x and height instead.
-return lerp(UV, float2(WorldPos.x, -WorldPos.z) * 0.01, Board);
+// Wall space in metres: the mesher's UV already is (u along the wall, -height). With WorldProjection 1 (the material board,
+// meshes without wall UVs) it is a world-aligned box projection instead: walls facing east or west use y, walls facing north
+// or south use x, both use the height, and roofs and floors use x and y. No face stretches, whatever the mesh's own UVs say.
+float2 Box;
+if (abs(Normal.z) > 0.7)
+{
+	Box = WorldPos.xy * 0.01;
+}
+else if (abs(Normal.x) > abs(Normal.y))
+{
+	Box = float2(-sign(Normal.x) * WorldPos.y, -WorldPos.z) * 0.01;
+}
+else
+{
+	Box = float2(sign(Normal.y) * WorldPos.x, -WorldPos.z) * 0.01;
+}
+return lerp(UV, Box, WorldProjection);
 """
 
 UV_HLSL = """
@@ -52,8 +68,11 @@ FDgFacadeSurface Surface = DgFacadeSampleSurface(TexColor, TexColorSampler, TexN
 float3 Color = DgFacadeShift(Surface.Color, HueShift + (Variation - 0.5) * HueJitter, Saturation, Value);
 Color = DgFacadeRecolor(Color, ScanMean, Recolor, RecolorAmount);
 Color *= DgFacadeBrightness(BuildingTint, TintMin, TintMax, Metres);
-NormalOut = normalize(float3(Surface.NormalXY * NormalStrength, 1.0));
-RoughOut = saturate(Surface.Roughness * RoughnessScale);
+float2 GrainTilt;
+float GrainRough;
+DgFacadeFineGrain(Metres, FineGrain, GrainTilt, GrainRough);
+NormalOut = normalize(float3(Surface.NormalXY * NormalStrength + GrainTilt, 1.0));
+RoughOut = saturate(Surface.Roughness * RoughnessScale + GrainRough);
 AOOut = Surface.AO;
 return Color;
 """
@@ -105,7 +124,8 @@ SCAN_MEAN = {
 # Reflectances: Hamburg clinker 0.13 to 0.19, white render 0.6 to 0.75, beige 0.4 to 0.5, slab concrete 0.25 to 0.35.
 FACADES = {
     # Instances the streamed world's section names resolve to.
-    "Facade_Brick": dict(set="ms:brick_facade_efa35b96", tile=(2, 2), value=0.62, hue=-0.008, saturation=1.1, parallax=0.012,
+    "Facade_Brick": dict(set="ms:brick_facade_efa35b96", tile=(2, 2), value=0.55, hue=-0.012, saturation=1.0, recolor=(0.40, 0.24, 0.26),
+                         amount=0.5, parallax=0.012,
                          tint=(0.8, 1.15), windows=True),
     "Facade_Plaster": dict(set="Plaster/white_stucco_02", tile=(2.5, 2.5), recolor=(0.90, 0.86, 0.76), amount=1.0, anti_tile=1.0,
                            normal=1.5, tint=(0.85, 1.05), parallax=0.006, windows=True),
@@ -115,10 +135,10 @@ FACADES = {
                          tint=(0.8, 1.15), parallax=0.02, windows=False),
     "Roof_Tiles": dict(set="Roof/clay_roof_tiles_03", tile=(2.5, 2.5), tint=(0.75, 1.1), parallax=0.03),
     # Kit materials by typology class (typology.md).
-    "Facade_ClinkerDeepRed": dict(set="ms:brick_facade_efa35b96", tile=(2, 2), value=0.58, hue=-0.012, saturation=1.1,
-                                  parallax=0.012, tint=(0.8, 1.15)),
-    "Facade_ClinkerYellowBrown": dict(set="ms:brick_facade_56f913a0", tile=(2, 2), hue=0.05, saturation=0.72, value=0.8,
-                                      parallax=0.006, tint=(0.8, 1.15)),
+    "Facade_ClinkerDeepRed": dict(set="ms:brick_facade_efa35b96", tile=(2, 2), value=0.55, hue=-0.012, saturation=1.0, recolor=(0.40, 0.24, 0.26),
+                                  amount=0.5, parallax=0.012, tint=(0.8, 1.15)),
+    "Facade_ClinkerYellowBrown": dict(set="ms:brick_wall_5d318a8f", tile=(4, 2), hue=0.062, saturation=0.95, value=1.25,
+                                      parallax=0.012, tint=(0.8, 1.15)),
     "Facade_BrickGruenderzeit": dict(set="ms:brick_wall_5d318a8f", tile=(4, 2), value=1.0, saturation=1.1, parallax=0.012,
                                      tint=(0.75, 1.15)),
     "Facade_BrickSooty": dict(set="ms:brick_wall_e2865ee3", tile=(1, 2), value=1.2, parallax=0.012, tint=(0.8, 1.1)),
@@ -133,13 +153,13 @@ FACADES = {
     "Facade_RenderScratchGrey": dict(set="Plaster/white_stucco_02", tile=(2.5, 2.5), normal=1.5, recolor=(0.62, 0.62, 0.61), amount=1.0,
                                      anti_tile=1.0, parallax=0.004, tint=(0.88, 1.05)),
     "Facade_RenderSmoothWhite": dict(set="ms:stucco_facade_a78c4b5c", tile=(2, 2), recolor=(0.95, 0.95, 0.93), amount=1.0,
-                                     anti_tile=1.0, normal=0.5, tint=(0.9, 1.05)),
+                                     anti_tile=1.0, normal=0.6, grain=1.0, tint=(0.9, 1.05)),
     "Facade_RenderSmoothBeige": dict(set="ms:stucco_facade_a78c4b5c", tile=(2, 2), recolor=(0.86, 0.78, 0.64), amount=1.0,
-                                     anti_tile=1.0, normal=0.5, tint=(0.9, 1.05)),
+                                     anti_tile=1.0, normal=0.6, grain=1.0, tint=(0.9, 1.05)),
     "Facade_RenderSmoothPastel": dict(set="ms:stucco_facade_a78c4b5c", tile=(2, 2), recolor=(0.80, 0.86, 0.80), amount=1.0,
-                                      anti_tile=1.0, normal=0.5, tint=(0.9, 1.05)),
+                                      anti_tile=1.0, normal=0.6, grain=1.0, tint=(0.9, 1.05)),
     "Facade_RenderSmoothGrey": dict(set="ms:stucco_facade_a78c4b5c", tile=(2, 2), recolor=(0.58, 0.60, 0.62), amount=1.0,
-                                    anti_tile=1.0, normal=0.5, tint=(0.9, 1.05)),
+                                    anti_tile=1.0, normal=0.6, grain=1.0, tint=(0.9, 1.05)),
     "Facade_ConcreteSlab": dict(set="Concrete/concrete_wall_004", tile=(3, 3), recolor=(0.60, 0.59, 0.56), amount=1.0, parallax=0.006,
                                 tint=(0.8, 1.05)),
     "Facade_ConcreteStained": dict(set="ms:weathered_concrete_wall_9485cd8b", tile=(2, 1), parallax=0.01, tint=(0.8, 1.05)),
@@ -283,10 +303,11 @@ def build_master():
     link(tile, "", tile_xy, "")
     wall_uv = expr(m, unreal.MaterialExpressionCustom, -2200, 100, code=WALL_UV_HLSL, description="WallUV",
                    output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT2,
-                   inputs=[custom_input("UV"), custom_input("WorldPos"), custom_input("Board")])
+                   inputs=[custom_input("UV"), custom_input("WorldPos"), custom_input("Normal"), custom_input("WorldProjection")])
     link(texcoord, "", wall_uv, "UV")
     link(expr(m, unreal.MaterialExpressionWorldPosition, -2400, 600), "", wall_uv, "WorldPos")
-    link(scalar(m, "Board", 0.0, -2400, 700), "", wall_uv, "Board")
+    link(expr(m, unreal.MaterialExpressionVertexNormalWS, -2400, 800), "", wall_uv, "Normal")
+    link(scalar(m, "WorldProjection", 0.0, -2400, 700), "", wall_uv, "WorldProjection")
     uv_node = expr(m, unreal.MaterialExpressionCustom, -2000, 100, code=UV_HLSL, description="FacadeUV",
                    output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT2,
                    inputs=[custom_input("Wall"), custom_input("Tile"), custom_input("Variation")])
@@ -297,9 +318,9 @@ def build_master():
 
     surface = expr(m, unreal.MaterialExpressionCustom, -800, 0, code=SURFACE_HLSL, description="FacadeSurface",
                    output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3,
-                   include_file_paths=[cm.TERRAIN_INCLUDE, FACADE_INCLUDE])
+                   include_file_paths=[cm.TERRAIN_INCLUDE, *WEATHERING_INCLUDES[:1], FACADE_INCLUDE])
     names = ["Uv", "WorldPos", "AntiTile", "HueShift", "HueJitter", "Saturation", "Value", "ScanMean", "Recolor",
-             "RecolorAmount", "BuildingTint", "TintMin", "TintMax", "Variation", "NormalStrength", "RoughnessScale"]
+             "RecolorAmount", "BuildingTint", "TintMin", "TintMax", "Variation", "NormalStrength", "RoughnessScale", "FineGrain"]
     surface.set_editor_property("inputs", [custom_input(n) for n in ("TexColor", "TexNormal", "TexRough", "TexAO", *names)])
     surface.set_editor_property("additional_outputs", [
         cm.custom_output("NormalOut", unreal.CustomMaterialOutputType.CMOT_FLOAT3),
@@ -316,7 +337,7 @@ def build_master():
     link(vertex_color, "R", surface, "BuildingTint")
     link(vertex_color, "G", surface, "Variation")
     defaults = dict(AntiTile=0.0, HueShift=0.0, HueJitter=0.03, Saturation=1.0, Value=1.0, RecolorAmount=0.0, TintMin=1.0,
-                    TintMax=1.0, NormalStrength=1.0, RoughnessScale=1.0)
+                    TintMax=1.0, NormalStrength=1.0, RoughnessScale=1.0, FineGrain=0.0)
     y = 400
     for name, default in defaults.items():
         link(scalar(m, name, default, -1300, y), "", surface, name)
@@ -399,7 +420,7 @@ def build_instance(master, name, settings, board=False):
     existing = unreal.load_asset(path) if eal.does_asset_exist(path) else None
     mi = existing or cm.asset_tools.create_asset(path.split("/")[-1], path.rsplit("/", 1)[0], unreal.MaterialInstanceConstant,
                                                  unreal.MaterialInstanceConstantFactoryNew())
-    mel.set_material_instance_scalar_parameter_value(mi, "Board", 1.0 if board else 0.0)
+    mel.set_material_instance_scalar_parameter_value(mi, "WorldProjection", 1.0 if board else 0.0)
     mel.set_material_instance_parent(mi, master)
     set_ref = settings["set"]
     for kind in (*MAP_KINDS, "Height"):
@@ -417,7 +438,7 @@ def build_instance(master, name, settings, board=False):
         mel.set_material_instance_scalar_parameter_value(mi, "RecolorAmount", settings.get("amount", 1.0))
     scalars = {"HueShift": settings.get("hue", 0.0), "Saturation": settings.get("saturation", 1.0),
                "Value": settings.get("value", 1.0), "NormalStrength": settings.get("normal", 1.0),
-               "RoughnessScale": settings.get("rough", 1.0), "AntiTile": settings.get("anti_tile", 0.0),
+               "RoughnessScale": settings.get("rough", 1.0), "AntiTile": settings.get("anti_tile", 0.0), "FineGrain": settings.get("grain", 0.0),
                "TintMin": settings.get("tint", (1.0, 1.0))[0], "TintMax": settings.get("tint", (1.0, 1.0))[1]}
     for parameter, value in scalars.items():
         mel.set_material_instance_scalar_parameter_value(mi, parameter, value)
@@ -426,7 +447,7 @@ def build_instance(master, name, settings, board=False):
     if parallax is not None:
         mel.set_material_instance_scalar_parameter_value(mi, "HeightRatio", parallax)
     mel.set_material_instance_static_switch_parameter_value(mi, "Windows", bool(settings.get("windows")))
-    weather = CLASS_WEATHER.get(name) if not name.startswith("Roof_") else None
+    weather = CLASS_WEATHER.get(name) if WEATHERING_ON and not name.startswith("Roof_") else None
     mel.set_material_instance_static_switch_parameter_value(mi, "Weathering", weather is not None)
     if weather is not None:
         for parameter, value in {**WEATHERING_DEFAULTS, **weather}.items():
