@@ -57,19 +57,18 @@ struct FPaintOption
 	float Weight;
 };
 
-/** Colours of new cars in Germany: mostly grey, black, white and silver, with some blue and red. Linear albedo. */
+/** Colours of new cars in Germany (KBA): about a third grey and silver, a quarter black, a sixth white, then blue, red and a few others. Linear albedo. */
 const FPaintOption PaintPalette[] = {
-	{FLinearColor(0.150f, 0.155f, 0.162f), 18.f},   // grey
-	{FLinearColor(0.045f, 0.047f, 0.050f), 14.f},   // anthracite
-	{FLinearColor(0.012f, 0.012f, 0.013f), 18.f},   // black
-	{FLinearColor(0.640f, 0.640f, 0.620f), 20.f},   // white
-	{FLinearColor(0.330f, 0.340f, 0.350f), 10.f},   // silver
-	{FLinearColor(0.010f, 0.022f, 0.075f), 8.f},    // dark blue
-	{FLinearColor(0.300f, 0.012f, 0.010f), 5.f},    // red
-	{FLinearColor(0.012f, 0.040f, 0.022f), 1.5f},   // dark green
-	{FLinearColor(0.330f, 0.270f, 0.190f), 2.f},    // champagne
+	{FLinearColor(0.150f, 0.155f, 0.162f), 17.f},   // grey
+	{FLinearColor(0.330f, 0.340f, 0.350f), 16.f},   // silver
+	{FLinearColor(0.012f, 0.012f, 0.013f), 25.f},   // black
+	{FLinearColor(0.640f, 0.640f, 0.620f), 17.f},   // white
+	{FLinearColor(0.008f, 0.020f, 0.080f), 10.f},   // dark blue
+	{FLinearColor(0.300f, 0.012f, 0.010f), 6.f},    // red
+	{FLinearColor(0.012f, 0.040f, 0.022f), 3.f},    // dark green
+	{FLinearColor(0.070f, 0.035f, 0.025f), 2.f},    // brown
+	{FLinearColor(0.330f, 0.270f, 0.190f), 2.f},    // beige
 	{FLinearColor(0.380f, 0.150f, 0.020f), 1.f},    // orange
-	{FLinearColor(0.070f, 0.035f, 0.025f), 1.5f},   // brown
 };
 
 TSharedPtr<FTrafficVehicleModel> MakeModel(const TCHAR* Folder, const TCHAR* Type, const TCHAR* Tag, float Weight)
