@@ -233,7 +233,7 @@ void UTrafficSubsystem::EnsureLightPool()
 		Light->SetupAttachment(Root);
 		Light->RegisterComponent();
 		Light->SetIntensityUnits(ELightUnits::Candelas);
-		Light->SetIntensity(30.f);
+		Light->SetIntensity(8.f);
 		Light->SetSourceRadius(5.f);
 		SetupLight(Light, 900.f);
 		LensLights.Add(Light);
