@@ -29,7 +29,8 @@ static TAutoConsoleVariable<int32> CVarFakeHeadlights(TEXT("tg.FakeHeadlights"),
 
 namespace
 {
-constexpr int32 LampLightCount = 20;
+// MegaLights keeps many unshadowed local lights cheap; 64 covers the lamps within about 300 m of a lit street.
+constexpr int32 LampLightCount = 64;
 constexpr int32 LensLightCount = 10;
 constexpr float LampLightRangeCm = 11000.f;
 constexpr float LensLightRangeCm = 7000.f;

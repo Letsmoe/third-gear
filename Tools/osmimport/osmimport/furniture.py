@@ -34,6 +34,10 @@ STOP_LINE_MIN_SETBACK = 5.0
 POLE_SETBACK = 0.75
 KERB_CLEARANCE = 0.55
 LAMP_SPACING = 36.0
+# Every street in a German town is lit, but OSM tags lit=yes on only a few; these get lamps unless tagged lit=no
+# or signed faster than a town street.
+TOWN_STREETS = {"primary", "secondary", "tertiary", "unclassified", "residential", "living_street",
+                "primary_link", "secondary_link", "tertiary_link"}
 LAMP_OSM_MIN_GAP = 14.0
 SIGN_DISTANCE_FROM_JUNCTION = 9.0
 PARALLEL_DOT = 0.82
@@ -602,9 +606,20 @@ class FurnitureBuilder:
         self.lamps = [{"x": x, "y": y, "yaw": yaw, "source": "osm"} for x, y, yaw in osm_lamps]
         osm_points = shapely.MultiPoint([(x, y) for x, y, _ in osm_lamps]) if osm_lamps else None
         for way in self.graph.ways:
-            if way.tags.get("lit") != "yes" or way.tags.get("highway") in {"motorway", "motorway_link"}:
-                continue
-            self._add_lit_way_lamps(way, osm_points)
+            if self._is_lit(way):
+                self._add_lit_way_lamps(way, osm_points)
+
+    @staticmethod
+    def _is_lit(way):
+        """Whether a way has street lighting: tagged lit=yes, or an untagged town street."""
+        lit = way.tags.get("lit")
+        highway = way.tags.get("highway")
+        if highway in {"motorway", "motorway_link"} or lit == "no":
+            return False
+        if lit == "yes":
+            return True
+        speed = parse_speed(way.tags, urban=True)
+        return highway in TOWN_STREETS and (speed is None or 0 < speed <= 50)
 
     def _add_lit_way_lamps(self, way, osm_points):
         """Evenly spaced lamps along a lit way: right side only on narrow roads, alternating sides on wide ones."""

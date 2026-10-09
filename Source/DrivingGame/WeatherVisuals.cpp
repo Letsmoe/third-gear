@@ -49,7 +49,13 @@ namespace WeatherVisualsDetail
 	constexpr float CalibratedEV100 = 12.8f;
 	constexpr float CalibratedSunAltitudeDegrees = 38.f;
 	/** Exposure never opens further than this at night, so dark stays dark. */
-	constexpr float NightEV100 = 2.5f;
+	constexpr float NightEV100 = 1.5f;
+	/**
+	 * Sky glow over a town at night: the cloud deck and the haze lit orange by street lamps from below, about
+	 * 0.1 cd/m2 under clear skies and several times that under low cloud.
+	 */
+	const FLinearColor SkyGlowLuminance(0.5f, 0.31f, 0.18f);
+	constexpr float OvercastSkyGlowGain = 3.f;
 
 	/** Direct sun left under a closed deck, and the diffuse light such a day has relative to a clear one. */
 	constexpr float OvercastSunTransmission = 0.02f;
@@ -249,6 +255,7 @@ void UWeatherVisualsSubsystem::FindLevelActors()
 	if (FogIt)
 	{
 		Fog = FogIt->GetComponent();
+		BaseFogInscattering = FogIt->GetComponent()->FogInscatteringLuminance;
 	}
 	for (TActorIterator<APostProcessVolume> It(World); It; ++It)
 	{
@@ -398,6 +405,7 @@ void UWeatherVisualsSubsystem::ApplySun()
 	const FIsobarCalendar Calendar = IsobarCalendarAt(Weather->GetWeatherSeconds());
 	const FIsobarSunPosition Position = IsobarSunAtTimeOfDay(WeatherVisualsDetail::MapLatitudeDegrees, Calendar.DayOfYear, Calendar.DayFraction);
 	// Isobar: X east, Y north, Z up. Unreal: X east, Y south. The light shines away from the sun.
+	SunAltitudeDegrees = float(Position.GetAltitudeDegrees());
 	const FVector ToSun(Position.Direction.X, 0.0 - Position.Direction.Y, Position.Direction.Z);
 	Light->SetActorRotation((-ToSun).Rotation());
 	const float Transmission = SunTransmission();
@@ -422,11 +430,19 @@ void UWeatherVisualsSubsystem::ApplySky()
 	// The atmosphere is lit by the sun alone, so dimming the sun for the cloud deck would darken the sky with it.
 	// A real deck turns the beam into diffuse light: the sky gets brighter by what the beam loses, minus what the
 	// cloud absorbs and reflects back up (an overcast day has about 40 % of a clear day's light).
+	// The deck brightens the sky only with the sun up: at night it hides the twilight instead of amplifying it.
+	const float Daylight = WeatherVisualsDetail::SmoothStep01(-3.f, 4.f, SunAltitudeDegrees);
 	const float DeckTransmission = FMath::Lerp(1.f, WeatherVisualsDetail::OvercastSunTransmission, Overcast);
-	const float SkyGain = WeatherVisualsDetail::ClearSkyGain * FMath::Lerp(1.f, WeatherVisualsDetail::OvercastDiffuseShare / DeckTransmission, Overcast);
+	const float DeckGain = FMath::Lerp(1.f, WeatherVisualsDetail::OvercastDiffuseShare / DeckTransmission, Overcast);
+	const float SkyGain = WeatherVisualsDetail::ClearSkyGain * FMath::Lerp(1.f - 0.95f * Overcast, DeckGain, Daylight);
 	// A flash lights the cloud deck from inside.
 	const float Flash = 1.f + 40.f * FlashLevel();
 	Component->SetSkyLuminanceFactor(FLinearColor(SkyGain, SkyGain, SkyGain) * Flash);
+}
+
+float UWeatherVisualsSubsystem::NightFactor() const
+{
+	return 1.f - WeatherVisualsDetail::SmoothStep01(-6.f, 0.f, SunAltitudeDegrees);
 }
 
 void UWeatherVisualsSubsystem::ApplyFog()
@@ -442,6 +458,8 @@ void UWeatherVisualsSubsystem::ApplyFog()
 	Component->SetSecondFogDensity(FogExtinction * WeatherVisualsDetail::FogDensityPerExtinction);
 	Component->SetSecondFogHeightFalloff(WeatherVisualsDetail::RadiationFogHeightFalloff);
 	Component->SetSecondFogHeightOffset(0.f);
+	const float Glow = NightFactor() * FMath::Lerp(1.f, WeatherVisualsDetail::OvercastSkyGlowGain, Current.CloudCover);
+	Component->SetFogInscatteringColor(BaseFogInscattering + WeatherVisualsDetail::SkyGlowLuminance * Glow);
 }
 
 void UWeatherVisualsSubsystem::ApplyExposure()
@@ -497,4 +515,5 @@ void UWeatherVisualsSubsystem::ApplyMaterialParameters()
 	Instance->SetScalarParameterValue(TEXT("WindDirectionY"), WindDirection.Y);
 	Instance->SetScalarParameterValue(TEXT("CloudCover"), Current.CloudCover);
 	Instance->SetScalarParameterValue(TEXT("Thunder"), Current.ThunderActivity);
+	Instance->SetScalarParameterValue(TEXT("Night"), NightFactor());
 }
