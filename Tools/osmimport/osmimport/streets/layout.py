@@ -44,11 +44,18 @@ class SegmentLayout:
             result += (shape.node_offsets[key] - own) * blend
         return result
 
+    def line_range(self, key: LineKey) -> tuple:
+        """(start, end) distance along the segment between which the line runs."""
+        return self.start.cuts.get(key, 0.0), self.segment.length() - self.end.cuts.get(key, 0.0)
+
     def line_xy(self, key: LineKey):
         """The line as a polyline between its cuts, or None when nothing is left of it."""
-        total = self.segment.length()
-        start_s = self.start.cuts.get(key, 0.0)
-        end_s = total - self.end.cuts.get(key, 0.0)
+        start_s, end_s = self.line_range(key)
+        return self.line_between(key, start_s, end_s)
+
+    def line_between(self, key: LineKey, start_s: float, end_s: float, shift: float = 0.0):
+        """The part of a line between two distances along the segment, moved sideways by shift (to the right), or
+        None when it is too short."""
         if end_s - start_s < 0.5:
             return None
         centre = polyline.resample(polyline.cut_polyline(self.segment.xy, start_s, end_s),
@@ -56,7 +63,7 @@ class SegmentLayout:
         if len(centre) < 2:
             return None
         along = start_s + polyline.arclength(centre)
-        return polyline.offset_polyline(centre, self.offsets(key, along))
+        return polyline.offset_polyline(centre, self.offsets(key, along) + shift)
 
     def width_at_end(self, at_start: bool) -> float:
         """The kerb to kerb width at one end of the segment."""

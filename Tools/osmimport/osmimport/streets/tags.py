@@ -208,3 +208,20 @@ def cycle_lane_is_advisory(tags, side: str) -> bool:
 def bus_lane_sides(tags) -> list:
     """The sides ("left", "right") with a bus lane on the carriageway."""
     return [side for side, value in side_values(tags, "busway").items() if value in BUS_LANE_VALUES]
+
+
+def turn_lanes(tags, travel) -> list:
+    """The turn:lanes values of the lanes going one way along the way (travel: cross_section.Travel FORWARD or
+    BACKWARD), from the driver's left; [] when not tagged."""
+    if is_oneway(tags):
+        forward_is_travel = not is_reversed_oneway(tags)
+        if (travel.value == "forward") != forward_is_travel:
+            return []
+        value = tags.get("turn:lanes", "")
+    elif travel.value == "forward":
+        value = tags.get("turn:lanes:forward", "")
+    else:
+        value = tags.get("turn:lanes:backward", "")
+    if not value:
+        return []
+    return str(value).split("|")

@@ -20,6 +20,8 @@ class LineKind(Enum):
     EDGE = "edge"        # outer edge of the travel lanes, where an edge line is painted
     CENTRE = "centre"    # between the two directions
     LANE = "lane"        # between two lanes of one direction
+    CYCLE = "cycle"      # between a cycle lane and the lane beside it
+    CYCLE_OUTER = "cycle_outer"   # the kerb side of a cycle lane: unpainted along the road, the furt's second line
 
 
 class Side(Enum):
@@ -65,6 +67,22 @@ def section_lines(section: CrossSection) -> dict:
         key = _divider_key(lanes, position)
         if key is not None:
             lines[key] = lanes[position][2]
+    lines.update(_cycle_lines(section))
+    return lines
+
+
+def _cycle_lines(section: CrossSection) -> dict:
+    """The inner and outer lines of the cycle lanes."""
+    lines = {}
+    for strip, left, right in section.strip_edges():
+        if strip.kind != StripKind.CYCLE_LANE:
+            continue
+        if left + right < 0:
+            lines[LineKey(LineKind.CYCLE, Side.LEFT)] = right
+            lines[LineKey(LineKind.CYCLE_OUTER, Side.LEFT)] = left
+        else:
+            lines[LineKey(LineKind.CYCLE, Side.RIGHT)] = left
+            lines[LineKey(LineKind.CYCLE_OUTER, Side.RIGHT)] = right
     return lines
 
 
@@ -89,7 +107,7 @@ def painted_lines(tags, section: CrossSection, rural: bool) -> dict:
     """{LineKey: marking kind} of the lines painted on a road: lane and centre lines on marked roads with two or more
     lanes wide enough to mark (two-way roads from CENTRE_LINE_MIN_WIDTH, never in a Tempo 30 zone), edge lines on
     major roads and on wide rural ones."""
-    painted = {}
+    painted = painted_cycle_lines(tags, section)
     road_class = osm_tags.highway(tags)
     if road_class not in assumptions.PAINTED_CLASSES or tags.get("lane_markings") == "no" or tags.get("area") == "yes":
         return painted
@@ -100,12 +118,63 @@ def painted_lines(tags, section: CrossSection, rural: bool) -> dict:
     lines = section_lines(section)
     if _lane_lines_painted(tags, section):
         for key in lines:
-            if key.kind in (LineKind.CENTRE, LineKind.LANE):
-                painted[key] = dash
+            if key.kind == LineKind.CENTRE:
+                painted[key] = _centre_line_kind(section, dash)
+            if key.kind == LineKind.LANE:
+                painted[key] = _lane_line_kind(tags, section, key, dash)
     if road_class in assumptions.EDGE_LINE_CLASSES or (rural and width >= assumptions.RURAL_EDGE_LINE_MIN_WIDTH):
         for key in lines:
-            if key.kind == LineKind.EDGE:
+            if key.kind == LineKind.EDGE and LineKey(LineKind.CYCLE, key.side) not in painted:
                 painted[key] = "edge"
+    return painted
+
+
+def _centre_line_kind(section: CrossSection, dash: str) -> str:
+    """A double solid line (Fahrstreifenbegrenzung, Zeichen 295) between the directions where one of them has two or
+    more lanes (VwV-StVO zu Zeichen 295 and 340), else the dashed centre line."""
+    forward = sum(1 for strip in section.travel_lanes() if strip.travel == Travel.FORWARD)
+    backward = sum(1 for strip in section.travel_lanes() if strip.travel == Travel.BACKWARD)
+    if max(forward, backward) >= 2:
+        return "centre_double"
+    return dash
+
+
+def _lane_line_kind(tags, section: CrossSection, key: LineKey, dash: str) -> str:
+    """A broad line beside a lane that turns where its neighbour doesn't (or turns elsewhere): dashed along the road,
+    solid over the queueing length before the junction; else the normal dashed lane line."""
+    turns = osm_tags.turn_lanes(tags, key.travel)
+    lane_count = sum(1 for strip in section.travel_lanes() if strip.travel == key.travel)
+    if len(turns) != lane_count:
+        return dash
+    # Lane lines are counted from the kerb, the turn lanes from the driver's left: line k lies between the turn lanes
+    # lane_count - k and lane_count - k + 1 (from 1).
+    left_lane = turns[lane_count - key.index - 1]
+    right_lane = turns[lane_count - key.index]
+    if _turns_apart(left_lane, right_lane):
+        return "turn_lane"
+    return dash
+
+
+def _turns_apart(first: str, second: str) -> bool:
+    """True when two neighbouring lanes lead to different places and at least one of them only turns."""
+    first_turns = set(first.split(";"))
+    second_turns = set(second.split(";"))
+    if first_turns == second_turns:
+        return False
+    return "through" not in first_turns or "through" not in second_turns
+
+
+def painted_cycle_lines(tags, section: CrossSection) -> dict:
+    """{LineKey: marking kind} of the lines of painted cycle lanes, on every road that has them: a broad solid line
+    beside an exclusive cycle lane, a dashed one beside an advisory lane. They replace the edge line on their side."""
+    painted = {}
+    for key in section_lines(section):
+        if key.kind != LineKind.CYCLE:
+            continue
+        kind = "cycle_exclusive"
+        if osm_tags.cycle_lane_is_advisory(tags, key.side.value):
+            kind = "cycle_advisory"
+        painted[key] = kind
     return painted
 
 

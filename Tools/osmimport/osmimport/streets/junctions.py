@@ -1,11 +1,11 @@
 """Junctions: where each arm's painted lines stop, which arms are one road going straight through, and the guide
-lines that carry lines across the junction.
+lines inside them.
 
 * An arm's mouth is where its carriageway leaves the other arms' carriageways, plus the corner radius: the lane and
   centre lines stop there instead of running into the crossing road, which keeps the junction clear.
-* The road going straight through continues its centre and lane lines across the junction as guide lines (1:1
-  dashes), and its edge lines as broken broad lines across the mouths of side roads. Driveways and other minor arms
-  don't interrupt its lines at all.
+* Lane and centre lines don't run through a junction: where the lines of two crossing roads would meet inside it,
+  a small cross marks the spot. The road going straight through continues its edge lines as broken broad lines
+  across the mouths of side roads. Driveways and other minor arms don't interrupt its lines at all.
 * At signalised junctions, approaches with their own left-turn lanes get guide lines around the corner, along the
   right-hand edge of each left-turn lane's path into the road it turns into.
 """
@@ -25,6 +25,12 @@ MOUTH_SEARCH_STEP = 0.5
 # Points across an arm's carriageway tested against the other arms.
 MOUTH_PROBE_POINTS = 9
 LEFT_TURN_ANGLES = (45.0, 135.0)
+# Lines the through road carries across a junction (edge lines, broken across side roads), and the lines whose
+# crossings with the other road's get a cross instead.
+CONTINUED_KINDS = {LineKind.EDGE, LineKind.CYCLE}
+CROSSED_KINDS = {LineKind.CENTRE, LineKind.LANE}
+# Lines meeting at a shallower angle than this get no cross.
+CROSS_MIN_ANGLE = 30.0
 
 
 class JunctionLines:
@@ -85,12 +91,14 @@ class JunctionLines:
     # ------------------------------------------------------------ guide lines
 
     def guide_lines(self, layouts: list, mouths: dict) -> list:
-        """(marking kind, (n, 2) points) of every guide line through the junctions, from the segment layouts."""
+        """(marking kind, (n, 2) points) of every line inside the junctions, from the segment layouts."""
         result = []
         for node in self.junctions:
             ends = self.network.ends_at[node]
-            for entering, leaving in self._through_pairs(ends):
+            pairs = self._through_pairs(ends)
+            for entering, leaving in pairs:
                 result += self._through_guides(layouts, entering, leaving, ends, mouths)
+            result += self._crosses(layouts, ends, pairs, mouths)
             if self._is_signalised(node):
                 for entering in ends:
                     result += self._left_turn_guides(layouts, entering, ends, mouths)
@@ -128,21 +136,75 @@ class JunctionLines:
         result = []
         for key, kind in entering_painted.items():
             counterpart = mirrored(key)
-            if counterpart not in leaving_painted:
+            if counterpart not in leaving_painted or key.kind not in CONTINUED_KINDS:
                 continue
-            start = self._mouth_point(entering, entering_lines[key], mouths)
-            end = self._mouth_point(leaving, leaving_lines[counterpart], mouths)
-            curve = polyline.smooth_curve(start, -self._direction_at_mouth(entering, mouths), end,
-                                          self._direction_at_mouth(leaving, mouths), assumptions.LINE_POINT_SPACING)
-            result.append((self._guide_kind(key, kind, entering, leaving, side_arms), curve))
+            guide_kind = self._guide_kind(key, kind, entering, leaving, side_arms)
+            continued = [key]
+            if guide_kind == "cycle_furt":
+                continued.append(LineKey(LineKind.CYCLE_OUTER, key.side))
+            for line_key in continued:
+                start = self._mouth_point(entering, entering_lines[line_key], mouths)
+                end = self._mouth_point(leaving, leaving_lines[mirrored(line_key)], mouths)
+                curve = polyline.smooth_curve(start, -self._direction_at_mouth(entering, mouths), end,
+                                              self._direction_at_mouth(leaving, mouths), assumptions.LINE_POINT_SPACING)
+                result.append((guide_kind, curve))
         return result
 
+    def _crosses(self, layouts: list, ends: list, pairs: list, mouths: dict) -> list:
+        """Crosses where the lane and centre lines of two crossing roads would meet inside the junction (German
+        junctions don't carry the lines through). Each road's lines run straight across the junction: from mouth to
+        mouth for a road going through, from the mouth into the junction for one that ends there."""
+        chords = []   # (road number, start, end)
+        paired = set()
+        for road, (entering, leaving) in enumerate(pairs):
+            paired.update((entering, leaving))
+            chords += [(road, start, end) for start, end in self._through_chords(layouts, entering, leaving, mouths)]
+        for road, end in enumerate(ends, start=len(pairs)):
+            if end in paired or self.is_minor(end):
+                continue
+            chords += [(road, start, stop) for start, stop in self._entry_chords(layouts, end, mouths)]
+        result = []
+        for index, (road, start, end) in enumerate(chords):
+            for other_road, other_start, other_end in chords[index + 1:]:
+                if other_road == road:
+                    continue
+                crossing = _segment_intersection(start, end, other_start, other_end)
+                if crossing is None or _crossing_angle(end - start, other_end - other_start) < CROSS_MIN_ANGLE:
+                    continue
+                result += _cross(crossing, end - start, other_end - other_start)
+        return result
+
+    def _through_chords(self, layouts: list, entering: SegmentEnd, leaving: SegmentEnd, mouths: dict) -> list:
+        """(start, end) of the straight lines joining the painted lane and centre lines of a through road's arms."""
+        entering_lines = arm_lines(layouts[entering.segment].lines, entering)
+        leaving_lines = arm_lines(layouts[leaving.segment].lines, leaving)
+        leaving_painted = arm_keys(layouts[leaving.segment].painted, leaving)
+        chords = []
+        for key in arm_keys(layouts[entering.segment].painted, entering):
+            if key.kind not in CROSSED_KINDS or mirrored(key) not in leaving_painted:
+                continue
+            chords.append((self._mouth_point(entering, entering_lines[key], mouths),
+                           self._mouth_point(leaving, leaving_lines[mirrored(key)], mouths)))
+        return chords
+
+    def _entry_chords(self, layouts: list, end: SegmentEnd, mouths: dict) -> list:
+        """(start, end) of the painted lane and centre lines of an arm ending at the junction, run on straight
+        across it."""
+        lines = arm_lines(layouts[end.segment].lines, end)
+        inward = -self._direction_at_mouth(end, mouths)
+        reach = 2.0 * mouths.get(end, 0.0) + self._segment(end).section.width()
+        chords = []
+        for key in arm_keys(layouts[end.segment].painted, end):
+            if key.kind in CROSSED_KINDS:
+                start = self._mouth_point(end, lines[key], mouths)
+                chords.append((start, start + inward * reach))
+        return chords
+
     def _guide_kind(self, key: LineKey, kind: str, entering: SegmentEnd, leaving: SegmentEnd, side_arms: list) -> str:
-        """Guide dashes inside a junction; an edge line stays solid on a side no other road joins."""
+        """How a line continues across a junction: an edge line as a broken broad line and a cycle lane as a cycle
+        crossing (furt) where a side road joins on its side, unchanged on a side no other road joins."""
         if not side_arms:
             return kind
-        if key.kind != LineKind.EDGE:
-            return "guide"
         # Facing out of the entering arm is facing against the through traffic, so its left edge is on the right
         # of the traffic going from entering to leaving.
         through = polyline.unit(self.network.arm_direction(leaving) - self.network.arm_direction(entering))
@@ -150,8 +212,11 @@ class JunctionLines:
         on_right = key.side == Side.LEFT
         for arm in side_arms:
             arm_on_right = float(np.dot(self.network.arm_direction(arm), right)) > 0
-            if arm_on_right == on_right:
-                return "edge_guide"
+            if arm_on_right != on_right:
+                continue
+            if key.kind == LineKind.CYCLE:
+                return "cycle_furt"
+            return "edge_guide"
         return kind
 
     def _left_turn_guides(self, layouts: list, entering: SegmentEnd, ends: list, mouths: dict) -> list:
@@ -257,7 +322,7 @@ def _exclusive_left_lanes(tags, end: SegmentEnd) -> int:
     toward_node = Travel.FORWARD
     if end.at_start:
         toward_node = Travel.BACKWARD  # the segment leaves the node along the way, so traffic comes in against it
-    turns = _turn_lanes(tags, toward_node)
+    turns = osm_tags.turn_lanes(tags, toward_node)
     count = 0
     for value in turns:
         directions = set(value.split(";"))
@@ -267,17 +332,32 @@ def _exclusive_left_lanes(tags, end: SegmentEnd) -> int:
     return count
 
 
-def _turn_lanes(tags, travel: Travel) -> list:
-    """The turn:lanes values of the lanes going one way along the way, from the driver's left."""
-    if osm_tags.is_oneway(tags):
-        forward_is_travel = not osm_tags.is_reversed_oneway(tags)
-        if (travel == Travel.FORWARD) != forward_is_travel:
-            return []
-        value = tags.get("turn:lanes", "")
-    elif travel == Travel.FORWARD:
-        value = tags.get("turn:lanes:forward", "")
-    else:
-        value = tags.get("turn:lanes:backward", "")
-    if not value:
-        return []
-    return str(value).split("|")
+def _segment_intersection(first_start, first_end, second_start, second_end):
+    """The point where two straight segments cross, or None."""
+    first = first_end - first_start
+    second = second_end - second_start
+    denominator = first[0] * second[1] - first[1] * second[0]
+    if abs(denominator) < 1e-9:
+        return None
+    gap = second_start - first_start
+    along_first = (gap[0] * second[1] - gap[1] * second[0]) / denominator
+    along_second = (gap[0] * first[1] - gap[1] * first[0]) / denominator
+    if not (0.0 <= along_first <= 1.0 and 0.0 <= along_second <= 1.0):
+        return None
+    return first_start + first * along_first
+
+
+def _crossing_angle(first, second) -> float:
+    """The angle between two lines in degrees, 0 to 90."""
+    cosine = abs(float(np.dot(polyline.unit(first), polyline.unit(second))))
+    return math.degrees(math.acos(min(cosine, 1.0)))
+
+
+def _cross(centre, first_direction, second_direction) -> list:
+    """("solid", points) of the two bars of a cross, each along one of the crossing lines."""
+    half = assumptions.JUNCTION_CROSS_LENGTH / 2
+    bars = []
+    for direction in (first_direction, second_direction):
+        along = polyline.unit(direction) * half
+        bars.append(("solid", np.array([centre - along, centre + along])))
+    return bars

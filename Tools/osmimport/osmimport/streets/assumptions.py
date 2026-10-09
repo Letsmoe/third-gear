@@ -120,11 +120,29 @@ TAPER_MAX_SEGMENT_SHARE = 0.45
 DEFAULT_SPEED_URBAN = 50.0
 DEFAULT_SPEED_RURAL = 100.0
 
+# Between the directions, roads with two or more lanes in one direction get a double solid line (Fahrstreifen-
+# begrenzung, Zeichen 295, VwV-StVO): two narrow lines this far apart, centre to centre.
+DOUBLE_LINE_SPACING = 0.24
+# A lane that turns where its neighbour doesn't is marked off with a broad line (0.25 m): broken along the road, solid
+# over the queueing length before the junction (RASt 06 Tabelle 45: 20 m as a rule). The broken line's dashes are not
+# in the free sources.
+TURN_LANE_QUEUE_LENGTH = 20.0
+TURN_LANE_DASH = (3.0, 3.0)
+
+# Cycle lane lines (VwV-StVO zu Zeichen 340, Bayern Musterblatt 1): an exclusive lane has a solid broad line (0.25 m),
+# an advisory one a narrow line of 1 m dashes and 1 m gaps; across junctions both become a cycle crossing ("Furt") of
+# two broad lines with 0.5 m dashes and 0.2 m gaps.
+ADVISORY_CYCLE_LINE_DASH = (1.0, 1.0)
+CYCLE_FURT_DASH = (0.5, 0.2)
+
 # Kerb radius at junction corners: lines stop where the corner's curve begins.
 CORNER_RADIUS = 4.0
-# Through a junction, the lines of the road that goes straight on continue as guide lines with dash and gap 1:1
-# (RMS Teil 1 3.2.2.3); the dash length is not in the free sources.
+# Left-turn guide lines inside a junction: dash and gap 1:1 (RMS Teil 1 3.2.2.3); the dash length is not in the free
+# sources.
 GUIDE_LINE_DASH = (1.5, 1.5)
+# Lane lines stop at a junction; a cross of two bars this long marks where the lines of crossing roads would meet
+# (the size is not in the free sources).
+JUNCTION_CROSS_LENGTH = 1.0
 # The edge line of the through road continues across the mouth of a side road as a broken broad line.
 EDGE_GUIDE_DASH = (1.5, 1.5)
 # Two arms are one road going straight through a junction when their directions differ by at most this much.
