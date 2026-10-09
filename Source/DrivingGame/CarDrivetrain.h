@@ -25,6 +25,9 @@ public:
 		float Vy = 0.f;     // ... to the wheel's right, m/s
 		float LoadN = 0.f;  // normal force
 		float Grip = 1.f;   // surface grip factor (1 = dry asphalt)
+		float PeakSlipScale = 1.f;       // grip peak at more slip on snow and ice
+		float ShapeCScale = 1.f;         // slip curve falloff after the peak
+		float ExtraRollingResistance = 0.f; // loose snow drag, coefficient added to the tyre's own
 	};
 
 	/** Tyre forces averaged over the step, wheel frame. */
