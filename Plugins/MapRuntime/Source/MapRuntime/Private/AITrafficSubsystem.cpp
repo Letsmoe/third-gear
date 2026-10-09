@@ -249,9 +249,28 @@ bool UAITrafficSubsystem::TrySpawnOne(const FVector& ViewerCm, const FVector2D& 
 		}
 	}
 	const FVector2D Viewer = FVector2D(ViewerCm) * 0.01;
+	// Staging: only lanes that pass near the point the viewer looks at are worth trying.
+	TArray<int32> StagingLanes;
+	if (CVarSpawnAnywhere.GetValueOnGameThread() == 2)
+	{
+		const FVector2D Focus = Viewer + ViewerForward * StagingFocusM;
+		for (const int32 LaneId : SpawnLanes)
+		{
+			const FTrafficLane& Candidate = Lanes.GetLane(LaneId);
+			if (FVector2D::Distance(FVector2D(Candidate.Points[Candidate.Points.Num() / 2]), Focus) < StagingRadiusM + Candidate.Length() * 0.5f)
+			{
+				StagingLanes.Add(LaneId);
+			}
+		}
+		if (StagingLanes.IsEmpty())
+		{
+			return false;
+		}
+	}
 	for (int32 Attempt = 0; Attempt < 24; ++Attempt)
 	{
-		const FTrafficLane& Lane = Lanes.GetLane(SpawnLanes[Random.RandHelper(SpawnLanes.Num())]);
+		const int32 PickedLane = StagingLanes.IsEmpty() ? SpawnLanes[Random.RandHelper(SpawnLanes.Num())] : StagingLanes[Random.RandHelper(StagingLanes.Num())];
+		const FTrafficLane& Lane = Lanes.GetLane(PickedLane);
 		const float TierChance = 0.25f + 0.2f * float(FMath::Clamp(Lane.Tier, 0, 4)) * 1.5f;
 		if (Random.FRand() > TierChance)
 		{

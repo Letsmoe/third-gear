@@ -82,10 +82,12 @@ class Lane:
     good: bool = False
 
     def arclength(self):
+        """Cumulative distance along the lane at every point."""
         steps = np.hypot(*np.diff(self.xy, axis=0).T)
         return np.concatenate([[0.0], np.cumsum(steps)])
 
     def length(self):
+        """Length of the lane in metres."""
         return float(self.arclength()[-1])
 
 
@@ -101,10 +103,12 @@ class Segment:
 
 
 def right_of(direction):
+    """The unit vector to the right of a direction in the x east, y south frame."""
     return np.array([-direction[1], direction[0]])
 
 
 def unit(vector):
+    """The vector scaled to length one; (1, 0) for a zero vector."""
     norm = float(np.hypot(*vector))
     return vector / norm if norm > 1e-9 else np.array([1.0, 0.0])
 
@@ -225,6 +229,7 @@ class LaneBuilder:
     """Builds the lane graph for one area from the furniture builder's road graph, approaches and signs."""
 
     def __init__(self, area, net, builder):
+        """Prepares an empty graph for an area; build() fills it."""
         self.area = area
         self.net = net
         self.builder = builder
@@ -238,6 +243,7 @@ class LaneBuilder:
     # ------------------------------------------------------------ road segments
 
     def _is_traffic_way(self, way):
+        """Whether cars drive on the way: not driveways, parking aisles and private or closed roads."""
         tags = way.tags
         if tags.get("highway") not in CLASS_TIER:
             return False
@@ -261,6 +267,7 @@ class LaneBuilder:
         return {node for node in occurrences if node in ends or occurrences[node] >= 2}
 
     def _new_node(self, xy):
+        """A node for a point where a way was cut at the area edge."""
         self.synthetic_nodes += 1
         node = -self.synthetic_nodes
         self.node_xy[node] = (float(xy[0]), float(xy[1]))
@@ -284,6 +291,7 @@ class LaneBuilder:
                 self._add_clipped(way, xy, way.node_ids[a], way.node_ids[b], box, bridge)
 
     def _add_clipped(self, way, xy, start_node, end_node, box, bridge):
+        """Adds a segment, cut to the area when it leaves it; the new ends become dead ends."""
         line = shapely.LineString(xy)
         if box.contains(line):
             self.segments.append(Segment(len(self.segments), way, xy, start_node, end_node, bridge))
@@ -301,6 +309,7 @@ class LaneBuilder:
     # ------------------------------------------------------------ lanes
 
     def _directions(self, way):
+        """The directions of travel (+1 along the node order, -1 against it) the way allows."""
         return [travel for travel in (+1, -1) if self.graph.can_travel(way, travel)]
 
     def _lane_offset(self, way):
@@ -315,6 +324,7 @@ class LaneBuilder:
         return float(np.clip(offset, MIN_LANE_OFFSET, max(width / 2.0 - 1.0, MIN_LANE_OFFSET)))
 
     def _raw_lane_path(self, segment, travel):
+        """The lane centre line of a segment in one direction, before junction trimming."""
         xy = segment.xy if travel > 0 else segment.xy[::-1]
         return offset_polyline(xy, self._lane_offset(segment.way))
 
@@ -353,7 +363,6 @@ class LaneBuilder:
                 self.approach_phase[approach_id] = (junction.id, approach.phase)
                 best = None
                 stop = np.array(approach.stop_xy)
-                direction = np.array(approach.direction)
                 for segment in self.segments:
                     if segment.way.id != approach.way.id:
                         continue
@@ -363,7 +372,6 @@ class LaneBuilder:
                     s, distance = project_on_polyline(raw, stop)
                     if distance > 6.0:
                         continue
-                    ahead = raw[min(np.searchsorted(np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(raw, axis=0).T))]), s) + 1, len(raw) - 1)]
                     if best is None or distance < best[0]:
                         best = (distance, segment.id, s)
                 if best is not None:
@@ -376,6 +384,7 @@ class LaneBuilder:
         end_node = segment.end_node if travel > 0 else segment.start_node
 
         def junction_trim(node):
+            """Room a junction takes from a lane at the given node."""
             if self.arm_count[node] < 3:
                 return 0.0
             return self.node_width[node] * 0.5 + JUNCTION_TRIM_BASE
@@ -390,12 +399,14 @@ class LaneBuilder:
         return trim_start, trim_end
 
     def _lane_limit(self, way):
+        """Legal speed limit of the way in km/h; roads without one count as 100."""
         limit = self.graph.speed.get(way.id)
         if limit is None:   # bridges are not in the furniture graph
             limit = furniture.parse_speed(way.tags, True)
         return limit if limit > 0 else 100.0
 
     def _make_road_lane(self, segment, travel):
+        """Creates the trimmed, smoothed lane of a segment and direction, with its stop lines."""
         raw = self.raw[(segment.id, travel)]
         raw_length = float(np.hypot(*np.diff(raw, axis=0).T).sum())
         trim_start, trim_end = self._trim_for(segment, travel, raw_length)
@@ -445,16 +456,11 @@ class LaneBuilder:
     # ------------------------------------------------------------ connections
 
     def _end_direction(self, lane, at_end):
+        """Unit direction of travel at the end or the start of a lane."""
         pts = lane.xy
         if at_end:
             return unit(pts[-1] - pts[-2])
         return unit(pts[1] - pts[0])
-
-    def _arm_directions(self, node):
-        """Incoming and outgoing road lanes at a node."""
-        incoming = [lane for lane in self.arms[node] if lane.end_node == node and not (lane.start_node == node and lane.end_node == node and False)]
-        outgoing = [lane for lane in self.arms[node] if lane.start_node == node]
-        return incoming, outgoing
 
     def build_connections(self):
         """Links every incoming lane to every outgoing lane at each node, and turns dead ends around."""
@@ -480,6 +486,7 @@ class LaneBuilder:
                         self._connect(lane_in, partner, node, multi, uturn=True)
 
     def _connect(self, lane_in, lane_out, node, multi, uturn=False):
+        """Adds the Bezier connection from the end of one lane to the start of another; None when the turn is too sharp."""
         p0, p3 = lane_in.xy[-1], lane_out.xy[0]
         d_in, d_out = self._end_direction(lane_in, True), self._end_direction(lane_out, False)
         cross = d_in[0] * d_out[1] - d_in[1] * d_out[0]
@@ -660,6 +667,7 @@ class LaneBuilder:
         return int(sizes[main]), count
 
     def build(self):
+        """Builds the whole graph; returns (lanes in the main loop, all lanes)."""
         self.build_segments()
         self.build_road_lanes()
         self.build_connections()
@@ -671,9 +679,10 @@ class LaneBuilder:
     # ------------------------------------------------------------ output
 
     def to_dict(self):
+        """The graph as the dictionary written to lanes.json."""
         out_lanes = []
         for lane in self.lanes:
-            points = np.round(np.column_stack([lane.xy, lane.z]), 2 if False else 3).ravel().tolist()
+            points = np.round(np.column_stack([lane.xy, lane.z]), 3).ravel().tolist()
             record = {"id": lane.id, "kind": {"road": 0, "connection": 1, "uturn": 2}[lane.kind], "way": lane.way,
                       "limit": lane.limit_kmh, "tier": lane.tier, "pts": points, "next": lane.next,
                       "good": 1 if lane.good else 0}
