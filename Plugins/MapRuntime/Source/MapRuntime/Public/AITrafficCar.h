@@ -6,6 +6,7 @@
 
 class UBoxComponent;
 class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class UStaticMesh;
 class UStaticMeshComponent;
 class USceneComponent;
@@ -42,6 +43,8 @@ struct MAPRUNTIME_API FTrafficVehicleModel
 	/** Slot index of the paint and the lights in the body mesh's materials, or INDEX_NONE. */
 	int32 PaintSlot = INDEX_NONE;
 	int32 LightSlot = INDEX_NONE;
+	/** Clean paint instance of this model from /Game/Vehicles/TrafficPaint (Scripts/create_traffic_paint.py), or null for the stock one. */
+	UMaterialInterface* TrafficPaint = nullptr;
 
 	// Derived, metres
 	float LengthM = 4.4f;
