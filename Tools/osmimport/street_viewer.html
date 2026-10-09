@@ -77,10 +77,10 @@ const layerControl = L.control.layers({ "Aerial (Hamburg, leaf-off)": aerial, "O
                                       { collapsed: false }).addTo(map);
 L.control.scale({ imperial: false, maxWidth: 200 }).addTo(map);
 
-const overlays = {};       // layer name -> L.GeoJSON currently shown in the control
-const hiddenLayers = new Set();
-let outline = null;
-let fitted = false;
+const groups = {};          // layer name -> L.LayerGroup, kept for the whole session so toggles stay
+const outlineGroup = L.layerGroup().addTo(map);
+layerControl.addOverlay(outlineGroup, "Game regions");
+let pending = null;
 
 function escapeHtml(text) {
   return String(text).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -115,34 +115,53 @@ function makeLayer(collection) {
   });
 }
 
+function groupFor(name) {
+  if (!groups[name]) {
+    groups[name] = L.layerGroup().addTo(map);
+    layerControl.addOverlay(groups[name], name);
+  }
+  return groups[name];
+}
+
+function showOutlines(outlines) {
+  outlineGroup.clearLayers();
+  for (const [name, outline] of Object.entries(outlines)) {
+    L.geoJSON(outline, { style: { color: "#fff", weight: 1.5, fill: false, dashArray: "4 6" }, interactive: false })
+      .bindTooltip(name, { permanent: true, direction: "top" }).addTo(outlineGroup);
+  }
+}
+
 async function loadLayers() {
   const status = document.getElementById("status");
+  if (pending) pending.abort();
+  pending = new AbortController();
+  const bbox = map.getBounds().pad(0.2).toBBoxString();
   status.textContent = "loading layers…";
   const started = performance.now();
-  const response = await fetch("/layers.json", { cache: "no-store" });
+  let response;
+  try {
+    response = await fetch(`/layers.json?bbox=${bbox}`, { cache: "no-store", signal: pending.signal });
+  } catch (error) {
+    if (error.name !== "AbortError") status.textContent = "server not reachable: " + error;
+    return;
+  }
   if (!response.ok) {
     status.textContent = "layer build failed:\n" + await response.text();
     return;
   }
   const data = await response.json();
-  for (const [name, layer] of Object.entries(overlays)) {
-    if (!map.hasLayer(layer)) hiddenLayers.add(name); else hiddenLayers.delete(name);
-    map.removeLayer(layer);
-    layerControl.removeLayer(layer);
-    delete overlays[name];
+  showOutlines(data.outlines);
+  for (const group of Object.values(groups)) group.clearLayers();
+  if (data.too_wide) {
+    status.textContent = "zoom in to see the streets";
+    return;
   }
-  if (outline) map.removeLayer(outline);
-  outline = L.geoJSON(data.outline, { style: { color: "#fff", weight: 1, fill: false, dashArray: "2 6" }, interactive: false }).addTo(map);
   let count = 0;
   for (const name of Object.keys(data.layers).sort()) {
-    const layer = makeLayer(data.layers[name]);
-    overlays[name] = layer;
-    layerControl.addOverlay(layer, `${name} (${data.layers[name].features.length})`);
-    if (!hiddenLayers.has(name)) layer.addTo(map);
+    groupFor(name).addLayer(makeLayer(data.layers[name]));
     count += data.layers[name].features.length;
   }
-  if (!fitted) { map.fitBounds(outline.getBounds()); fitted = true; }
-  status.textContent = `${data.region}: ${count} features, built in ${Math.round(performance.now() - started)} ms`;
+  status.textContent = `${count} features in view, loaded in ${Math.round(performance.now() - started)} ms`;
 }
 
 const legend = L.control({ position: "bottomright" });
@@ -160,6 +179,8 @@ legend.onAdd = () => {
 };
 legend.addTo(map);
 
+map.setView([53.4880, 10.2120], 17);
+map.on("moveend", loadLayers);
 document.getElementById("reload").onclick = loadLayers;
 document.addEventListener("keydown", event => { if (event.key === "r" && !event.ctrlKey) loadLayers(); });
 loadLayers();
