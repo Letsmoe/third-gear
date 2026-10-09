@@ -133,33 +133,79 @@ ZEBRA_BAR_LENGTH_WIDE_ROAD = 4.0
 ZEBRA_WIDE_ROAD = 7.5
 
 
-def zebra_bars(zebra):
-    """The white bars of one zebra crossing (Fuss\u00fcbergang): 0.5 m bars with 0.5 m gaps, parallel to the road and
-    spread across the carriageway, centred on it. Returns (bar centre lines, outline polygon of the whole crossing)."""
+def zebra_carriageway(net):
+    """Paved driving surface kerb to kerb: every road surface minus the pavement."""
+    roadway = shapely.union_all(list(net.surfaces.values()))
+    return roadway.difference(net.pavement)
+
+
+def zebra_spans(zebra, carriageway):
+    """Lateral intervals (lo, hi), metres across the road from the crossing node, where the crossing line runs over
+    the carriageway within reach of the node. A split carriageway gives one interval per side of the island."""
     ux, uy = zebra["direction"]
     nx, ny = -uy, ux
-    width = zebra["width"]
-    length = ZEBRA_BAR_LENGTH_WIDE_ROAD if width >= ZEBRA_WIDE_ROAD else ZEBRA_BAR_LENGTH
-    count = max(int((width - ZEBRA_BAR_WIDTH) / (2 * ZEBRA_BAR_WIDTH)) + 1, 1)
-    first = -(count - 1) * ZEBRA_BAR_WIDTH  # bars are 1 m apart centre to centre
+    reach = 25.0
+    cross = shapely.LineString([(zebra["x"] - nx * reach, zebra["y"] - ny * reach),
+                                (zebra["x"] + nx * reach, zebra["y"] + ny * reach)])
+    spans = []
+    inside = cross.intersection(carriageway)
+    for part in getattr(inside, "geoms", [inside]):
+        if not isinstance(part, shapely.LineString) or part.is_empty:
+            continue
+        lateral = sorted((c[0] - zebra["x"]) * nx + (c[1] - zebra["y"]) * ny for c in part.coords)
+        if lateral[0] - 0.01 > 12.0 or lateral[-1] + 0.01 < -12.0:
+            continue
+        if lateral[-1] - lateral[0] >= ZEBRA_BAR_WIDTH:
+            spans.append((lateral[0], lateral[-1]))
+    return spans
+
+
+def zebra_bars(zebra, carriageway):
+    """The white bars of one zebra crossing (Fussuebergang): 0.5 m bars with 0.5 m gaps, parallel to the road, filling
+    the carriageway from kerb to kerb. Returns (bar centre lines, outline polygon of the whole crossing, spans)."""
+    ux, uy = zebra["direction"]
+    nx, ny = -uy, ux
+    spans = zebra_spans(zebra, carriageway)
+    if not spans:
+        half = zebra["width"] / 2
+        spans = [(-half, half)]
+    length = ZEBRA_BAR_LENGTH_WIDE_ROAD if zebra["width"] >= ZEBRA_WIDE_ROAD else ZEBRA_BAR_LENGTH
     bars = []
-    for index in range(count):
-        lateral = first + index * 2 * ZEBRA_BAR_WIDTH
-        cx, cy = zebra["x"] + nx * lateral, zebra["y"] + ny * lateral
-        bars.append(shapely.LineString([(cx - ux * length / 2, cy - uy * length / 2),
-                                        (cx + ux * length / 2, cy + uy * length / 2)]))
+    placed = []
+    for low, high in spans:
+        count = max(int((high - low + ZEBRA_BAR_WIDTH) / (2 * ZEBRA_BAR_WIDTH)), 1)
+        used = count * 2 * ZEBRA_BAR_WIDTH - ZEBRA_BAR_WIDTH
+        first = (low + high) / 2 - used / 2 + ZEBRA_BAR_WIDTH / 2
+        placed.append((low, high, first - ZEBRA_BAR_WIDTH / 2, first + (count - 1) * 2 * ZEBRA_BAR_WIDTH + ZEBRA_BAR_WIDTH / 2))
+        for index in range(count):
+            lateral = first + index * 2 * ZEBRA_BAR_WIDTH
+            cx, cy = zebra["x"] + nx * lateral, zebra["y"] + ny * lateral
+            bars.append(shapely.LineString([(cx - ux * length / 2, cy - uy * length / 2),
+                                            (cx + ux * length / 2, cy + uy * length / 2)]))
     outline = shapely.MultiLineString(bars).buffer(ZEBRA_BAR_WIDTH, cap_style="flat").convex_hull
-    return bars, outline
+    return bars, outline, placed
 
 
-def write_zebras(writers, zebras):
+def write_zebras(writers, zebras, carriageway):
     """Zebra stripes into the tiles they touch."""
     for zebra in zebras:
-        bars, _ = zebra_bars(zebra)
+        bars, _, _ = zebra_bars(zebra, carriageway)
         for bar in bars:
             for writer in writers.values():
                 if writer.box.intersects(bar):
                     writer.add_marking("Marking_White", MARKING_STYLES["solid"], bar, ZEBRA_BAR_WIDTH, None)
+
+
+def log_zebra_gaps(zebras, carriageway):
+    """Prints the gap between the outermost bar and the kerb on each side of every striped span."""
+    worst = 0.0
+    for zebra in zebras:
+        for low, high, bar_low, bar_high in zebra_bars(zebra, carriageway)[2]:
+            gap = max(bar_low - low, high - bar_high)
+            worst = max(worst, gap)
+            if gap > 0.5:
+                log(f"ZEBRA GAP {gap:.2f} m at ({zebra['x']:.0f}, {zebra['y']:.0f})")
+    log(f"zebra edge gap, worst over all spans: {worst:.2f} m")
 
 
 def poi_ground_height(x, y, net, ground, on_pavement):
@@ -268,7 +314,9 @@ def main():
     log(f"furniture: {len(traffic['junctions'])} signal junctions, {len(builder.heads)} signal poles, "
         f"{len(builder.signs)} signs, {len(builder.lamps)} lamps")
 
-    zebra_cutout = shapely.union_all([zebra_bars(z)[1] for z in builder.zebras]) if builder.zebras else None
+    carriageway = zebra_carriageway(net)
+    zebra_cutout = shapely.union_all([zebra_bars(z, carriageway)[1] for z in builder.zebras]) if builder.zebras else None
+    log_zebra_gaps(builder.zebras, carriageway)
     zebra_nodes = sum(1 for point in data.points if point.tags.get("highway") == "crossing"
                       and (point.tags.get("crossing") in {"zebra", "marked"} or point.tags.get("crossing_ref") == "zebra"))
     log(f"zebra crossings: {len(builder.zebras)} striped of {zebra_nodes} crossing nodes tagged zebra or marked")
@@ -278,7 +326,7 @@ def main():
         write_surfaces(writer, net, surfaces)
         write_markings(writer, net, zebra_cutout)
     write_stop_lines(writers, traffic["junctions"])
-    write_zebras(writers, builder.zebras)
+    write_zebras(writers, builder.zebras, carriageway)
     write_furniture(writers, area, builder, net, ground)
     for osm_id, tags, footprint in building_footprints(data):
         point = footprint.representative_point()
