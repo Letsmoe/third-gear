@@ -260,7 +260,10 @@ automatically when its manifest's `detail` matches (skip with `-nohorizon`).
   `create_materials.py` layers season (snow, leaves) then wetness over every surface; `SEASON_KEEP` says how much each
   surface keeps. Snow with depth is a mesh per near tile (`WorldSnow.cpp`: about 16 cm on lawns, 3.5 cm on roads, roofs with
   rounded eaves, drifts by the wind; `M_Snow_Layer` from `Scripts/create_snow_material.py` sinks it with `SnowCover`), built only
-  while snow lies (`-ForceSnowMesh` always) and faded into the ground material between 130 and 180 m. Test with `-WeatherHour=<h> -WeatherDay=<day of year> -WeatherOverride="CloudCover=1,Fog=0.8,Rain=8,
+  while snow lies (`-ForceSnowMesh` always) and faded into the ground material between 130 and 180 m. Tyre tracks: wheels (`UCarMovementComponent`, `AAITrafficCar`) call
+  `USnowTrackSubsystem::StampWheel` (MapRuntime), which keeps a toroidal 2048² map (5 cm texels, 102 m) around the viewer
+  in `/Game/World/SnowTracks/RT_SnowTracks` (`Scripts/create_snow_track_map.py`); `M_Snow_Layer` draws ruts, ridges and tread
+  from it in the pixel shader, and new snowfall fades them. `-SnowDrive` with `-SpawnCar` drives a scripted circle for screenshots. Test with `-WeatherHour=<h> -WeatherDay=<day of year> -WeatherOverride="CloudCover=1,Fog=0.8,Rain=8,
   Snow=1,Temperature=-3,Wind=6,Thunder=1,FallenLeaves=0.5"`.
 - **Street furniture and rules**: `osmimport/furniture.py` places signals, signs and lamps (`POIS` tile section);
   models from `Tools/furniture` (Blender), assets by `Scripts/create_furniture_assets.py` into `/Game/World/Furniture`.

@@ -16,6 +16,7 @@ FOLDER = "/Game/World/Materials"
 NAME = "M_Snow_Layer"
 TEX = "/Game/Textures"
 WEATHER_COLLECTION = "/Game/World/MPC_Weather"
+TRACK_MAP = "/Game/World/SnowTracks/RT_SnowTracks"  # Scripts/create_snow_track_map.py
 TERRAIN_INCLUDE = "/Plugin/MapRuntime/Private/TerrainNoise.ush"
 
 mel = unreal.MaterialEditingLibrary
@@ -64,6 +65,28 @@ float step_m = 0.02;
 float dhx = (SNOW_H(p + float2(step_m, 0)) - h) / (step_m * 100.0);
 float dhy = (SNOW_H(p + float2(0, step_m)) - h) / (step_m * 100.0);
 
+// Tyre tracks from the deformation map (SnowTrackSubsystem; R compaction, G ridge, BA direction of travel). The 1 m mesh
+// is too coarse for a 20 cm rut, so the rut is drawn in the pixel shader: packed colour, a normal from the height
+// field (rut floor at the packed depth, ridges of pushed aside snow) and the tread of the tyre.
+float2 map_uv = frac(WorldPos.xy / 10240.0);
+float4 rut = Texture2DSample(TrackMap, TrackMapSampler, map_uv);
+float map_fade = 1.0 - smoothstep(3000.0, 4200.0, length(WorldPos.xy - CameraPos.xy));
+float depth_cm = Depth * 100.0;
+float snow_here = saturate(depth_cm / 1.5) * saturate(Cover * 2.0);
+float compaction = rut.r * map_fade * snow_here;
+float2 travel = normalize((rut.ba - 0.5) * 2.0 + float2(1e-4, 0.0));
+float2 across = float2(-travel.y, travel.x);
+// Tread: transverse blocks with a shallow V, 4.5 cm pitch, repeating every 20 cm across the tyre. Fine detail fades out before it aliases.
+float fade_tread = saturate(1.0 - pixel_cm / 1.4);
+#define TREAD_H(q) (0.45 * smoothstep(0.30, 0.5, abs(frac(dot((q), travel) / 0.045 + 0.35 * abs(frac(dot((q), across) / 0.2) - 0.5)) - 0.5) * 2.0) * fade_tread)
+#define RUT_H(uv_, q_) (Texture2DSample(TrackMap, TrackMapSampler, (uv_)).g * map_fade * snow_here * 1.8 - Texture2DSample(TrackMap, TrackMapSampler, (uv_)).r * map_fade * snow_here * 0.7 * depth_cm + compaction * TREAD_H(q_))
+float2 texel_uv = 1.0 / 2048.0;
+float rut_h = RUT_H(map_uv, p);
+float rut_dx = (RUT_H(map_uv + float2(texel_uv.x, 0), p + float2(0.05, 0)) - rut_h) / 5.0;
+float rut_dy = (RUT_H(map_uv + float2(0, texel_uv.y), p + float2(0, 0.05)) - rut_h) / 5.0;
+dhx += rut_dx * 1.5;
+dhy += rut_dy * 1.5;
+
 // Colour. Fresh snow is bright and slightly cool; trodden and road snow is greyer and dirtier.
 float macro = DgValueNoise(p / 5.0 + 11.0);
 // Same albedo as the ground's snow (SNOW_TONE in create_materials.py) so the layer fades into it unseen.
@@ -77,13 +100,18 @@ float road_cover = saturate(0.55 + 0.7 * ridge - 0.9 * tracks);
 float3 road_color = lerp(wet_road, road_snow, road_cover);
 float3 color = lerp(fresh, trodden_color, trodden);
 color = lerp(color, road_color, road);
+// Packed snow is denser: greyer and darker, and on thin road snow the wet asphalt shows through.
+float3 packed = color * float3(0.52, 0.56, 0.64);
+color = lerp(color, packed, compaction);
+float reveal = compaction * road * (1.0 - saturate((depth_cm - 2.0) / 4.0));
+color = lerp(color, wet_road * 0.8, reveal * 0.6);
 
 // Rough and soft: snow is a diffuse scatterer; tracks are compacted and a little glossier.
 float rough = lerp(0.95, 0.7, saturate(tracks + trodden * 0.5));
 
 // World-space normal tilted by the height gradient (x east, y south).
 Normal = normalize(N + float3(-dhx, -dhy, 0) * 1.0);
-Roughness = rough;
+Roughness = lerp(rough, 0.6, compaction);
 
 // Patchy melting at low cover: thin, trodden and road snow goes first.
 float patch = DgValueNoise(p / 1.3 + 5.0) * 0.6 + DgValueNoise(p / 0.35) * 0.4;
@@ -167,7 +195,7 @@ def build():
     pixel = expr(m, unreal.MaterialExpressionCustom, -600, 0, code=SNOW_HLSL, description="SnowSurface",
                  output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3,
                  inputs=[custom_input(n) for n in ("VertexRoad", "VertexFootway", "VertexEdge", "WorldPos", "N", "Cover", "Night", "Clouds", "CameraVector",
-                                                   "PixelDepth", "Depth", "Snow1Color", "AsphaltSnowColor")])
+                                                   "PixelDepth", "Depth", "CameraPos", "Snow1Color", "AsphaltSnowColor", "TrackMap")])
     pixel.set_editor_property("additional_outputs", [
         custom_output("Normal", unreal.CustomMaterialOutputType.CMOT_FLOAT3),
         custom_output("Roughness", unreal.CustomMaterialOutputType.CMOT_FLOAT1),
@@ -188,6 +216,10 @@ def build():
     depth_metres = expr(m, unreal.MaterialExpressionMultiply, -800, -600, const_b=1.275)
     link(vertex_color, "R", depth_metres, "A")
     link(depth_metres, "", pixel, "Depth")
+    link(expr(m, unreal.MaterialExpressionCameraPositionWS, -1200, 250), "", pixel, "CameraPos")
+    link(expr(m, unreal.MaterialExpressionTextureObjectParameter, -1200, 600, parameter_name="TrackMap",
+              texture=unreal.load_asset(TRACK_MAP), sampler_type=unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR),
+         "", pixel, "TrackMap")
     link(texture_object(m, "TroddenSnow", "Snow/snow_01", 300), "", pixel, "Snow1Color")
     link(texture_object(m, "RoadSnow", "Snow/asphalt_snow", 450), "", pixel, "AsphaltSnowColor")
 

@@ -1,4 +1,5 @@
 #include "CarMovementComponent.h"
+#include "SnowTrackSubsystem.h"
 
 #include "CarDrivetrain.h"
 #include "CarSettings.h"
@@ -420,6 +421,27 @@ void UCarMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	UpdateWheelSurfaces(DeltaTime);
+	StampSnowTracks();
+}
+
+void UCarMovementComponent::StampSnowTracks()
+{
+	USnowTrackSubsystem* SnowTracks = GetWorld() ? GetWorld()->GetSubsystem<USnowTrackSubsystem>() : nullptr;
+	const USkeletalMeshComponent* Mesh = Cast<USkeletalMeshComponent>(UpdatedComponent);
+	const UCarSettings* Settings = GetDefault<UCarSettings>();
+	if (!SnowTracks || !Mesh || Settings->WheelBones.Num() < CarNumWheels)
+	{
+		return;
+	}
+	constexpr float TyreWidthCm = 20.f;
+	const FCarTelemetry Telemetry = GetTelemetry();
+	for (int32 Wheel = 0; Wheel < CarNumWheels; ++Wheel)
+	{
+		if (Telemetry.bContact[Wheel])
+		{
+			SnowTracks->StampWheel(reinterpret_cast<const uint8*>(this) + Wheel, Mesh->GetSocketLocation(Settings->WheelBones[Wheel]), TyreWidthCm);
+		}
+	}
 }
 
 FCarSurfaceConditions UCarMovementComponent::CurrentSurfaceConditions() const

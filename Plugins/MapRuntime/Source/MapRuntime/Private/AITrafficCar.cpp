@@ -6,6 +6,7 @@
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "TrafficRuleComponent.h"
+#include "SnowTrackSubsystem.h"
 #include "UObject/ConstructorHelpers.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAITrafficCar, Log, All);
@@ -176,6 +177,7 @@ void AAITrafficCar::Initialize(const FTrafficVehicleModel& Model, const FLinearC
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
 		const FVector Centre = Model.WheelCentersCm[Index];
+		WheelOffsetsCm[Index] = Centre - OriginShift;
 		const bool bFront = Index < 2;
 		USceneComponent* Parent = VisualRoot;
 		if (bFront)
@@ -247,6 +249,21 @@ void AAITrafficCar::ApplyPose(const FVector& GroundLocationCm, const FRotator& R
 		{
 			SpinPivots[Index]->SetRelativeRotation(RollRotation);
 		}
+	}
+	StampSnowTracks();
+}
+
+void AAITrafficCar::StampSnowTracks()
+{
+	USnowTrackSubsystem* SnowTracks = GetWorld() ? GetWorld()->GetSubsystem<USnowTrackSubsystem>() : nullptr;
+	if (!SnowTracks)
+	{
+		return;
+	}
+	constexpr float TyreWidthCm = 20.f;
+	for (int32 Wheel = 0; Wheel < 4; ++Wheel)
+	{
+		SnowTracks->StampWheel(reinterpret_cast<const uint8*>(this) + Wheel, GetActorTransform().TransformPosition(WheelOffsetsCm[Wheel]), TyreWidthCm);
 	}
 }
 

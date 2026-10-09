@@ -84,6 +84,9 @@ public:
 	/** Builds the meshes of a model and paints it. Call once, right after spawning. */
 	void Initialize(const FTrafficVehicleModel& Model, const FLinearColor& PaintColor);
 
+	/** Presses the four wheels' tracks into the snow (USnowTrackSubsystem). */
+	void StampSnowTracks();
+
 	/** Places the car: origin on the ground (cm), orientation, front wheel steering angle and how far the wheels rolled (radians). */
 	void ApplyPose(const FVector& GroundLocationCm, const FRotator& Rotation, float SteerRadians, float WheelRollRadians);
 
@@ -108,6 +111,9 @@ private:
 	TObjectPtr<UStaticMeshComponent> GlassComponent;
 	UPROPERTY()
 	TObjectPtr<USceneComponent> SteerPivots[2];
+
+	/** Wheel centres relative to the actor origin (on the ground, mid axles), cm. */
+	FVector WheelOffsetsCm[4] = {};
 	UPROPERTY()
 	TObjectPtr<USceneComponent> SpinPivots[4];
 	UPROPERTY()

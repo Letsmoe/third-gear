@@ -184,6 +184,10 @@ void ADrivingGameMode::BeginPlay()
 			if (ACarPawn* Car = GetWorld()->SpawnActor<ACarPawn>(ACarPawn::StaticClass(), Ground + FVector(0, 0, 50), FRotator(0, Yaw, 0), SpawnInfo))
 			{
 				Car->PlaceCar(Ground, Yaw, /*bEngineRunning=*/true);
+				if (FParse::Param(FCommandLine::Get(), TEXT("SnowDrive")))
+				{
+					StartScriptedSnowDrive(Car);
+				}
 			}
 		}
 	}
@@ -216,6 +220,65 @@ void ADrivingGameMode::BeginPlay()
 		FTimerHandle Handle;
 		GetWorldTimerManager().SetTimer(Handle, this, &ADrivingGameMode::TakeNextShot, Delay, false);
 	}
+}
+
+void ADrivingGameMode::StartScriptedSnowDrive(ACarPawn* Car)
+{
+	// Pulls away in first gear (clutch released over two seconds), drives straight for four seconds, then holds a
+	// quarter turn of the wheel: a circle of about 23 m. Leaves tracks in the snow for the screenshots (-SnowDrive).
+	Car->SetAutopilot(true);
+	TWeakObjectPtr<ACarPawn> WeakCar(Car);
+	const double StartTime = GetWorld()->GetTimeSeconds();
+	GetWorldTimerManager().SetTimer(SnowDriveHandle, [this, WeakCar, StartTime]()
+	{
+		if (!WeakCar.IsValid())
+		{
+			return;
+		}
+		const float Elapsed = static_cast<float>(GetWorld()->GetTimeSeconds() - StartTime);
+		const FCarTelemetry Telemetry = WeakCar->GetTelemetry();
+		FCarDriverInput Input;
+		Input.SelectedGear = 1;
+		// A driving-school start as in the drive test: some throttle, clutch quickly to the bite point (pedal 0.8),
+		// slowly through it to 0.4, then out. Afterwards the throttle holds about 20 km/h.
+		const float ClutchTime = Elapsed - 1.5f;
+		if (ClutchTime < 0.f)
+		{
+			Input.Clutch = 1.f;
+		}
+		else if (ClutchTime < 0.3f)
+		{
+			Input.Clutch = FMath::Lerp(1.f, 0.8f, ClutchTime / 0.3f);
+		}
+		else if (ClutchTime < 1.8f)
+		{
+			Input.Clutch = FMath::Lerp(0.8f, 0.4f, (ClutchTime - 0.3f) / 1.5f);
+		}
+		else
+		{
+			Input.Clutch = FMath::Lerp(0.4f, 0.f, FMath::Clamp((ClutchTime - 1.8f) / 0.7f, 0.f, 1.f));
+		}
+		if (Elapsed < 1.f)
+		{
+			Input.Throttle = 0.f;
+		}
+		else if (ClutchTime < 3.5f)
+		{
+			Input.Throttle = FMath::Clamp(0.3f + (1600.f - Telemetry.EngineRpm) * 0.0015f, 0.f, 0.8f);
+		}
+		else
+		{
+			Input.Throttle = FMath::Clamp((20.f - Telemetry.SpeedKmh) * 0.08f, 0.f, 0.5f);
+		}
+		Input.SteeringWheelDeg = Elapsed < 8.f ? 0.f : 90.f;
+		WeakCar->SetAutopilotInput(Input);
+		if (FMath::FloorToInt(Elapsed) != FMath::FloorToInt(Elapsed - 0.02f) && FMath::FloorToInt(Elapsed) % 2 == 0)
+		{
+			const FVector Location = WeakCar->GetActorLocation() / 100.0;
+			UE_LOG(LogTemp, Log, TEXT("SnowDrive t=%.0f s at %.1f, %.1f m, %.1f km/h, gear %d"), Elapsed, Location.X, Location.Y,
+				Telemetry.SpeedKmh, Telemetry.SelectedGear);
+		}
+	}, 0.02f, true);
 }
 
 namespace DrivingGameModeShots

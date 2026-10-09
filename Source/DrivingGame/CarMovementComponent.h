@@ -33,6 +33,9 @@ public:
 	void SetSurfaceConditionsOverride(const FCarSurfaceConditions& Conditions);
 
 	virtual TUniquePtr<Chaos::FSimpleWheeledVehicle> CreatePhysicsVehicle() override;
+	/** Presses the tracks of the wheels that touch the ground into the snow (USnowTrackSubsystem). */
+	void StampSnowTracks();
+
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:

@@ -53,6 +53,10 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<AActor> GeneratedStart;
 
+	/** Test drive for snow track screenshots: drives the parked -SpawnCar car through a circle (-SnowDrive). */
+	void StartScriptedSnowDrive(class ACarPawn* Car);
+	FTimerHandle SnowDriveHandle;
+
 	TArray<FString> PendingShots;
 	int32 ShotIndex = 0;
 	/** Seconds the renderer gets after shaders and textures are ready (Lumen and TSR history), -ShotSettle=. */
