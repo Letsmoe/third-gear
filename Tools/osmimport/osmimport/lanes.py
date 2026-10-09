@@ -30,6 +30,9 @@ LANE_SPACING = 1.5
 CONNECTION_SPACING = 0.75
 MIN_LANE_OFFSET = 1.2
 JUNCTION_TRIM_BASE = 2.5
+# Lanes beside parked cars keep the normal offset this far from a segment end and reach the shifted one PARKING_TAPER_LENGTH later.
+PARKING_TAPER_START = 6.5
+PARKING_TAPER_LENGTH = 2.5
 STOP_TRIM_EXTRA = 0.3
 MAX_STOP_BEFORE_LANE = 8.0
 CONFLICT_DISTANCE = 1.9
@@ -114,8 +117,9 @@ def unit(vector):
 
 
 def offset_polyline(xy, distance):
-    """Moves a polyline sideways by distance to the right of its direction, with mitred corners."""
-    if abs(distance) < 1e-6:
+    """Moves a polyline sideways by distance to the right of its direction, with mitred corners.
+    distance is one number, or one number per point."""
+    if np.ndim(distance) == 0 and abs(distance) < 1e-6:
         return xy.copy()
     steps = np.diff(xy, axis=0)
     lengths = np.hypot(steps[:, 0], steps[:, 1])
@@ -135,6 +139,7 @@ def offset_polyline(xy, distance):
         vertex_normals[i] = mean
         scale[i] = 1.0 / max(float(np.dot(mean, before)), 0.5)
     return xy + vertex_normals * (distance * scale)[:, None]
+
 
 
 def resample(xy, spacing):
@@ -318,6 +323,15 @@ class LaneBuilder:
         base = self._base_lane_offset(way, width)
         return parking.lane_offset_with_parking(base, width, travel, parking.parking_sides(way.tags, way.id, width))
 
+    def _tapered_offsets(self, xy, base, shifted):
+        """Per point offsets of a lane that keeps its usual offset near both ends and moves to the parked-car offset
+        in between, so the junction connections (and their conflicts) are the same as without parked cars."""
+        steps = np.hypot(*np.diff(xy, axis=0).T)
+        along = np.concatenate([[0.0], np.cumsum(steps)])
+        from_end = np.minimum(along, along[-1] - along)
+        blend = np.clip((from_end - PARKING_TAPER_START) / PARKING_TAPER_LENGTH, 0.0, 1.0)
+        return base + (shifted - base) * blend
+
     def _base_lane_offset(self, way, width):
         """The lane offset on a street without parked cars."""
         total_lanes = max(roads.road_lanes(way.tags), 1)
@@ -331,7 +345,13 @@ class LaneBuilder:
     def _raw_lane_path(self, segment, travel):
         """The lane centre line of a segment in one direction, before junction trimming."""
         xy = segment.xy if travel > 0 else segment.xy[::-1]
-        return offset_polyline(xy, self._lane_offset(segment.way, travel))
+        width = self.net.widths[segment.way.id]
+        base = self._base_lane_offset(segment.way, width)
+        shifted = self._lane_offset(segment.way, travel)
+        if abs(shifted - base) < 1e-6:
+            return offset_polyline(xy, base)
+        xy = resample(xy, 1.0)
+        return offset_polyline(xy, self._tapered_offsets(xy, base, shifted))
 
     def build_road_lanes(self):
         """A lane per segment and direction, trimmed at junctions, smoothed and resampled."""
@@ -376,7 +396,7 @@ class LaneBuilder:
                         continue
                     s, distance = project_on_polyline(raw, stop)
                     # The stop point is on the way's centre line and the lane is offset from it: compare against that offset.
-                    mismatch = abs(distance - abs(self._lane_offset(segment.way, approach.travel)))
+                    mismatch = abs(distance - self._base_lane_offset(segment.way, self.net.widths[segment.way.id]))
                     if mismatch > 4.0:
                         continue
                     if best is None or mismatch < best[0]:

@@ -263,9 +263,9 @@ bool AWorldTileActor::AddFurnitureStep(const FWorldFurnitureInstances& Furniture
 namespace
 {
 /** Parked cars are drawn out to these distances; beyond them the street's cars are too small to tell from the buildings' shade. */
-constexpr int32 ParkedBodyCullCm = 22000;
-constexpr int32 ParkedGlassCullCm = 16000;
-constexpr int32 ParkedWheelCullCm = 10000;
+constexpr int32 ParkedBodyCullCm = 16000;
+constexpr int32 ParkedGlassCullCm = 8000;
+constexpr int32 ParkedWheelCullCm = 6000;
 }
 
 void AWorldTileActor::AddParkedCarColliders(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes)

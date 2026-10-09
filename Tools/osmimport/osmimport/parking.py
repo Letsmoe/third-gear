@@ -124,7 +124,7 @@ def lane_offset_with_parking(base_offset, width, travel, sides):
 class ParkedCarBuilder:
     """Places parked cars along the ways of a FurnitureBuilder's road graph, keeping the legal gaps of § 12 StVO."""
 
-    JUNCTION_GAP = 5.5
+    JUNCTION_GAP = 6.5
     SIGNAL_GAP = 10.5
     CROSSING_GAP = 8.5
     BUS_STOP_GAP = 15.0
