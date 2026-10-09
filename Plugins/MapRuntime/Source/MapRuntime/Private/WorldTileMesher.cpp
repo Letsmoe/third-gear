@@ -23,8 +23,8 @@ const FVector3f Up(0.f, 0.f, 1.f);
 /** Settings that change with the detail level. */
 struct FDetailSettings
 {
-	/** Terrain vertex spacing in grid cells. */
-	int32 TerrainStep;
+	/** Terrain vertex spacing in metres; coarse grids (horizon tiles) use every vertex. */
+	float TerrainStepMetres;
 	/** Spacing of the extra vertices inside surface polygons, metres; 0 means outline only. */
 	float SurfaceGrid;
 	/** Longest outline edge before it is split, so surfaces follow the ground. */
@@ -41,11 +41,11 @@ FDetailSettings SettingsFor(EWorldTileDetail Detail)
 {
 	switch (Detail)
 	{
-	case EWorldTileDetail::Near: return {1, 2.f, 2.f, 0.f, 0.5f, 4};
-	case EWorldTileDetail::Middle: return {4, 8.f, 8.f, 0.15f, 2.f, 2};
-	case EWorldTileDetail::Far: return {8, 0.f, 16.f, 0.3f, 4.f, 1};
+	case EWorldTileDetail::Near: return {1.f, 2.f, 2.f, 0.f, 0.5f, 4};
+	case EWorldTileDetail::Middle: return {4.f, 8.f, 8.f, 0.15f, 2.f, 2};
+	case EWorldTileDetail::Far: return {8.f, 0.f, 16.f, 0.3f, 4.f, 1};
 	}
-	return {1, 2.f, 2.f, 0.f, 0.5f, 4};
+	return {1.f, 2.f, 2.f, 0.f, 0.5f, 4};
 }
 
 FVector3f ToCm(float LocalX, float LocalY, float Z)
@@ -180,13 +180,17 @@ TArray<int32> GridSteps(int32 Count, int32 Step)
 	return Steps;
 }
 
-/** Vertical strip hanging down from a row of terrain vertices, facing away from the tile. */
+/** Vertical strip hanging down from a row of terrain vertices, facing away from the tile; INDEX_NONE (holes) breaks it. */
 void AddSkirt(FWorldMeshBuilder& Builder, const TArray<int32>& EdgeVertices, float Depth, int32 Material, const FVector3f& Outward)
 {
 	for (int32 Index = 0; Index + 1 < EdgeVertices.Num(); ++Index)
 	{
 		const int32 TopA = EdgeVertices[Index];
 		const int32 TopB = EdgeVertices[Index + 1];
+		if (TopA == INDEX_NONE || TopB == INDEX_NONE)
+		{
+			continue;
+		}
 		const FVector3f DepthCm(0.f, 0.f, Depth * MetresToCm);
 		const int32 BottomA = Builder.AddVertex(Builder.GetPosition(TopA) - DepthCm, FVector2f::ZeroVector);
 		const int32 BottomB = Builder.AddVertex(Builder.GetPosition(TopB) - DepthCm, FVector2f::ZeroVector);
@@ -198,8 +202,9 @@ void BuildTerrain(const FWorldTileData& Tile, const FDetailSettings& Settings, F
 {
 	const FWorldTileGrid& Grid = Tile.Grid;
 	const int32 Material = MaterialSlot(Meshes, TEXT("Terrain_Grass"));
-	const TArray<int32> Xs = GridSteps(Grid.NumX, Settings.TerrainStep);
-	const TArray<int32> Ys = GridSteps(Grid.NumY, Settings.TerrainStep);
+	const int32 Step = FMath::Max(1, FMath::RoundToInt(Settings.TerrainStepMetres / Grid.CellSize));
+	const TArray<int32> Xs = GridSteps(Grid.NumX, Step);
+	const TArray<int32> Ys = GridSteps(Grid.NumY, Step);
 	FWorldMeshBuilder& Builder = Meshes.Ground;
 	const int32 First = Builder.NumVertices();
 	for (const int32 Y : Ys)
@@ -212,11 +217,16 @@ void BuildTerrain(const FWorldTileData& Tile, const FDetailSettings& Settings, F
 		}
 	}
 	const int32 Columns = Xs.Num();
-	const auto VertexAt = [&](int32 Column, int32 Row) { return First + Row * Columns + Column; };
+	const auto IsHoleAt = [&](int32 Column, int32 Row) { return Grid.IsHole(Xs[Column], Ys[Row]); };
+	const auto VertexAt = [&](int32 Column, int32 Row) { return IsHoleAt(Column, Row) ? INDEX_NONE : First + Row * Columns + Column; };
 	for (int32 Row = 0; Row + 1 < Ys.Num(); ++Row)
 	{
 		for (int32 Column = 0; Column + 1 < Columns; ++Column)
 		{
+			if (IsHoleAt(Column, Row) || IsHoleAt(Column + 1, Row) || IsHoleAt(Column, Row + 1) || IsHoleAt(Column + 1, Row + 1))
+			{
+				continue;
+			}
 			Builder.AddQuad(VertexAt(Column, Row), VertexAt(Column + 1, Row), VertexAt(Column + 1, Row + 1), VertexAt(Column, Row + 1), Material, Up);
 		}
 	}

@@ -12,7 +12,8 @@ World frame as in geo.py: x east, y south.
 Sections:
   NAME  string table: u32 count, per string u16 length + utf-8. Records refer to material and model names by index.
   GRID  u32 nx, u32 ny, f32 cell, f32 base_z; u16 terrain[ny*nx], u16 road[ny*nx] (cm above base_z, row-major,
-        row 0 at y0), u8 cover[ny*nx*3] (landcover blend weights: meadow, field, forest)
+        row 0 at y0; terrain 0xFFFF marks a hole: no ground in any cell touching that point, used by horizon tiles
+        around the region), u8 cover[ny*nx*3] (landcover blend weights: meadow, field, forest)
   SURF  u32 count; per polygon: u16 material, u8 height_mode, u8 pad, f32 params[6], u32 ring_count,
         per ring u32 n + f32 xy[n*2] (ring 0 is the outline, the rest are holes; no repeated end point)
   MARK  u32 count; per line: u16 material, u8 style, u8 pad, f32 width, f32 dash_on, f32 dash_off, f32 phase,
@@ -29,6 +30,9 @@ import numpy as np
 import shapely
 
 VERSION = 1
+
+# GRID terrain value of a hole
+HOLE = 0xFFFF
 
 # SURF height modes: how the runtime gets z for a vertex
 HEIGHT_ROAD = 0        # road height grid + params[0]
@@ -94,14 +98,18 @@ class TileWriter:
         self.buildings = []
         self.plants = []
 
-    def set_grid(self, terrain, road, cover, cell):
-        """terrain, road: (ny, nx) heights in metres at the tile's vertex grid; cover: (ny, nx, 3) weights 0..1."""
+    def set_grid(self, terrain, road, cover, cell, holes=None):
+        """terrain, road: (ny, nx) heights in metres at the tile's vertex grid; cover: (ny, nx, 3) weights 0..1;
+        holes: optional (ny, nx) bool mask of grid points without ground."""
         base = float(np.floor(min(terrain.min(), road.min())))
-        to_cm = lambda z: np.clip(np.round((z - base) * 100.0), 0, 65535).astype("<u2")  # noqa: E731
+        to_cm = lambda z: np.clip(np.round((z - base) * 100.0), 0, HOLE - 1).astype("<u2")  # noqa: E731
         ny, nx = terrain.shape
+        terrain_cm = to_cm(terrain)
+        if holes is not None:
+            terrain_cm[holes] = HOLE
         self.grid = b"".join([
             struct.pack("<IIff", nx, ny, cell, base),
-            to_cm(terrain).tobytes(), to_cm(road).tobytes(),
+            terrain_cm.tobytes(), to_cm(road).tobytes(),
             np.clip(np.round(cover * 255.0), 0, 255).astype(np.uint8).tobytes(),
         ])
 
