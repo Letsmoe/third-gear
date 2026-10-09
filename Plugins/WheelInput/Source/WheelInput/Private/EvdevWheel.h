@@ -24,6 +24,8 @@ struct FEvdevWheelConfig
 	float BrakeFullTravel = 0.75f;
 	TArray<int32> GearButtonIndices;
 	int32 ReverseButtonIndex = -1;
+	int32 DPadXAxis = 0x10;
+	int32 DPadYAxis = 0x11;
 	bool bInvertForce = false;
 	float ForceGain = 1.f;
 	bool bLogInput = false;
@@ -48,11 +50,18 @@ public:
 	void SetSteeringResistance(float Damping, float Friction);
 	void SetWheelRange(int32 Degrees);
 
+	/**
+	 * Hands a new configuration (axes, inversion, deadzones, buttons, force sign and gain) to the running worker.
+	 * Thread-safe; the worker switches to it at the start of its next loop iteration. The device path only matters on (re)connect.
+	 */
+	void SetConfig(const FEvdevWheelConfig& NewConfig);
+
 	// FRunnable
 	virtual uint32 Run() override;
 	virtual void Stop() override;
 
 private:
+	void ApplyPendingConfig();
 	bool TryOpen();
 	void Close();
 	void ReadEvents();
@@ -67,7 +76,11 @@ private:
 		int32 Max = 1;
 	};
 
+	/** Worker-thread copy; only the worker reads it. New values arrive through PendingConfig. */
 	FEvdevWheelConfig Config;
+	FCriticalSection PendingConfigLock;
+	FEvdevWheelConfig PendingConfig;
+	std::atomic<bool> bConfigPending{false};
 	FRunnableThread* Thread = nullptr;
 	FThreadSafeBool bStopRequested = false;
 

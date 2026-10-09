@@ -3,18 +3,14 @@
 #include "EvdevWheel.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "UserSettingsFile.h"
 #include "WheelInputSettings.h"
 
-void UWheelInputSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+namespace
 {
-	Super::Initialize(Collection);
-
-	// No device access in commandlets (cooking, headless scripts) or with -NoWheel (automated tests).
-	if (IsRunningCommandlet() || FParse::Param(FCommandLine::Get(), TEXT("NoWheel")))
-	{
-		return;
-	}
-
+/** Copies the (game-thread) settings object into the plain struct the worker thread uses. */
+FEvdevWheelConfig MakeConfigFromSettings()
+{
 	const UWheelInputSettings* Settings = GetDefault<UWheelInputSettings>();
 	FEvdevWheelConfig Config;
 	Config.DevicePath = Settings->DevicePath;
@@ -31,10 +27,32 @@ void UWheelInputSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Config.BrakeFullTravel = FMath::Clamp(Settings->BrakeFullTravel, 0.3f, 1.f);
 	Config.GearButtonIndices = Settings->GearButtonIndices;
 	Config.ReverseButtonIndex = Settings->ReverseButtonIndex;
+	Config.DPadXAxis = Settings->DPadXAxis;
+	Config.DPadYAxis = Settings->DPadYAxis;
 	Config.bInvertForce = Settings->bInvertForce;
 	Config.ForceGain = FMath::Clamp(Settings->ForceGain, 0.f, 1.f);
 	Config.bLogInput = Settings->bLogInput || FParse::Param(FCommandLine::Get(), TEXT("WheelDebug"));
-	Wheel = MakeShared<FEvdevWheel>(Config);
+	return Config;
+}
+}
+
+void UWheelInputSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	// Per-user overrides saved by the in-game menu (Saved/Config/<platform>/UserSettings.ini) win over Config/DefaultGame.ini.
+	if (!IsRunningCommandlet())
+	{
+		FUserSettingsFile::LoadOverrides(GetMutableDefault<UWheelInputSettings>(), UWheelInputSettings::GetUserEditableProperties());
+	}
+
+	// No device access in commandlets (cooking, headless scripts) or with -NoWheel (automated tests).
+	if (IsRunningCommandlet() || FParse::Param(FCommandLine::Get(), TEXT("NoWheel")))
+	{
+		return;
+	}
+
+	Wheel = MakeShared<FEvdevWheel>(MakeConfigFromSettings());
 	Wheel->Start();
 }
 
@@ -47,6 +65,16 @@ void UWheelInputSubsystem::Deinitialize()
 FWheelInputState UWheelInputSubsystem::GetState() const
 {
 	return Wheel ? Wheel->GetState() : FWheelInputState();
+}
+
+void UWheelInputSubsystem::ApplySettings()
+{
+	if (!Wheel)
+	{
+		return;
+	}
+	Wheel->SetConfig(MakeConfigFromSettings());
+	Wheel->SetWheelRange(GetDefault<UWheelInputSettings>()->WheelRangeDegrees);
 }
 
 void UWheelInputSubsystem::SetSteeringForce(float Normalized)

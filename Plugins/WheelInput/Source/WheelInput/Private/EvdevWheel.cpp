@@ -32,6 +32,8 @@ constexpr double ForceTimeoutSeconds = 0.25;
 constexpr float VelocityFilterSeconds = 0.012f;
 /** Velocity at which friction reaches ~76 % (tanh(1)) of its value, rad/s. */
 constexpr float FrictionVelocityScale = 0.3f;
+/** Number of axis codes published in FWheelInputState::AxisValues (Linux ABS_CNT). */
+constexpr int32 PublishedAxisCount = 64;
 
 #if PLATFORM_LINUX
 constexpr size_t BitsPerLong = sizeof(unsigned long) * 8;
@@ -118,6 +120,31 @@ void FEvdevWheel::SetWheelRange(int32 Degrees)
 	RequestedRange.store(Degrees, std::memory_order_relaxed);
 }
 
+void FEvdevWheel::SetConfig(const FEvdevWheelConfig& NewConfig)
+{
+	FScopeLock Lock(&PendingConfigLock);
+	PendingConfig = NewConfig;
+	bConfigPending.store(true, std::memory_order_release);
+}
+
+void FEvdevWheel::ApplyPendingConfig()
+{
+	if (!bConfigPending.load(std::memory_order_acquire))
+	{
+		return;
+	}
+	{
+		FScopeLock Lock(&PendingConfigLock);
+		Config = PendingConfig;
+		bConfigPending.store(false, std::memory_order_relaxed);
+	}
+	// The decoded values depend on the configuration, so refresh them now instead of at the next device event.
+	if (Fd >= 0)
+	{
+		PublishState();
+	}
+}
+
 void FEvdevWheel::Stop()
 {
 	bStopRequested = true;
@@ -128,6 +155,7 @@ uint32 FEvdevWheel::Run()
 #if PLATFORM_LINUX
 	while (!bStopRequested)
 	{
+		ApplyPendingConfig();
 		if (Fd < 0)
 		{
 			const double Now = FPlatformTime::Seconds();
@@ -447,7 +475,24 @@ void FEvdevWheel::PublishState()
 	const int32 RangeDegrees = AppliedRange > 0 ? AppliedRange : (Config.WheelRangeDegrees > 0 ? Config.WheelRangeDegrees : 900);
 	SteeringRad = FMath::DegreesToRadians(Steering * RangeDegrees * 0.5f);
 
+	auto HatDirection = [this, &Normalized](int32 Code) -> int32
+	{
+		if (!AxisRanges.Contains(Code))
+		{
+			return 0;
+		}
+		const float Value = Normalized(Code) * 2.f - 1.f;
+		return Value > 0.5f ? 1 : (Value < -0.5f ? -1 : 0);
+	};
+
 	FScopeLock Lock(&StateLock);
+	State.AxisValues.SetNumUninitialized(PublishedAxisCount);
+	for (int32 Code = 0; Code < PublishedAxisCount; ++Code)
+	{
+		State.AxisValues[Code] = AxisRanges.Contains(Code) ? Normalized(Code) : -1.f;
+	}
+	State.DPadX = HatDirection(Config.DPadXAxis);
+	State.DPadY = HatDirection(Config.DPadYAxis);
 	State.Steering = Steering;
 	State.SteeringDegrees = Steering * RangeDegrees * 0.5f;
 	State.Throttle = Pedal(Config.ThrottleAxis, Config.bInvertThrottle);

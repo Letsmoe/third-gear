@@ -18,6 +18,9 @@ class WHEELINPUT_API UWheelInputSettings : public UDeveloperSettings
 	GENERATED_BODY()
 
 public:
+	/** Names of the properties the in-game menu edits and saves as per-user overrides (everything except the device path and debug logging). */
+	static const TArray<FName>& GetUserEditableProperties();
+
 	/** Explicit /dev/input/eventN path (or /dev/input/by-id/... link); empty = auto-detect the first Logitech device with force feedback. */
 	UPROPERTY(Config, EditAnywhere, Category = "Device")
 	FString DevicePath;
@@ -82,6 +85,25 @@ public:
 	/** Puts the car back upright on the road at its current position. */
 	UPROPERTY(Config, EditAnywhere, Category = "Buttons")
 	int32 ResetCarButtonIndex = -1;
+
+	/** Opens and closes the in-game settings menu (-1 = unassigned; the keyboard F1 always works). Assignable in the menu. */
+	UPROPERTY(Config, EditAnywhere, Category = "Menu")
+	int32 MenuButtonIndex = -1;
+
+	/** Menu: activates the selected row (-1 = unassigned; the D-pad right and keyboard Enter always work). */
+	UPROPERTY(Config, EditAnywhere, Category = "Menu")
+	int32 MenuConfirmButtonIndex = -1;
+
+	/** Menu: cancels an assignment, otherwise closes the menu (-1 = unassigned; keyboard Backspace and Escape always work). */
+	UPROPERTY(Config, EditAnywhere, Category = "Menu")
+	int32 MenuBackButtonIndex = -1;
+
+	/** Axis codes of the D-pad (hat switch): Linux ABS_HAT0X and ABS_HAT0Y, which is what the G923 reports. */
+	UPROPERTY(Config, EditAnywhere, Category = "Menu")
+	int32 DPadXAxis = 0x10;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Menu")
+	int32 DPadYAxis = 0x11;
 
 	/** Flip if a positive (clockwise) torque request pulls the wheel to the LEFT (wheeltest ffb). */
 	UPROPERTY(Config, EditAnywhere, Category = "Force Feedback")

@@ -28,6 +28,13 @@ public:
 	FWheelInputState GetState() const;
 
 	/**
+	 * Applies the current values of UWheelInputSettings (axes, inversion, deadzones, buttons, force sign and gain, range)
+	 * to the running device without a restart. Call on the game thread after changing the settings object.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Wheel")
+	void ApplySettings();
+
+	/**
 	 * Requests a steering torque, normalised to the wheel's maximum: +1 = full force turning the wheel clockwise (right).
 	 * Thread-safe. Must be refreshed regularly (at least every 0.25 s) or it fades out.
 	 */
