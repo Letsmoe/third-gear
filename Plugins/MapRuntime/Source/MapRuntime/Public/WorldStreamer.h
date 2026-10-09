@@ -184,6 +184,9 @@ private:
 
 	/** Per plant model, the wind-swaying material for every slot (Scripts/create_tree_wind_materials.py); empty if absent. */
 	TMap<FString, TArray<TObjectPtr<UMaterialInterface>>> LoadedPlantWindMaterials;
+	/** The same materials as a flat list, because a map of arrays can't be a UPROPERTY and the collector must see them. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInterface>> PlantWindMaterialReferences;
 
 	/** Street furniture meshes by asset name, and the sign materials by graphic name. */
 	UPROPERTY(Transient)

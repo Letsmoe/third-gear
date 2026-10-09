@@ -739,6 +739,24 @@ void FGrassField::Update(const FVector& ViewerCm, const FTileFinder& FindTiles)
 	}
 }
 
+void FGrassField::AddReferencedObjects(FReferenceCollector& Collector)
+{
+	for (FKind& Kind : Kinds)
+	{
+		Collector.AddReferencedObjects(Kind.Meshes);
+		Collector.AddReferencedObject(Kind.Material);
+	}
+	for (TPair<FIntPoint, FCell>& Cell : Cells)
+	{
+		Collector.AddReferencedObjects(Cell.Value.Components);
+	}
+}
+
+FString FGrassField::GetReferencerName() const
+{
+	return TEXT("FGrassField");
+}
+
 void FGrassField::Clear()
 {
 	for (TPair<FIntPoint, FCell>& Entry : Cells)

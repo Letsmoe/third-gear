@@ -246,6 +246,7 @@ void AWorldStreamer::LoadPlantWindMaterials(const FString& ModelKey, const UStat
 		}
 		SlotMaterials.Add(Material);
 	}
+	PlantWindMaterialReferences.Append(SlotMaterials);
 	LoadedPlantWindMaterials.Add(ModelKey, MoveTemp(SlotMaterials));
 }
 
