@@ -10,6 +10,8 @@ namespace
 {
 constexpr float KitMetresToCm = 100.f;
 constexpr float KitFoundationDepth = 1.0f;
+/** Height of the parapet around flat roofs. */
+constexpr float KitParapetHeight = 0.5f;
 /** Class ids of the typology (osmimport/building_types.py CLASS_NAMES). */
 enum EKitBuildingClass : int32
 {
@@ -241,13 +243,132 @@ FKitRoofFrame MakeKitRoofFrame(const TArray<FVector2f>& Ring, float RidgeYawDegr
 	return Frame;
 }
 
+/** A material choice with its weight. */
+struct FKitChoice
+{
+	const TCHAR* Name;
+	float Weight;
+};
+
+/** Deterministic weighted draw from the choices, seeded by the building. */
+const TCHAR* KitPick(uint64 OsmId, int32 Salt, const TArray<FKitChoice>& Choices)
+{
+	float Total = 0.f;
+	for (const FKitChoice& Choice : Choices)
+	{
+		Total += Choice.Weight;
+	}
+	float Draw = KitHash01(OsmId, Salt) * Total;
+	for (const FKitChoice& Choice : Choices)
+	{
+		Draw -= Choice.Weight;
+		if (Draw <= 0.f)
+		{
+			return Choice.Name;
+		}
+	}
+	return Choices.Last().Name;
+}
+
+/** Name of the facade material instance (/Game/World/Facades/M_<name>) for the walls of a building of this class. */
+FString KitFacadeName(const FWorldBuilding& Building)
+{
+	TArray<FKitChoice> Choices;
+	switch (Building.ClassId)
+	{
+	case ClassGruenderzeit:
+		Choices = {{TEXT("BrickGruenderzeit"), 40}, {TEXT("ClinkerDeepRed"), 22}, {TEXT("BrickSooty"), 10}, {TEXT("RenderScratchBeige"), 10},
+			{TEXT("RenderScratchWhite"), 8}, {TEXT("ClinkerYellowBrown"), 10}};
+		break;
+	case Class1920s:
+		Choices = {{TEXT("ClinkerDeepRed"), 45}, {TEXT("BrickSooty"), 20}, {TEXT("ClinkerYellowBrown"), 25}, {TEXT("BrickPostwar"), 10}};
+		break;
+	case ClassPostwar:
+		Choices = {{TEXT("RenderScratchWhite"), 22}, {TEXT("RenderScratchBeige"), 18}, {TEXT("RenderScratchPastel"), 10}, {TEXT("RenderScratchGrey"), 8},
+			{TEXT("BrickPostwar"), 22}, {TEXT("ClinkerYellowBrown"), 12}, {TEXT("ClinkerDeepRed"), 8}};
+		break;
+	case ClassSlab:
+		Choices = {{TEXT("ConcreteSlab"), 30}, {TEXT("RenderSmoothWhite"), 20}, {TEXT("RenderSmoothGrey"), 20}, {TEXT("RenderSmoothPastel"), 15},
+			{TEXT("ConcreteSmooth"), 15}};
+		break;
+	case ClassTerraced:
+	case ClassSemidetached:
+	case ClassDetached:
+		Choices = {{TEXT("RenderScratchWhite"), 22}, {TEXT("RenderScratchBeige"), 16}, {TEXT("RenderScratchPastel"), 8}, {TEXT("RenderScratchGrey"), 4},
+			{TEXT("BrickPostwar"), 20}, {TEXT("ClinkerDeepRed"), 14}, {TEXT("ClinkerYellowBrown"), 16}};
+		break;
+	case ClassVilla:
+		Choices = {{TEXT("RenderScratchWhite"), 30}, {TEXT("RenderScratchBeige"), 20}, {TEXT("ClinkerDeepRed"), 30}, {TEXT("BrickGruenderzeit"), 20}};
+		break;
+	case ClassModern:
+		Choices = {{TEXT("RenderSmoothWhite"), 30}, {TEXT("RenderSmoothGrey"), 25}, {TEXT("RenderSmoothBeige"), 15}, {TEXT("ConcreteSmooth"), 15},
+			{TEXT("RenderSmoothPastel"), 15}};
+		break;
+	case ClassCommercial:
+		Choices = {{TEXT("BrickGruenderzeit"), 35}, {TEXT("ClinkerDeepRed"), 25}, {TEXT("RenderSmoothBeige"), 20}, {TEXT("RenderScratchWhite"), 20}};
+		break;
+	case ClassHalfTimbered:
+		Choices = {{TEXT("RenderScratchWhite"), 40}, {TEXT("ClinkerDeepRed"), 35}, {TEXT("RenderScratchBeige"), 25}};
+		break;
+	default:
+		Choices = {{TEXT("ClinkerDeepRed"), 70}, {TEXT("BrickSooty"), 30}};
+		break;
+	}
+	return FString::Printf(TEXT("Facade_%s"), KitPick(Building.OsmId, 4101, Choices));
+}
+
+/** Name of the roof tile material (/Game/World/Facades/M_<name>) of a pitched roof. */
+FString KitRoofTileName(const FWorldBuilding& Building)
+{
+	TArray<FKitChoice> Choices;
+	switch (Building.ClassId)
+	{
+	case ClassGruenderzeit:
+	case Class1920s:
+	case ClassVilla:
+	case ClassCommercial:
+	case ClassHalfTimbered:
+		if (Building.TypedRoofShape == 4 || Building.TypedRoofShape == 5)
+		{
+			Choices = {{TEXT("Roof_Slate"), 70}, {TEXT("Roof_ClayOld"), 30}};
+		}
+		else
+		{
+			Choices = {{TEXT("Roof_ClayOld"), 35}, {TEXT("Roof_Clay"), 35}, {TEXT("Roof_Slate"), 30}};
+		}
+		break;
+	case ClassFarmhouse:
+		Choices = {{TEXT("Roof_Clay"), 50}, {TEXT("Roof_ClayOld"), 50}};
+		break;
+	default:
+		Choices = {{TEXT("Roof_Clay"), 35}, {TEXT("Roof_ConcreteAnthracite"), 30}, {TEXT("Roof_ConcreteGrey"), 15}, {TEXT("Roof_ClayOld"), 20}};
+		break;
+	}
+	return KitPick(Building.OsmId, 4102, Choices);
+}
+
+/** Flat roofs: gravel on the older and plainer blocks, bitumen sheet on shops, offices and new buildings. */
+const TCHAR* KitFlatRoofName(const FWorldBuilding& Building)
+{
+	const bool bBitumen = Building.ClassId == ClassModern || Building.ClassId == ClassCommercial || KitHash01(Building.OsmId, 4103) < 0.3f;
+	return bBitumen ? TEXT("Roof_Bitumen") : TEXT("Roof_Gravel");
+}
+
+/** Which kind of roof a building gets. */
+enum class EKitRoofMode : uint8
+{
+	Flat,
+	Skeleton,
+	Rectangle,
+};
+
 /** Everything one building's assembly needs while it is built. */
 class FKitAssembler
 {
 public:
-	FKitAssembler(const FWorldBuilding& InBuilding, const FKitStyle& InStyle, const FKitRoofMaterials& InMaterials,
+	FKitAssembler(const FWorldBuilding& InBuilding, const FKitStyle& InStyle, const TFunction<int32(const FString&)>& InFindSlot,
 		FWorldKitInstances& InInstances, FWorldMeshBuilder& InRoofBuilder)
-		: Building(InBuilding), Style(InStyle), Materials(InMaterials), Instances(InInstances), RoofBuilder(InRoofBuilder)
+		: Building(InBuilding), Style(InStyle), FindSlot(InFindSlot), Instances(InInstances), RoofBuilder(InRoofBuilder)
 	{
 		StoreyCount = FMath::Clamp<int32>(Building.Storeys, 1, 40);
 		GroundScale = Building.GroundHeight / Style.StoreyHeight;
@@ -256,17 +377,20 @@ public:
 		WallTopZ = BaseZ + Building.GroundHeight + (StoreyCount - 1) * Building.StoreyHeight;
 		const float FrontRadians = FMath::DegreesToRadians(Building.FrontYaw);
 		FrontDirection = FVector2f(FMath::Cos(FrontRadians), FMath::Sin(FrontRadians));
+		FacadeName = KitFacadeName(Building);
+		RoofTileName = KitRoofTileName(Building);
+		RoofFrame = MakeKitRoofFrame(Building.Footprint.Rings[0], Building.RidgeYaw);
+		PitchSlope = FMath::Tan(FMath::DegreesToRadians(FMath::Clamp<float>(Building.PitchDegrees, 20.f, 65.f)));
+		RoofMode = DecideRoofMode();
 	}
 
-	/** Walls, roof and decorations; returns true when a flat roof surface is still to be added at WallTopZ. */
-	bool Build()
+	/** Walls, roof and decorations. Fills Flat when the caller has to add a flat roof surface. */
+	void Build(FKitFlatRoof& Flat)
 	{
-		TArray<FKitEdge> Edges;
 		for (int32 RingIndex = 0; RingIndex < Building.Footprint.Rings.Num(); ++RingIndex)
 		{
 			KitCollectEdges(Building.Footprint.Rings[RingIndex], RingIndex > 0, Edges);
 		}
-		int32 FrontEdge = INDEX_NONE;
 		float BestFacing = 0.2f;
 		for (int32 Index = 0; Index < Edges.Num(); ++Index)
 		{
@@ -281,13 +405,19 @@ public:
 		{
 			BuildEdge(Edges[Index], Index == FrontEdge, Index);
 		}
-		return BuildRoof();
+		BuildRoof();
+		if (RoofMode == EKitRoofMode::Flat)
+		{
+			Flat.bNeeded = true;
+			Flat.Z = WallTopZ + 0.02f;
+			Flat.Material = FindSlot(KitFlatRoofName(Building));
+		}
 	}
 
 private:
 	const FWorldBuilding& Building;
 	const FKitStyle& Style;
-	const FKitRoofMaterials& Materials;
+	const TFunction<int32(const FString&)>& FindSlot;
 	FWorldKitInstances& Instances;
 	FWorldMeshBuilder& RoofBuilder;
 	int32 StoreyCount = 1;
@@ -295,7 +425,54 @@ private:
 	float UpperScale = 1.f;
 	float BaseZ = 0.f;
 	float WallTopZ = 0.f;
+	float PitchSlope = 1.f;
 	FVector2f FrontDirection = FVector2f(1.f, 0.f);
+	FString FacadeName;
+	FString RoofTileName;
+	FKitRoofFrame RoofFrame;
+	EKitRoofMode RoofMode = EKitRoofMode::Flat;
+	TArray<FKitEdge> Edges;
+	int32 FrontEdge = INDEX_NONE;
+
+	/** Pitched roofs from the skeleton when the tile has one, over the bounding rectangle when the plan is one, else flat. */
+	EKitRoofMode DecideRoofMode() const
+	{
+		const int32 Shape = Building.TypedRoofShape;
+		const bool bPitchedShape = Shape == KitRoofGabled || Shape == KitRoofHipped || Shape == KitRoofHalfHipped || Shape == KitRoofMansard
+			|| Shape == KitRoofGambrel || Shape == KitRoofPyramidal;
+		if (Style.bFlatRoof || !bPitchedShape)
+		{
+			return EKitRoofMode::Flat;
+		}
+		if (!Building.RoofFaces.IsEmpty())
+		{
+			return EKitRoofMode::Skeleton;
+		}
+		const float Rise = (FMath::Min(RoofFrame.HalfAcross, RoofFrame.HalfAlong * (Shape == KitRoofGabled ? 100.f : 1.f)) + Style.EaveOverhang) * PitchSlope;
+		const bool bFits = RoofFrame.Rectangularity > 0.8f && Building.Footprint.Rings.Num() == 1 && Rise < 7.5f && RoofFrame.HalfAcross > 1.5f;
+		return bFits ? EKitRoofMode::Rectangle : EKitRoofMode::Flat;
+	}
+
+	/** Key of an instance list: the piece, and the material that replaces its wall, trim or roof slots (empty for none). */
+	FName PieceKey(const TCHAR* Piece, const FString& Material) const
+	{
+		return Material.IsEmpty() ? FName(*FString::Printf(TEXT("%s_%s"), Style.Prefix, Piece))
+			: FName(*FString::Printf(TEXT("%s_%s|%s"), Style.Prefix, Piece, *Material));
+	}
+
+	/** Material that the slots of this piece that show the wall take: the facade for walls, corners and cornices. */
+	FString MaterialFor(const FString& Piece) const
+	{
+		if (Piece.StartsWith(TEXT("Wall_")) || Piece.StartsWith(TEXT("Corner_")) || Piece.StartsWith(TEXT("Cornice")))
+		{
+			return FacadeName;
+		}
+		if (Piece.StartsWith(TEXT("Plinth")))
+		{
+			return TEXT("Facade_Plinth");
+		}
+		return FString();
+	}
 
 	/** Adds one instance of a kit piece: location in metres (tile-relative), yaw, scale along the wall and in height. */
 	void Place(const TCHAR* Piece, const FVector2f& Point, float ZMetres, float YawDegrees, float ScaleX, float ScaleZ = 1.f)
@@ -304,8 +481,12 @@ private:
 		{
 			return;
 		}
-		const FName Name(*FString::Printf(TEXT("%s_%s"), Style.Prefix, Piece));
-		Instances.Pieces.FindOrAdd(Name).Emplace(FRotator(0.f, YawDegrees, 0.f), FVector(KitToCm(Point, ZMetres)), FVector(ScaleX, 1.f, ScaleZ));
+		AddInstance(PieceKey(Piece, MaterialFor(Piece)), FTransform(FRotator(0.f, YawDegrees, 0.f), FVector(KitToCm(Point, ZMetres)), FVector(ScaleX, 1.f, ScaleZ)));
+	}
+
+	void AddInstance(const FName& Key, const FTransform& Transform)
+	{
+		Instances.Pieces.FindOrAdd(Key).Add(Transform);
 		++Instances.NumInstances;
 	}
 
@@ -370,6 +551,28 @@ private:
 			}
 		}
 		BuildBands(Edge, StartOffset, BayWidth, Bays, Scale);
+		if (RoofMode == EKitRoofMode::Flat && !Style.bFlatRoof)
+		{
+			BuildParapet(Edge, StartOffset, BayWidth, Bays, Scale);
+		}
+		if (RoofMode != EKitRoofMode::Flat && ShouldHaveGutter(Edge))
+		{
+			PlaceGutter(Edge);
+		}
+	}
+
+	/** A low wall above the cornice around a flat roof, from solid bays stretched down to the parapet height. */
+	void BuildParapet(const FKitEdge& Edge, float StartOffset, float BayWidth, int32 Bays, float Scale)
+	{
+		const float ParapetScale = KitParapetHeight / Style.StoreyHeight;
+		for (int32 Bay = 0; Bay < Bays; ++Bay)
+		{
+			Place(Style.WallSolid, Edge.Start + Edge.Tangent * (StartOffset + Bay * BayWidth), WallTopZ, Edge.YawDegrees, Scale, ParapetScale);
+		}
+		if (Edge.bPostAtStart)
+		{
+			Place(TEXT("Corner_L"), Edge.Start, WallTopZ, Edge.YawDegrees, 1.f, ParapetScale);
+		}
 	}
 
 	/** Which wall piece and openings one bay gets. */
@@ -416,7 +619,7 @@ private:
 		return (Side > 0.f && bClosedRight) || (Side < 0.f && bClosedLeft);
 	}
 
-	/** Plinth, string courses, top band and gutter along one facade run. */
+	/** Plinth, string courses and top band along one facade run. */
 	void BuildBands(const FKitEdge& Edge, float StartOffset, float BayWidth, int32 Bays, float Scale)
 	{
 		PlaceBand(TEXT("Plinth"), Edge, BaseZ, BayWidth, StartOffset, Bays, Scale);
@@ -434,6 +637,124 @@ private:
 	}
 
 	// ------------------------------------------------------------------------------------------------ roof
+
+	float EaveZ() const { return WallTopZ + Style.EaveLift; }
+
+	void BuildRoof()
+	{
+		switch (RoofMode)
+		{
+		case EKitRoofMode::Skeleton:
+			BuildSkeletonRoof();
+			PlaceHipCaps();
+			PlaceFrontDormers();
+			PlaceChimneyOnTop();
+			break;
+		case EKitRoofMode::Rectangle:
+			BuildRectangleRoof();
+			PlaceFrontDormers();
+			PlaceChimneyOnRidge();
+			break;
+		case EKitRoofMode::Flat:
+			break;
+		}
+	}
+
+	/** The roof planes the world compiler cut from the straight skeleton (osmimport/roofs.py), above the eave line. */
+	void BuildSkeletonRoof()
+	{
+		const int32 TileSlot = FindSlot(RoofTileName);
+		const int32 FlatSlot = FindSlot(KitFlatRoofName(Building));
+		for (const FWorldRoofFace& Face : Building.RoofFaces)
+		{
+			const int32 Material = Face.Kind == 1 ? FlatSlot : TileSlot;
+			AddRoofFaceMesh(Face, Material);
+		}
+	}
+
+	void AddRoofFaceMesh(const FWorldRoofFace& Face, int32 Material)
+	{
+		for (const float Side : {1.f, -1.f})
+		{
+			TArray<int32> Vertices;
+			for (int32 Index = 0; Index < Face.Positions.Num(); ++Index)
+			{
+				const FVector3f& Position = Face.Positions[Index];
+				Vertices.Add(RoofBuilder.AddVertex(KitToCm(FVector2f(Position.X, Position.Y), EaveZ() + Position.Z), Face.UVs[Index]));
+			}
+			for (int32 Triangle = 0; Triangle + 2 < Face.Indices.Num(); Triangle += 3)
+			{
+				const FVector3f A = RoofBuilder.GetPosition(Vertices[Face.Indices[Triangle]]);
+				const FVector3f B = RoofBuilder.GetPosition(Vertices[Face.Indices[Triangle + 1]]);
+				const FVector3f C = RoofBuilder.GetPosition(Vertices[Face.Indices[Triangle + 2]]);
+				FVector3f Normal = FVector3f::CrossProduct(B - A, C - A).GetSafeNormal();
+				if (Normal.Z < 0.f)
+				{
+					Normal = -Normal;
+				}
+				RoofBuilder.AddTriangle(Vertices[Face.Indices[Triangle]], Vertices[Face.Indices[Triangle + 1]], Vertices[Face.Indices[Triangle + 2]],
+					Material, Normal * Side);
+			}
+		}
+	}
+
+	/** Ridge cap pieces along the hips and ridges, tilted to follow each line. */
+	void PlaceHipCaps()
+	{
+		for (const FWorldRoofCap& Cap : Building.RoofCaps)
+		{
+			const FVector3f Delta = Cap.End - Cap.Start;
+			const float Length = Delta.Size();
+			if (Length < 0.5f)
+			{
+				continue;
+			}
+			const FVector3f Direction = Delta / Length;
+			const FRotator Rotation(FMath::RadiansToDegrees(FMath::Asin(Direction.Z)), FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X)), 0.f);
+			const int32 Pieces = FMath::Max(1, FMath::CeilToInt(Length / 2.f));
+			const float Scale = Length / (2.f * Pieces);
+			for (int32 Piece = 0; Piece < Pieces; ++Piece)
+			{
+				const FVector3f Point = Cap.Start + Direction * (Piece * 2.f * Scale);
+				AddInstance(RidgeKey(), FTransform(Rotation, FVector(KitToCm(FVector2f(Point.X, Point.Y), EaveZ() + Point.Z)), FVector(Scale, 1.f, 1.f)));
+			}
+		}
+	}
+
+	/** The kit's ridge cap, in the roof tile material of the building (the farm style only has a thatch one). */
+	FName RidgeKey() const { return FName(*FString::Printf(TEXT("brick_Roof_Tile_Ridge|%s"), *RoofTileName)); }
+
+	/** A chimney near the highest point of the skeleton roof. */
+	void PlaceChimneyOnTop()
+	{
+		if (KitHash01(Building.OsmId, 777) > 0.6f)
+		{
+			return;
+		}
+		FVector3f Top = FVector3f::ZeroVector;
+		for (const FWorldRoofFace& Face : Building.RoofFaces)
+		{
+			if (Face.Kind != 0)
+			{
+				continue;
+			}
+			for (const FVector3f& Position : Face.Positions)
+			{
+				if (Position.Z > Top.Z)
+				{
+					Top = Position;
+				}
+			}
+		}
+		if (Top.Z < 1.f)
+		{
+			return;
+		}
+		const float Yaw = Building.RidgeYaw + 180.f;
+		AddInstance(PieceKey(TEXT("Chimney"), FString()), FTransform(FRotator(0.f, Yaw, 0.f), FVector(KitToCm(FVector2f(Top.X, Top.Y), EaveZ() + Top.Z - 0.35f))));
+	}
+
+	// -- plain gable or hip roof over the bounding rectangle, for outlines without a skeleton roof
 
 	/** Adds a convex roof polygon (cm) facing up, with its underside so the eaves aren't see-through. */
 	void AddRoofFace(const TArray<FVector3f>& Points, int32 Material)
@@ -464,13 +785,13 @@ private:
 			}
 			for (int32 Index = 1; Index + 1 < Indices.Num(); ++Index)
 			{
-				RoofBuilder.AddTriangle(Indices[0], Indices[Index], Indices[Index + 1], Materials.RoofTiles, Normal * Side);
+				RoofBuilder.AddTriangle(Indices[0], Indices[Index], Indices[Index + 1], Material, Normal * Side);
 			}
 		}
 	}
 
 	/** One gable triangle or trapezoid in the wall plane at the end of the ridge, facing outward. */
-	void AddGableFace(const TArray<FVector3f>& Points, const FVector3f& Outward)
+	void AddGableFace(const TArray<FVector3f>& Points, const FVector3f& Outward, int32 Material)
 	{
 		TArray<int32> Indices;
 		for (const FVector3f& Point : Points)
@@ -480,162 +801,163 @@ private:
 		}
 		for (int32 Index = 1; Index + 1 < Indices.Num(); ++Index)
 		{
-			RoofBuilder.AddTriangle(Indices[0], Indices[Index], Indices[Index + 1], Materials.Gable, Outward);
+			RoofBuilder.AddTriangle(Indices[0], Indices[Index], Indices[Index + 1], Material, Outward);
 		}
 	}
 
-	/** Roof surfaces, ridge caps, gutters, dormers and chimney. Returns true when the roof is flat. */
-	bool BuildRoof()
-	{
-		const TArray<FVector2f>& Ring = Building.Footprint.Rings[0];
-		const FKitRoofFrame Frame = MakeKitRoofFrame(Ring, Building.RidgeYaw);
-		const int32 Shape = Building.TypedRoofShape;
-		const bool bPitchedShape = Shape == KitRoofGabled || Shape == KitRoofHipped || Shape == KitRoofHalfHipped || Shape == KitRoofMansard
-			|| Shape == KitRoofGambrel || Shape == KitRoofPyramidal;
-		const float Slope = FMath::Tan(FMath::DegreesToRadians(Style.PitchDegrees));
-		const float Overhang = Style.EaveOverhang;
-		const float Rise = (FMath::Min(Frame.HalfAcross, Frame.HalfAlong * (Shape == KitRoofGabled ? 100.f : 1.f)) + Overhang) * Slope;
-		const bool bFits = Frame.Rectangularity > 0.8f && Building.Footprint.Rings.Num() == 1 && Rise < 7.5f && Frame.HalfAcross > 1.5f;
-		if (Style.bFlatRoof || !bPitchedShape || !bFits)
-		{
-			return true;
-		}
-		const float EaveZ = WallTopZ + Style.EaveLift;
-		const bool bGable = Shape == KitRoofGabled || Shape == KitRoofGambrel;
-		BuildPitchedRoof(Frame, EaveZ, Slope, bGable, Shape == KitRoofPyramidal);
-		AddGutters(Frame, EaveZ, bGable);
-		AddRoofDetails(Frame, EaveZ, Slope, bGable);
-		return false;
-	}
+	bool IsGabled() const { return Building.TypedRoofShape == KitRoofGabled || Building.TypedRoofShape == KitRoofGambrel; }
 
-	void BuildPitchedRoof(const FKitRoofFrame& Frame, float EaveZ, float Slope, bool bGable, bool bPyramid)
+	void BuildRectangleRoof()
 	{
+		const int32 TileSlot = FindSlot(RoofTileName);
 		const float Overhang = Style.EaveOverhang;
-		const float GableOverhang = 0.25f;
-		const float HalfAlong = Frame.HalfAlong;
-		const float HalfAcross = Frame.HalfAcross;
+		const bool bGable = IsGabled();
+		const bool bPyramid = Building.TypedRoofShape == KitRoofPyramidal;
+		const float HalfAlong = RoofFrame.HalfAlong;
+		const float HalfAcross = RoofFrame.HalfAcross;
 		const float AcrossOuter = HalfAcross + Overhang;
-		const float AlongOuter = HalfAlong + (bGable ? GableOverhang : Overhang);
+		const float AlongOuter = HalfAlong + (bGable ? 0.25f : Overhang);
 		float RidgeHalf = bGable ? AlongOuter : HalfAlong - HalfAcross;
 		const bool bApex = bPyramid || RidgeHalf < 0.3f;
 		RidgeHalf = bApex ? 0.f : RidgeHalf;
-		const float RidgeZ = EaveZ + (bApex ? FMath::Min(AcrossOuter, AlongOuter) : AcrossOuter) * Slope;
-		const auto P = [&](float Along, float Across, float Z) { return KitToCm(Frame.Point(Along, Across), Z); };
-		const TArray<FVector3f> Front = {P(AlongOuter, -AcrossOuter, EaveZ), P(-AlongOuter, -AcrossOuter, EaveZ), P(-RidgeHalf, 0.f, RidgeZ), P(RidgeHalf, 0.f, RidgeZ)};
-		const TArray<FVector3f> Back = {P(-AlongOuter, AcrossOuter, EaveZ), P(AlongOuter, AcrossOuter, EaveZ), P(RidgeHalf, 0.f, RidgeZ), P(-RidgeHalf, 0.f, RidgeZ)};
-		AddRoofFace(Front, Materials.RoofTiles);
-		AddRoofFace(Back, Materials.RoofTiles);
+		const float Z = EaveZ();
+		const float RidgeZ = Z + (bApex ? FMath::Min(AcrossOuter, AlongOuter) : AcrossOuter) * PitchSlope;
+		const auto P = [&](float Along, float Across, float Height) { return KitToCm(RoofFrame.Point(Along, Across), Height); };
+		AddRoofFace({P(AlongOuter, -AcrossOuter, Z), P(-AlongOuter, -AcrossOuter, Z), P(-RidgeHalf, 0.f, RidgeZ), P(RidgeHalf, 0.f, RidgeZ)}, TileSlot);
+		AddRoofFace({P(-AlongOuter, AcrossOuter, Z), P(AlongOuter, AcrossOuter, Z), P(RidgeHalf, 0.f, RidgeZ), P(-RidgeHalf, 0.f, RidgeZ)}, TileSlot);
 		if (bGable)
 		{
-			AddGableEnd(Frame, HalfAlong, 1.f, EaveZ, Slope, RidgeZ);
-			AddGableEnd(Frame, -HalfAlong, -1.f, EaveZ, Slope, RidgeZ);
+			AddGableEnd(HalfAlong, 1.f);
+			AddGableEnd(-HalfAlong, -1.f);
+			PlaceRidge(RidgeHalf * 2.f, RidgeZ);
 			return;
 		}
-		const TArray<FVector3f> EndPlus = {P(AlongOuter, AcrossOuter, EaveZ), P(AlongOuter, -AcrossOuter, EaveZ), P(RidgeHalf, 0.f, RidgeZ)};
-		const TArray<FVector3f> EndMinus = {P(-AlongOuter, -AcrossOuter, EaveZ), P(-AlongOuter, AcrossOuter, EaveZ), P(-RidgeHalf, 0.f, RidgeZ)};
-		AddRoofFace(EndPlus, Materials.RoofTiles);
-		AddRoofFace(EndMinus, Materials.RoofTiles);
+		AddRoofFace({P(AlongOuter, AcrossOuter, Z), P(AlongOuter, -AcrossOuter, Z), P(RidgeHalf, 0.f, RidgeZ)}, TileSlot);
+		AddRoofFace({P(-AlongOuter, -AcrossOuter, Z), P(-AlongOuter, AcrossOuter, Z), P(-RidgeHalf, 0.f, RidgeZ)}, TileSlot);
 		if (!bApex)
 		{
-			PlaceRidge(Frame, RidgeHalf * 2.f, RidgeZ);
+			PlaceRidge(RidgeHalf * 2.f, RidgeZ);
+		}
+		AddRectangleHipCaps(RidgeHalf, AlongOuter, AcrossOuter, Z, RidgeZ);
+	}
+
+	/** Hip caps from the four eave corners of a hipped rectangle up to the ridge ends. */
+	void AddRectangleHipCaps(float RidgeHalf, float AlongOuter, float AcrossOuter, float Z, float RidgeZ)
+	{
+		for (const float AlongSign : {1.f, -1.f})
+		{
+			for (const float AcrossSign : {1.f, -1.f})
+			{
+				const FVector2f From = RoofFrame.Point(AlongOuter * AlongSign, AcrossOuter * AcrossSign);
+				const FVector2f To = RoofFrame.Point(RidgeHalf * AlongSign, 0.f);
+				FWorldRoofCap Cap;
+				Cap.Start = FVector3f(From.X, From.Y, 0.f);
+				Cap.End = FVector3f(To.X, To.Y, RidgeZ - Z);
+				PlaceCap(Cap);
+			}
+		}
+	}
+
+	void PlaceCap(const FWorldRoofCap& Cap)
+	{
+		const FVector3f Delta = Cap.End - Cap.Start;
+		const float Length = Delta.Size();
+		if (Length < 0.5f)
+		{
+			return;
+		}
+		const FVector3f Direction = Delta / Length;
+		const FRotator Rotation(FMath::RadiansToDegrees(FMath::Asin(Direction.Z)), FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X)), 0.f);
+		const int32 Pieces = FMath::Max(1, FMath::CeilToInt(Length / 2.f));
+		const float Scale = Length / (2.f * Pieces);
+		for (int32 Piece = 0; Piece < Pieces; ++Piece)
+		{
+			const FVector3f Point = Cap.Start + Direction * (Piece * 2.f * Scale);
+			AddInstance(RidgeKey(), FTransform(Rotation, FVector(KitToCm(FVector2f(Point.X, Point.Y), EaveZ() + Point.Z)), FVector(Scale, 1.f, 1.f)));
 		}
 	}
 
 	/** The wall above the eave line at one end of a gabled roof, up to where the roof planes meet it. */
-	void AddGableEnd(const FKitRoofFrame& Frame, float AlongPosition, float Direction, float EaveZ, float Slope, float RidgeZ)
+	void AddGableEnd(float AlongPosition, float Direction)
 	{
-		const float HalfAcross = Frame.HalfAcross;
-		const float BaseZ0 = WallTopZ;
-		const float PlaneZAtWall = EaveZ + Style.EaveOverhang * Slope;
-		const float TopZ = EaveZ + (HalfAcross + Style.EaveOverhang) * Slope;
-		const auto P = [&](float Across, float Z) { return KitToCm(Frame.Point(AlongPosition, Across), Z); };
-		const FVector2f OutwardAxis = Frame.AlongAxis * Direction;
-		const TArray<FVector3f> Face = {P(-HalfAcross, BaseZ0), P(HalfAcross, BaseZ0), P(HalfAcross, PlaneZAtWall), P(0.f, TopZ), P(-HalfAcross, PlaneZAtWall)};
-		AddGableFace(Face, FVector3f(OutwardAxis.X, OutwardAxis.Y, 0.f));
-		(void)RidgeZ;
+		const float HalfAcross = RoofFrame.HalfAcross;
+		const float PlaneZAtWall = EaveZ() + Style.EaveOverhang * PitchSlope;
+		const float TopZ = EaveZ() + (HalfAcross + Style.EaveOverhang) * PitchSlope;
+		const auto P = [&](float Across, float Height) { return KitToCm(RoofFrame.Point(AlongPosition, Across), Height); };
+		const FVector2f OutwardAxis = RoofFrame.AlongAxis * Direction;
+		AddGableFace({P(-HalfAcross, WallTopZ), P(HalfAcross, WallTopZ), P(HalfAcross, PlaneZAtWall), P(0.f, TopZ), P(-HalfAcross, PlaneZAtWall)},
+			FVector3f(OutwardAxis.X, OutwardAxis.Y, 0.f), FindSlot(FacadeName));
 	}
 
-	void PlaceRidge(const FKitRoofFrame& Frame, float RidgeLength, float RidgeZ)
+	void PlaceRidge(float RidgeLength, float RidgeZ)
 	{
-		const int32 Pieces = FMath::Max(1, FMath::CeilToInt(RidgeLength / 2.f));
-		const float Scale = RidgeLength / (2.f * Pieces);
-		const FVector2f Direction = -Frame.AlongAxis;
-		const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X));
-		for (int32 Piece = 0; Piece < Pieces; ++Piece)
-		{
-			Place(TEXT("Roof_Tile_Ridge"), Frame.Point(RidgeLength * 0.5f - Piece * 2.f * Scale, 0.f), RidgeZ, Yaw, Scale);
-		}
+		FWorldRoofCap Cap;
+		const FVector2f A = RoofFrame.Point(RidgeLength * 0.5f, 0.f);
+		const FVector2f B = RoofFrame.Point(-RidgeLength * 0.5f, 0.f);
+		Cap.Start = FVector3f(A.X, A.Y, RidgeZ - EaveZ());
+		Cap.End = FVector3f(B.X, B.Y, RidgeZ - EaveZ());
+		PlaceCap(Cap);
 	}
 
-	/** Gutters under the long eaves (and the short ones of a hipped roof). */
-	void AddGutters(const FKitRoofFrame& Frame, float EaveZ, bool bGable)
+	void PlaceChimneyOnRidge()
 	{
-		if (Style.bFlatRoof || Style.EaveOverhang <= 0.f || FString(Style.Prefix) == TEXT("farm"))
+		if (KitHash01(Building.OsmId, 777) > 0.6f || RoofFrame.HalfAlong < 3.f)
 		{
 			return;
 		}
-		PlaceGutterSide(Frame, -1.f, EaveZ, false);
-		PlaceGutterSide(Frame, 1.f, EaveZ, false);
-		if (!bGable)
-		{
-			PlaceGutterSide(Frame, -1.f, EaveZ, true);
-			PlaceGutterSide(Frame, 1.f, EaveZ, true);
-		}
+		const float RidgeZ = EaveZ() + (RoofFrame.HalfAcross + Style.EaveOverhang) * PitchSlope;
+		const float Along = RoofFrame.HalfAlong - 1.8f - 2.f * KitHash01(Building.OsmId, 778);
+		AddInstance(PieceKey(TEXT("Chimney"), FString()), FTransform(FRotator(0.f, Building.RidgeYaw + 180.f, 0.f),
+			FVector(KitToCm(RoofFrame.Point(Along, 0.f) - RoofFrame.AcrossAxis * 0.4f, RidgeZ - 0.35f))));
 	}
 
-	/** Gutter pieces along the roof rectangle's side facing Sign (along the across axis, or the along axis for the ends). */
-	void PlaceGutterSide(const FKitRoofFrame& Frame, float Sign, float EaveZ, bool bEnd)
+	/** Gutters on the eave sides: every wall of a hipped roof, only the long walls under a gable roof. */
+	bool ShouldHaveGutter(const FKitEdge& Edge) const
 	{
-		const FVector2f Normal = bEnd ? Frame.AlongAxis * Sign : Frame.AcrossAxis * Sign;
-		const FVector2f Tangent(Normal.Y, -Normal.X);
-		const float Length = 2.f * (bEnd ? Frame.HalfAcross : Frame.HalfAlong);
-		const float HalfNormal = bEnd ? Frame.HalfAlong : Frame.HalfAcross;
-		const FVector2f Start = Frame.Centre + Normal * HalfNormal - Tangent * (Length * 0.5f);
-		const int32 Pieces = FMath::Max(1, FMath::RoundToInt(Length / 2.f));
-		const float Scale = Length / (2.f * Pieces);
-		const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Tangent.Y, Tangent.X));
+		if (Style.EaveOverhang <= 0.f || FCString::Strcmp(Style.Prefix, TEXT("farm")) == 0)
+		{
+			return false;
+		}
+		if (RoofMode == EKitRoofMode::Skeleton && !IsGabled())
+		{
+			return true;
+		}
+		return FMath::Abs(FVector2f::DotProduct(Edge.Normal, RoofFrame.AcrossAxis)) > 0.7f;
+	}
+
+	void PlaceGutter(const FKitEdge& Edge)
+	{
+		const int32 Pieces = FMath::Max(1, FMath::RoundToInt(Edge.Length / 2.f));
+		const float Scale = Edge.Length / (2.f * Pieces);
 		for (int32 Piece = 0; Piece < Pieces; ++Piece)
 		{
-			Place(TEXT("Gutter_M"), Start + Tangent * (Piece * 2.f * Scale), EaveZ, Yaw, Scale);
+			Place(TEXT("Gutter_M"), Edge.Start + Edge.Tangent * (Piece * 2.f * Scale), EaveZ(), Edge.YawDegrees, Scale);
 		}
 	}
 
-	/** Dormers on the street slope and a chimney on the ridge. */
-	void AddRoofDetails(const FKitRoofFrame& Frame, float EaveZ, float Slope, bool bGable)
+	/** Dormers on the street side wall's roof slope when the attic is lived in. */
+	void PlaceFrontDormers()
 	{
 		const bool bAttic = (Building.TypeFlags & 1) != 0;
-		if (bAttic && Style.Dormer && Style.Dormer[0] && Frame.HalfAlong * 2.f >= 6.f)
+		if (!bAttic || !Style.Dormer || !Style.Dormer[0] || FrontEdge == INDEX_NONE || Building.TypedRoofShape == KitRoofMansard)
 		{
-			PlaceDormers(Frame, EaveZ, Slope);
+			return;
 		}
-		if (KitHash01(Building.OsmId, 777) < 0.6f && Frame.HalfAlong > 3.f)
+		const FKitEdge& Edge = Edges[FrontEdge];
+		const float Margin = RoofMode == EKitRoofMode::Skeleton ? 3.4f : 1.6f;
+		const float Usable = Edge.Length - 2.f * Margin;
+		if (Usable < Style.DormerWidth)
 		{
-			const FVector2f Direction = -Frame.AlongAxis;
-			const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X));
-			const float RidgeZ = EaveZ + (Frame.HalfAcross + Style.EaveOverhang) * Slope;
-			const float Along = Frame.HalfAlong - 1.8f - 2.f * KitHash01(Building.OsmId, 778);
-			Place(TEXT("Chimney"), Frame.Point(Along, 0.f) + Direction * 0.f - Frame.AcrossAxis * 0.4f, RidgeZ - 0.35f, Yaw, 1.f);
+			return;
 		}
-		(void)bGable;
-	}
-
-	void PlaceDormers(const FKitRoofFrame& Frame, float EaveZ, float Slope)
-	{
-		const float FacingAcross = FVector2f::DotProduct(Frame.AcrossAxis, FrontDirection);
-		const float Sign = FacingAcross >= 0.f ? 1.f : -1.f;
-		const FVector2f Normal = Frame.AcrossAxis * Sign;
-		const FVector2f Tangent(Normal.Y, -Normal.X);
-		const float Length = Frame.HalfAlong * 2.f;
-		const int32 Count = FMath::Clamp(FMath::FloorToInt((Length - 1.5f) / 3.8f), 1, 4);
-		const float Slot = Length / Count;
-		const FVector2f Start = Frame.Centre + Normal * Frame.HalfAcross - Tangent * (Length * 0.5f);
-		const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Tangent.Y, Tangent.X));
+		const int32 Count = FMath::Clamp(FMath::FloorToInt(Usable / 3.6f) + 1, 1, 4);
+		const float Slot = Usable / Count;
 		const float SurfaceInset = 2.0f;
-		const float Z = EaveZ + (SurfaceInset + Style.EaveOverhang) * Slope - 0.03f;
+		const float Z = EaveZ() + (SurfaceInset + Style.EaveOverhang) * PitchSlope - 0.03f;
 		for (int32 Index = 0; Index < Count; ++Index)
 		{
-			const float Along = Slot * (Index + 0.5f) - Style.DormerWidth * 0.5f;
-			Place(Style.Dormer, Start + Tangent * Along - Normal * SurfaceInset, Z, Yaw, 1.f);
+			const float Along = Margin + Slot * (Index + 0.5f) - Style.DormerWidth * 0.5f;
+			Place(Style.Dormer, Edge.Start + Edge.Tangent * Along - Edge.Normal * SurfaceInset, Z, Edge.YawDegrees, 1.f);
 		}
 	}
 };
@@ -660,16 +982,16 @@ bool IsKitBuilding(const FWorldBuilding& Building)
 	return KitOrthogonalShare(Ring) > 0.75f;
 }
 
-bool BuildKitBuilding(const FWorldTileData& Tile, const FWorldBuilding& Building, const FKitRoofMaterials& Materials,
-	FWorldKitInstances& Instances, FWorldMeshBuilder& RoofBuilder, float& FlatRoofZ)
+FKitFlatRoof BuildKitBuilding(const FWorldTileData& Tile, const FWorldBuilding& Building, const TFunction<int32(const FString&)>& FindSlot,
+	FWorldKitInstances& Instances, FWorldMeshBuilder& RoofBuilder)
 {
 	const FKitStyle* Style = KitStyleForClass(Building.ClassId);
-	FKitAssembler Assembler(Building, *Style, Materials, Instances, RoofBuilder);
-	const bool bFlat = Assembler.Build();
+	FKitAssembler Assembler(Building, *Style, FindSlot, Instances, RoofBuilder);
+	FKitFlatRoof Flat;
+	Assembler.Build(Flat);
 	++Instances.NumBuildings;
-	FlatRoofZ = Building.BaseZ + Building.PlinthMetres + Building.GroundHeight + (FMath::Clamp<int32>(Building.Storeys, 1, 40) - 1) * Building.StoreyHeight;
 	(void)Tile;
-	return bFlat;
+	return Flat;
 }
 
 namespace
@@ -709,18 +1031,73 @@ UStaticMesh* FindKitMeshCached(const FName& PieceName)
 	Cache.Add(PieceName, TStrongObjectPtr<UStaticMesh>(Mesh));
 	return Mesh;
 }
+
+/** Material instance of the world's facade folder by name (Facade_ClinkerDeepRed, Roof_Slate ...), cached. */
+UMaterialInterface* FindFacadeMaterialCached(const FString& Name)
+{
+	static TMap<FString, TStrongObjectPtr<UMaterialInterface>> Cache;
+	if (const TStrongObjectPtr<UMaterialInterface>* Found = Cache.Find(Name))
+	{
+		return Found->Get();
+	}
+	const FString Path = FString::Printf(TEXT("/Game/World/Facades/M_%s.M_%s"), *Name, *Name);
+	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *Path, nullptr, LOAD_NoWarn);
+	if (!Material)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Facade material %s missing; run Scripts/create_facade_materials.py"), *Path);
+	}
+	Cache.Add(Name, TStrongObjectPtr<UMaterialInterface>(Material));
+	return Material;
+}
+
+/** Which slots of a kit mesh the replacement material takes: wall slots, the trim of a plinth, or the roof tile slot. */
+void KitSlotOverrides(const FString& Piece, const FString& Material, TMap<FName, UMaterialInterface*>& Out)
+{
+	UMaterialInterface* Replacement = FindFacadeMaterialCached(Material);
+	if (!Replacement)
+	{
+		return;
+	}
+	if (Material.StartsWith(TEXT("Roof_")))
+	{
+		Out.Add(TEXT("RoofTile"), Replacement);
+		return;
+	}
+	for (const TCHAR* Slot : {TEXT("Brick"), TEXT("Plaster"), TEXT("Concrete")})
+	{
+		Out.Add(Slot, Replacement);
+	}
+	if (Material == TEXT("Facade_Plinth"))
+	{
+		Out.Add(TEXT("Sill"), Replacement);
+	}
+	if (Piece.StartsWith(TEXT("farm_")))
+	{
+		Out.Add(TEXT("Timber"), FindFacadeMaterialCached(TEXT("Facade_TimberBeam")));
+	}
+}
 }
 
 bool AddKitInstancesStep(AWorldTileActor& Actor, const FWorldKitInstances& Kit, int32 Step)
 {
-	TArray<FName> Names;
-	Kit.Pieces.GetKeys(Names);
-	Names.Sort(FNameLexicalLess());
+	TArray<FName> Keys;
+	Kit.Pieces.GetKeys(Keys);
+	Keys.Sort(FNameLexicalLess());
 	const int32 First = Step * KitPiecesPerStepCount;
-	const int32 Last = FMath::Min(First + KitPiecesPerStepCount, Names.Num());
+	const int32 Last = FMath::Min(First + KitPiecesPerStepCount, Keys.Num());
 	for (int32 Index = First; Index < Last; ++Index)
 	{
-		Actor.AddKitInstances(FindKitMeshCached(Names[Index]), Kit.Pieces[Names[Index]], PieceCastsShadow(Names[Index]));
+		FString Piece, Material;
+		if (!Keys[Index].ToString().Split(TEXT("|"), &Piece, &Material))
+		{
+			Piece = Keys[Index].ToString();
+		}
+		TMap<FName, UMaterialInterface*> Overrides;
+		if (!Material.IsEmpty())
+		{
+			KitSlotOverrides(Piece, Material, Overrides);
+		}
+		Actor.AddKitInstances(FindKitMeshCached(FName(*Piece)), Kit.Pieces[Keys[Index]], PieceCastsShadow(Keys[Index]), Overrides);
 	}
-	return Last >= Names.Num();
+	return Last >= Keys.Num();
 }

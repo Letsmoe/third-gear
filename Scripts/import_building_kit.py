@@ -6,8 +6,9 @@ slot at a time.
   Scripts/lock.sh gpu UnrealEditor-Cmd DrivingGame.uproject -run=pythonscript -script=Scripts/import_building_kit.py -unattended -nosplash
 
 Meshes: SM_<style>_<piece> (SM_brick_Wall_Window ...). Materials: MI_Kit_<Slot> for the slots Brick, Plaster, Concrete,
-RoofTile, Frame, Glass, Sill, Metal, Timber and Thatch. The wall slots are instances of the streamed world's facade
-materials with the painted windows switched off, because the kit walls have real openings.
+RoofTile, Frame, Glass, Sill, Metal, Timber and Thatch. The wall and roof slots default to the world's facade instances
+(/Game/World/Facades, painted windows are off for them) and each building replaces them by its own, see WorldKitBuildings.cpp.
+The flat roof coverings M_Roof_Gravel and M_Roof_Bitumen are made here as well.
 """
 import glob
 import os
@@ -22,13 +23,14 @@ mel = unreal.MaterialEditingLibrary
 eal = unreal.EditorAssetLibrary
 asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
 
-# slot -> (parent material, tint) for slots that reuse the world's textured materials
+# Default material of the textured slots, a world facade instance; the buildings replace them per building (WorldKitBuildings.cpp).
 TEXTURED = {
-    "Brick": ("/Game/World/Materials/M_Facade_Brick", 3.4),
-    "Plaster": ("/Game/World/Materials/M_Facade_Plaster", 0.97),
-    "Concrete": ("/Game/World/Materials/M_Facade_Concrete", 0.95),
-    "RoofTile": ("/Game/World/Materials/M_Roof_Tiles", 0.9),
+    "Brick": "/Game/World/Facades/M_Facade_ClinkerDeepRed",
+    "Plaster": "/Game/World/Facades/M_Facade_RenderScratchWhite",
+    "Concrete": "/Game/World/Facades/M_Facade_ConcreteSlab",
+    "RoofTile": "/Game/World/Facades/M_Roof_Clay",
 }
+FACADE_MASTER = "/Game/World/Facades/M_FacadeMaster"
 # slot -> (colour sRGB, roughness, metallic) for plain painted or metal parts
 SOLIDS = {
     "Frame": ((0.88, 0.88, 0.85), 0.40, 0.0),     # white painted timber or PVC
@@ -37,6 +39,11 @@ SOLIDS = {
     "Metal": ((0.50, 0.52, 0.53), 0.40, 0.85),    # zinc gutters and flashing
     "Timber": ((0.09, 0.055, 0.03), 0.75, 0.0),   # black-brown oak frame
     "Thatch": ((0.42, 0.33, 0.16), 0.95, 0.0),
+}
+# Flat roof coverings, instances of the facade master made from a copy of a roof instance: name -> (texture set, tile metres, value, parallax).
+FLAT_ROOFS = {
+    "Roof_Gravel": ("Ground/gravel_ground_01", 2.0, 0.85, 0.02),
+    "Roof_Bitumen": ("Asphalt/Asphalt031", 3.0, 0.45, 0.004),
 }
 
 
@@ -48,42 +55,42 @@ def get_instance(name):
                                     unreal.MaterialInstanceConstantFactoryNew())
 
 
-def kit_master():
-    """A copy of the world's surface master that is allowed on instanced static meshes (the shared master isn't)."""
-    path = f"{FOLDER}/M_KitSurfaceMaster"
-    if not eal.does_asset_exist(path):
-        eal.duplicate_asset("/Game/World/Materials/M_SurfaceMaster", path)
-    master = unreal.load_asset(path)
-    master.set_editor_property("used_with_instanced_static_meshes", True)
-    mel.recompile_material(master)
-    eal.save_loaded_asset(master)
-    return master
+def allow_instanced_meshes():
+    """The facade master has to be allowed on instanced static meshes, or the kit walls show the grid material."""
+    master = unreal.load_asset(FACADE_MASTER)
+    if not master.get_editor_property("used_with_instanced_static_meshes"):
+        master.set_editor_property("used_with_instanced_static_meshes", True)
+        mel.recompile_material(master)
+        eal.save_loaded_asset(master)
 
 
-def copy_parameters(source, target):
-    """Copies the parameter overrides of the world's material instance into the kit instance."""
-    for key in ("scalar_parameter_values", "vector_parameter_values", "texture_parameter_values"):
-        target.set_editor_property(key, source.get_editor_property(key))
-    for switch in ("Parallax", "Cracks"):
-        mel.set_material_instance_static_switch_parameter_value(
-            target, switch, mel.get_material_instance_static_switch_parameter_value(source, switch))
+def create_flat_roofs():
+    """M_Roof_Gravel and M_Roof_Bitumen in the facade folder, for the flat roofs of blocks, halls and shops."""
+    for name, (texture_set, tile, value, parallax) in FLAT_ROOFS.items():
+        path = f"/Game/World/Facades/M_{name}"
+        if not eal.does_asset_exist(path):
+            eal.duplicate_asset("/Game/World/Facades/M_Roof_Clay", path)
+        instance = unreal.load_asset(path)
+        set_name = texture_set.split("/")[-1]
+        for kind in ("BaseColor", "Normal", "Roughness", "AO", "Height"):
+            texture_path = f"/Game/Textures/{texture_set}/T_{set_name}_{kind}"
+            if eal.does_asset_exist(texture_path):
+                mel.set_material_instance_texture_parameter_value(instance, kind, unreal.load_asset(texture_path))
+        mel.set_material_instance_vector_parameter_value(instance, "TileMetres", unreal.LinearColor(tile, tile, 0, 0))
+        mel.set_material_instance_scalar_parameter_value(instance, "Value", value)
+        mel.set_material_instance_scalar_parameter_value(instance, "RecolorAmount", 0.0)
+        mel.set_material_instance_scalar_parameter_value(instance, "TintMin", 0.9)
+        mel.set_material_instance_scalar_parameter_value(instance, "TintMax", 1.1)
+        mel.set_material_instance_scalar_parameter_value(instance, "HeightRatio", parallax)
+        mel.update_material_instance(instance)
+        eal.save_loaded_asset(instance)
 
 
 def create_materials():
-    """MI_Kit_<Slot> for every slot; returns slot name -> material instance."""
-    result = {}
-    master = kit_master()
-    for slot, (source_path, tint) in TEXTURED.items():
-        instance = get_instance(f"MI_Kit_{slot}")
-        mel.set_material_instance_parent(instance, master)
-        copy_parameters(unreal.load_asset(source_path), instance)
-        mel.set_material_instance_static_switch_parameter_value(instance, "Windows", False)
-        if slot != "RoofTile":
-            mel.set_material_instance_scalar_parameter_value(instance, "TintMin", tint)
-            mel.set_material_instance_scalar_parameter_value(instance, "TintMax", tint)
-        mel.update_material_instance(instance)
-        eal.save_loaded_asset(instance)
-        result[slot] = instance
+    """Slot name -> default material: the world's facade instances for the textured slots, solid instances for the rest."""
+    allow_instanced_meshes()
+    create_flat_roofs()
+    result = {slot: unreal.load_asset(path) for slot, path in TEXTURED.items()}
     solid_master = unreal.load_asset("/Game/World/Furniture/M_FurnitureSolid")
     for slot, (srgb, roughness, metallic) in SOLIDS.items():
         instance = get_instance(f"MI_Kit_{slot}")

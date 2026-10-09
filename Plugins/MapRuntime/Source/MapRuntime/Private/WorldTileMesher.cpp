@@ -780,17 +780,15 @@ void BuildKitVersion(const FWorldTileData& Tile, const FWorldBuilding& Building,
 	{
 		Meshes.Kit = MakeShared<FWorldKitInstances>();
 	}
-	const FString Facade = Tile.Names.IsValidIndex(Building.Facade) ? Tile.Names[Building.Facade] : FString(TEXT("Facade_Plaster"));
-	FKitRoofMaterials Materials;
-	Materials.RoofTiles = MaterialSlot(Meshes, TEXT("Roof_Tiles"));
-	Materials.RoofFlat = MaterialSlot(Meshes, TEXT("Roof_Flat"));
-	Materials.Gable = MaterialSlot(Meshes, Facade);
-	float FlatRoofZ = 0.f;
-	if (BuildKitBuilding(Tile, Building, Materials, *Meshes.Kit, Meshes.KitRoofs, FlatRoofZ))
+	const FKitFlatRoof Flat = BuildKitBuilding(Tile, Building, [&Meshes](const FString& Name) { return MaterialSlot(Meshes, Name); },
+		*Meshes.Kit, Meshes.KitRoofs);
+	if (Flat.bNeeded)
 	{
-		FWorldBuilding Flat = Building;
-		Flat.EaveHeight = FlatRoofZ - Building.BaseZ;
-		BuildFlatRoof(Tile, Flat, Materials.RoofFlat, Meshes.KitRoofs);
+		FWorldBuilding FlatBuilding;
+		FlatBuilding.Footprint = Building.Footprint;
+		FlatBuilding.BaseZ = Building.BaseZ;
+		FlatBuilding.EaveHeight = Flat.Z - Building.BaseZ;
+		BuildFlatRoof(Tile, FlatBuilding, Flat.Material, Meshes.KitRoofs);
 	}
 	BuildBuilding(Tile, Building, Meshes, Meshes.KitCollision);
 }

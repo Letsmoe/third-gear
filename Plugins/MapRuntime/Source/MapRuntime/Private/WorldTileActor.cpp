@@ -98,11 +98,22 @@ void AWorldTileActor::AddBuildings(UE::Geometry::FDynamicMesh3&& Mesh, const TAr
 	}
 }
 
-void AWorldTileActor::AddKitInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow)
+void AWorldTileActor::AddKitInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow,
+	const TMap<FName, UMaterialInterface*>& SlotMaterials)
 {
-	if (Mesh && !Transforms.IsEmpty())
+	if (!Mesh || Transforms.IsEmpty())
 	{
-		AddInstances(Mesh, Transforms, 0)->SetCastShadow(bCastShadow);
+		return;
+	}
+	UInstancedStaticMeshComponent* Component = AddInstances(Mesh, Transforms, 0);
+	Component->SetCastShadow(bCastShadow);
+	const TArray<FStaticMaterial>& Slots = Mesh->GetStaticMaterials();
+	for (int32 Slot = 0; Slot < Slots.Num(); ++Slot)
+	{
+		if (UMaterialInterface* const* Replacement = SlotMaterials.Find(Slots[Slot].MaterialSlotName))
+		{
+			Component->SetMaterial(Slot, *Replacement);
+		}
 	}
 }
 

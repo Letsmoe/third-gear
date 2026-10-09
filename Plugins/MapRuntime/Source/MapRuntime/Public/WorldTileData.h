@@ -52,6 +52,23 @@ struct FWorldMarking
 	TArray<FVector2f> Points;
 };
 
+/** One planar piece of a skeleton roof (ROOF section): vertices in tile-relative metres with the height above the eave line. */
+struct FWorldRoofFace
+{
+	/** 0 roof tiles, 1 flat top. */
+	uint8 Kind = 0;
+	TArray<FVector3f> Positions;
+	TArray<FVector2f> UVs;
+	TArray<uint16> Indices;
+};
+
+/** A hip or ridge line of a skeleton roof, tile-relative metres, z above the eave line. */
+struct FWorldRoofCap
+{
+	FVector3f Start = FVector3f::ZeroVector;
+	FVector3f End = FVector3f::ZeroVector;
+};
+
 struct FWorldBuilding
 {
 	uint64 OsmId = 0;
@@ -84,6 +101,10 @@ struct FWorldBuilding
 	/** Ridge direction (0..180) and the direction the street facade faces, Unreal yaw degrees. */
 	float RidgeYaw = 0.f;
 	float FrontYaw = 0.f;
+
+	/** Skeleton roof from the ROOF section; empty when the game's own roof applies. */
+	TArray<FWorldRoofFace> RoofFaces;
+	TArray<FWorldRoofCap> RoofCaps;
 };
 
 struct FWorldPlant

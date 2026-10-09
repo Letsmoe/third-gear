@@ -23,13 +23,12 @@ struct FWorldKitInstances
 	bool IsEmpty() const { return NumInstances == 0; }
 };
 
-/** Material slot indices of the tile's material list that the generated kit roofs and gables use. */
-struct FKitRoofMaterials
+/** A flat roof surface the caller still has to add, at Z metres absolute with the given material slot. */
+struct FKitFlatRoof
 {
-	int32 RoofTiles = 0;
-	int32 RoofFlat = 0;
-	/** Gable end triangles, in the building's facade material. */
-	int32 Gable = 0;
+	bool bNeeded = false;
+	float Z = 0.f;
+	int32 Material = 0;
 };
 
 /** True when the building has a typing record, a class with a kit style, and a footprint the kit walls fit. */
@@ -37,13 +36,13 @@ bool IsKitBuilding(const FWorldBuilding& Building);
 
 /**
  * Appends the instances of one building's walls and decorations to Instances and its generated roof to RoofBuilder
- * (cm, relative to the tile corner). Returns true when the roof is flat and the caller should add a flat roof surface
- * at FlatRoofZ (metres, absolute).
+ * (cm, relative to the tile corner). FindSlot turns a material name (Roof_Clay, Facade_BrickSooty ...) into a slot of
+ * the tile's material list. A flat roof is returned for the caller to add.
  */
-bool BuildKitBuilding(const FWorldTileData& Tile, const FWorldBuilding& Building, const FKitRoofMaterials& Materials,
-	FWorldKitInstances& Instances, FWorldMeshBuilder& RoofBuilder, float& FlatRoofZ);
+FKitFlatRoof BuildKitBuilding(const FWorldTileData& Tile, const FWorldBuilding& Building, const TFunction<int32(const FString&)>& FindSlot,
+	FWorldKitInstances& Instances, FWorldMeshBuilder& RoofBuilder);
 
-/** Content path of the static mesh of a kit piece name. */
+/** Content path of the static mesh of a kit piece key; the part after a | is the replacement material. */
 FString KitMeshPath(const FName& PieceName);
 
 class AWorldTileActor;

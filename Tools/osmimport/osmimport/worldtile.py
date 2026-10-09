@@ -28,6 +28,10 @@ Sections:
         u8 tag bits (which values came from OSM tags), u8 plinth in 5 cm units, f32 storey height, f32 ground floor
         height, f32 eave height above the terrain base (plinth, ground floor and storeys), f32 ridge yaw (degrees,
         0..180, Unreal yaw), f32 front yaw (degrees, direction the street facade faces).
+  ROOF  skeleton roofs of kit buildings (roofs.py), for the buildings whose roof isn't a plain gable over a rectangle.
+        u32 count; per building: u64 osm_id, u32 face count, u32 cap count; per face: u8 kind (0 tiles, 1 flat top),
+        u8 pad, u16 vertex count n, u16 triangle count m, u16 pad, f32 vertices[n*5] (x, y tile-relative metres, height
+        above the eave line, u, v), u16 indices[m*3]; per cap (hip or ridge line): f32 x0, y0, z0, x1, y1, z1.
   VEGE  u32 count; per plant: u16 model, u16 pad, f32 x, y, z, yaw, crown, height, trunk
   POIS  street furniture, u32 count; per object (36 bytes): u8 kind (POI_*), u8 flags, u16 variant, u16 variant2,
         u16 pad, f32 x, y (tile-relative), z (absolute, at the foot), yaw (degrees, see below), param0, param1,
@@ -121,6 +125,7 @@ class TileWriter:
         self.markings = []
         self.buildings = []
         self.building_types = []
+        self.roofs = []
         self.plants = []
         self.pois = []
 
@@ -180,6 +185,20 @@ class TileWriter:
             int(round(record.plinth / 0.05)), record.storey_height, record.ground_height, record.eave_height,
             record.ridge_yaw, record.front_yaw))
 
+    def add_roof(self, osm_id, geometry):
+        """Adds the skeleton roof (a roofs.RoofGeometry) of a building already added with add_building."""
+        parts = [struct.pack("<QII", osm_id & 0xFFFFFFFFFFFFFFFF, len(geometry.faces), len(geometry.caps))]
+        for face in geometry.faces:
+            vertices = face.vertices.copy()
+            vertices[:, 0] -= self.x0
+            vertices[:, 1] -= self.y0
+            parts.append(struct.pack("<BxHHH", face.kind, len(vertices), len(face.triangles), 0))
+            parts.append(vertices.astype("<f4").tobytes())
+            parts.append(face.triangles.astype("<u2").tobytes())
+        for cap in geometry.caps:
+            parts.append(struct.pack("<6f", cap[0] - self.x0, cap[1] - self.y0, cap[2], cap[3] - self.x0, cap[4] - self.y0, cap[5]))
+        self.roofs.append(b"".join(parts))
+
     def add_plant(self, model, x, y, z, yaw, crown, height, trunk):
         """Adds one tree or shrub at world position (x, y, z)."""
         self.plants.append(struct.pack("<H2x7f", self.names(model), x - self.x0, y - self.y0, z, yaw, crown,
@@ -196,7 +215,7 @@ class TileWriter:
     def write(self, path):
         sections = [(b"NAME", self.names.pack()), (b"GRID", self.grid)]
         for tag, records in ((b"SURF", self.surfaces), (b"MARK", self.markings), (b"BLDG", self.buildings),
-                             (b"BTYP", self.building_types), (b"VEGE", self.plants), (b"POIS", self.pois)):
+                             (b"BTYP", self.building_types), (b"ROOF", self.roofs), (b"VEGE", self.plants), (b"POIS", self.pois)):
             sections.append((tag, struct.pack("<I", len(records)) + b"".join(records)))
         with open(path, "wb") as f:
             f.write(b"TGT1" + struct.pack("<Iddff", VERSION, self.x0, self.y0, self.x1 - self.x0, self.y1 - self.y0))
