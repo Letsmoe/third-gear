@@ -86,7 +86,9 @@ C++ changes need a rebuild in the root after the merge, with the editor closed; 
 
 ## Validation
 
-Test on something tiny: the 500 m area `bergedorf_test`, built and imported without the horizon (`-nohorizon`), so a test round takes minutes, not an hour. The full `bergedorf_core` map with the 60 km horizon is only for final checks and performance measurements.
+Test on something tiny: the 500 m region `bergedorf_test` (`-Region=bergedorf_test` on the `Streamed` map, the default), so a test round takes minutes, not an hour. `bergedorf_core` is for final checks and performance measurements.
+
+Every Unreal run and ComfyUI job takes the machine-wide gpu lock and every build the build lock (`Scripts/lock.sh`; the test scripts take it themselves), so parallel worktrees and agents take turns instead of running out of memory.
 
 Never launch or restart my running editor, game or VR session. Check things yourself headless or offscreen instead: `Scripts/screenshot.sh`, `-SeatShot`, `Scripts/drive_test.sh`, `Scripts/profile_gpu.sh`, and the logs under `Saved/Logs/`. Only I can test with the headset and the real wheel; when that's needed, say exactly what to try.
 
@@ -155,14 +157,26 @@ Readability and maintainability over cleverness. Match the surrounding code when
   force inverted). `BrakeFullTravel` 0.75: the G923 brake's rubber stop is too stiff to press to the end.
 - `Scripts/` — headless editor Python scripts (level/asset creation). `create_proving_ground.py` builds `/Game/Maps/ProvingGround`.
 - `Tools/wheeltest/` — standalone C diagnostic: `./wheeltest list|monitor|ffb` (axes, button indices, force direction).
-- `Tools/asset_fetch/`, `RawAssets/` — downloaded CC0 photoreal textures (with height maps), models, HDRIs, German sign SVGs; see `RawAssets/MANIFEST.md`.
+- **Data root** `/mnt/storage/third-gear` (`$THIRD_GEAR_DATA` overrides): everything big or third-party that isn't in
+  git — `downloads/`, `geodata/` (osm/, raw/), `world/<region>/` (streamed tiles), `raw_assets/`, `venvs/` (osmimport,
+  fab; uv, Python 3.13), `unreal/` (CitySampleVehicles, Textures, Vegetation, World content), `ddc/`, `building_kit/`.
+  `Tools/bootstrap/data_root.py` gives each checkout ignored links into it (`External`, the `Content/` folders,
+  `DerivedDataCache`, `Tools/osmimport/.venv`); `new_worktree.sh` calls it. Python finds paths via `data_root.*_dir()`.
+- `Tools/bootstrap/bootstrap.py [--status | <step> ...]` — sets up a fresh machine step by step (links, downloads,
+  Python envs, geodata, OpenXR, build, car, textures, materials, trees, world); each step checks its own output.
+- `Tools/asset_fetch/` — CC0 photoreal textures (with height maps), models, HDRIs, German sign SVGs into
+  `<data root>/raw_assets`; see `Data/raw_assets.md`.
   `Tools/asset_fetch/fab_download.py "<title>" <out> [--list]` downloads UE asset packs from the user's **Fab library**
   (no Epic launcher on Linux): uses the Epic login stored by Heroic (`~/.config/heroic/legendaryConfig/legendary/user.json`,
-  expires after ~1 day → log in again in Heroic) and `legendary-gl` (venv `/tmp/fabdl/.venv`; recreate with
-  `python -m venv … && pip install legendary-gl`). Output = `Content/<Pack>/…` → move into the project's `Content/`.
-- `Tools/geodata/`, `GeoData/` — OSM + terrain data for the Bergedorf/Vierlande bbox; see `GeoData/REPORT.md`.
-  Added later: `GeoData/raw/strassenbaeume/` (street tree register, WFS) and `GeoData/raw/bdom_hamburg/` (bDOM 2020 zip + tifs).
-- `Plugins/MapRuntime/` — runtime classes for the generated world (`AVegetationActor`) + material shader includes.
+  expires after ~1 day → log in again in Heroic) and `legendary-gl` (data root venv `fab`). Output = `Content/<Pack>/…`.
+- `Tools/geodata/` — OSM + terrain sources for the Bergedorf/Vierlande bbox, see `GeoData/REPORT.md`;
+  `Tools/bootstrap/prepare_geodata.py` clips and unpacks them into `<data root>/geodata` (DGM1, bDOM, street trees).
+- `Tools/buildingkit/` — building pieces generated in Blender (four styles) + Hunyuan 3D props; output in
+  `<data root>/building_kit`, see its README.
+- Isobar weather plugin: separate local repo `/home/moritz/Documents/personal/isobar` (shared with massif, private),
+  loaded via `AdditionalPluginDirectories`. `UWeatherSubsystem` (`Source/DrivingGame/`) runs it for the map;
+  console `Weather.Print`, `Weather.Skip <hours>`.
+- `Plugins/MapRuntime/` — the streamed world (see "Map pipeline"), `AVegetationActor` + material shader includes.
 - `Source/DrivingGameEditor/` — editor-only C++: `UDgMeshImporter` (.dgmesh → Nanite mesh), `UVegetationAssetTools`.
 
 - `Plugins/OpenXR/` — **patched copy of the engine OpenXR plugin** (project plugins override engine ones), not in git:
@@ -172,6 +186,20 @@ Readability and maintainability over cleverness. Match the surrounding code when
   with SteamVR on Linux. Re-run the script if the engine is upgraded.
 
 ## Map pipeline (OSM → Unreal)
+**Streamed world (current).** `Tools/osmimport/.venv/bin/python -I Tools/osmimport/build_world.py <region> [--reuse]`
+compiles OSM + DEM into 250 m `.tgtile` files in `<data root>/world/<region>/` (format: `osmimport/worldtile.py`,
+zlib sections NAME, GRID, SURF, MARK, BLDG, VEGE; `world.json` = index + start pose). bergedorf_core: 64 tiles, 9 MB,
+~3 min fresh, 22 s with `--reuse`. At runtime `AWorldStreamer` (`Plugins/MapRuntime`, placed in `/Game/Maps/Streamed`
+by `Scripts/create_streamed_map.py`) meshes tiles on worker threads (`WorldTileMesher`) into `UDynamicMeshComponent`s
+on `AWorldTileActor`s, in three detail levels (near < 400 m 1 m grid, middle < 1.2 km, far < 3 km), spawning in 2 ms
+budgeted steps and enabling collision per ground chunk within 150 m. `-Region=<region>` picks the region
+(default bergedorf_test). `Scripts/stream_test.sh [region] [route] [kmh]` flies through at driving speed and prints
+frame times and per-tile build/spawn times (bergedorf_core at 100 km/h: median 5.8 ms, 99 % < 9.8 ms; the one
+remaining ~45 ms hitch is garbage collection in the editor binary). Run: `env MAP=Streamed Scripts/run_desktop.sh
+-Region=bergedorf_core`. Gotchas: a triangle (A, B, C) faces along `Cross(C-A, B-A)`; reserve arrays of
+`FDynamicMesh3` (TArray relocates bitwise and breaks attribute parent pointers).
+
+**Prebaked maps (older pipeline, still in the repo; materials and vegetation models are shared with the streamed world):**
 1. `Tools/osmimport/.venv/bin/python -I Tools/osmimport/build_area.py <area>` (areas in `osmimport/geo.py`:
    `bergedorf_test` 500 m, `bergedorf_core` 2×2 km; world origin fixed at Bergedorf, x east / y south / z NHN metres)
    → `GeoData/build/<area>/tile_*.dgmesh` + `manifest.json` (start pose, points: signals, lamps, trees…).
