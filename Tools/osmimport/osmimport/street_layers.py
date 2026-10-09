@@ -173,6 +173,36 @@ def add_point(layers: Layers, point):
         layers.add("Lamps and bus stops", geometry, kind, properties)
 
 
+WATER_LANDUSE = {"reservoir", "basin"}
+# Typical waterway widths in metres when OSM has no width tag.
+WATERWAY_WIDTHS = {"river": 15.0, "canal": 8.0, "stream": 2.0, "ditch": 1.2, "drain": 1.2}
+
+
+def is_water_area(tags: dict) -> bool:
+    """True for mapped water surfaces: lakes, ponds, river and harbour areas, reservoirs."""
+    return (tags.get("natural") == "water" or "water" in tags or tags.get("waterway") in {"riverbank", "dock"}
+            or tags.get("landuse") in WATER_LANDUSE)
+
+
+def waterway_width(tags: dict) -> float:
+    """Width of a waterway line in metres: the width tag, else a typical width for its kind."""
+    width = roads._float(tags.get("width"))
+    if width and 0.3 <= width <= 200.0:
+        return width
+    return WATERWAY_WIDTHS.get(tags.get("waterway"), 1.0)
+
+
+def add_water_area(layers: Layers, osm_id: int, tags: dict, geometry):
+    """A mapped water surface."""
+    layers.add("Water", geometry, "water_area", _properties("water", osm_id, tags))
+
+
+def add_waterway(layers: Layers, way):
+    """A river, canal, stream or ditch centre line, with the width we assume for it."""
+    properties = _properties("waterway", way.id, way.tags, width_m=waterway_width(way.tags))
+    layers.add("Water", shapely.LineString(way.xy), "waterway", properties)
+
+
 def add_road_area(layers: Layers, osm_id: int, tags: dict, geometry):
     """A mapped road area (area:highway), the exact carriageway or path outline where mappers drew it."""
     layers.add("Road areas", geometry, "road_area", _properties("area", osm_id, tags))
@@ -209,6 +239,11 @@ def build(data: OsmData, buildings=()) -> Layers:
     for osm_id, tags, geometry in data.areas:
         if "area:highway" in tags:
             add_road_area(layers, osm_id, tags, geometry)
+        elif is_water_area(tags):
+            add_water_area(layers, osm_id, tags, geometry)
+    for way in data.waterways:
+        if way.tags.get("waterway") in WATERWAY_WIDTHS:
+            add_waterway(layers, way)
     for way in data.footways:
         add_path(layers, way)
     for way in data.railways:

@@ -14,6 +14,7 @@ import os
 import sys
 import traceback
 import urllib.parse
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bootstrap"))
@@ -22,9 +23,15 @@ from pyproj import Transformer  # noqa: E402
 
 import data_root  # noqa: E402
 from build_world import building_footprints  # noqa: E402
-from osmimport import building_types, geo, osm, street_layers  # noqa: E402
+from osmimport import building_types, dem, geo, osm, street_layers, street_scene  # noqa: E402
 
 PAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "street_viewer.html")
+SCENE_PAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "street_scene.html")
+AERIAL_WMS = ("https://geodienste.hamburg.de/wms_dop_zeitreihe_unbelaubt?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap"
+              "&FORMAT=image/jpeg&STYLES=&CRS=EPSG:25832&LAYERS=dop_zeitreihe_unbelaubt")
+AERIAL_PIXELS = 4096
+# The 3D scene covers at most this square around the viewport centre: roofs and draping take a few seconds per km².
+MAX_SCENE_METRES = 1000.0
 # The world frame of every region (same origin), wide enough to take the whole extract.
 WHOLE_EXTRACT = geo.Area("whole_extract", geo.ORIGIN_E, geo.ORIGIN_N, -100000, 100000, -100000, 100000)
 # Wider viewports are refused: the page asks the user to zoom in instead of drawing tens of thousands of features.
@@ -72,6 +79,20 @@ def viewport_box(query: dict):
                        east_max - geo.ORIGIN_E, geo.ORIGIN_N - north_min)
 
 
+def scene_box(query: dict):
+    """The world rectangle of the 3D scene: the viewport, cut to MAX_SCENE_METRES around its centre."""
+    x_min, y_min, x_max, y_max = viewport_box(query).bounds
+    centre_x, centre_y = (x_min + x_max) / 2, (y_min + y_max) / 2
+    half_x = min(x_max - x_min, MAX_SCENE_METRES) / 2
+    half_y = min(y_max - y_min, MAX_SCENE_METRES) / 2
+    return shapely.box(centre_x - half_x, centre_y - half_y, centre_x + half_x, centre_y + half_y)
+
+
+def world_box_query(query: dict):
+    """The world rectangle of the world=x_min,y_min,x_max,y_max query parameter."""
+    return shapely.box(*(float(value) for value in query["world"][0].split(",")))
+
+
 def region_outlines(module) -> dict:
     """{region name: GeoJSON outline} of every build region, so the viewer can show what the game covers."""
     return {name: module.region_outline(area) for name, area in geo.AREAS.items()}
@@ -89,6 +110,13 @@ class StreetViewerHandler(http.server.BaseHTTPRequestHandler):
                 self.respond(200, "text/html; charset=utf-8", page.read())
         elif url.path == "/layers.json":
             self.respond_layers(urllib.parse.parse_qs(url.query))
+        elif url.path == "/3d":
+            with open(SCENE_PAGE_PATH, "rb") as page:
+                self.respond(200, "text/html; charset=utf-8", page.read())
+        elif url.path == "/scene.json":
+            self.respond_scene(urllib.parse.parse_qs(url.query))
+        elif url.path == "/aerial.jpg":
+            self.respond_aerial(urllib.parse.parse_qs(url.query))
         else:
             self.respond(404, "text/plain", b"not found")
 
@@ -109,6 +137,36 @@ class StreetViewerHandler(http.server.BaseHTTPRequestHandler):
             self.respond(500, "text/plain; charset=utf-8", traceback.format_exc().encode())
             return
         self.respond(200, "application/json", json.dumps(body).encode())
+
+    def respond_scene(self, query: dict):
+        """Builds the 3D scene of the viewport with the current street_scene code, or sends the error."""
+        try:
+            layers_module = importlib.reload(street_layers)
+            module = importlib.reload(street_scene)
+            box = scene_box(query)
+            x_min, y_min, x_max, y_max = box.bounds
+            scene_area = geo.Area("scene", geo.ORIGIN_E, geo.ORIGIN_N, x_min, x_max, y_min, y_max)
+            heights = dem.build_mosaic(scene_area, data_root.geodata_dir(), margin=20.0)
+            body = module.build(self.index.subset(box), self.index.buildings_in(box), heights, box)
+            body["building_classes"] = layers_module.BUILDING_CLASS_COLOURS
+        except Exception:
+            self.respond(500, "text/plain; charset=utf-8", traceback.format_exc().encode())
+            return
+        self.respond(200, "application/json", json.dumps(body).encode())
+
+    def respond_aerial(self, query: dict):
+        """The aerial photo of a world rectangle, fetched from the WMS here because it sends no CORS headers and
+        WebGL refuses foreign textures without them."""
+        x_min, y_min, x_max, y_max = world_box_query(query).bounds
+        bbox = f"{geo.ORIGIN_E + x_min},{geo.ORIGIN_N - y_max},{geo.ORIGIN_E + x_max},{geo.ORIGIN_N - y_min}"
+        url = f"{AERIAL_WMS}&WIDTH={AERIAL_PIXELS}&HEIGHT={AERIAL_PIXELS}&BBOX={bbox}"
+        try:
+            with urllib.request.urlopen(url, timeout=120) as response:
+                image = response.read()
+        except Exception:
+            self.respond(502, "text/plain; charset=utf-8", traceback.format_exc().encode())
+            return
+        self.respond(200, "image/jpeg", image)
 
     def respond(self, status: int, content_type: str, body: bytes):
         """Sends one complete response; the page cancels requests for viewports it has already left, so a closed

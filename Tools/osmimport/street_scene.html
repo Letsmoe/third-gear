@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Third Gear street scene</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #9cc4e8; }
+  #panel { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.92); font: 13px sans-serif; padding: 8px 12px; line-height: 22px; }
+  #status { position: absolute; bottom: 10px; left: 10px; background: rgba(255,255,255,0.92); font: 12px sans-serif; padding: 3px 8px; white-space: pre; }
+  #legend { position: absolute; bottom: 10px; right: 10px; background: rgba(255,255,255,0.92); font: 12px sans-serif; padding: 6px 10px; line-height: 17px; }
+  #legend span { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: middle; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+               "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="panel">
+  <b>Street scene</b><br>
+  <label><input type="checkbox" id="showAerial" checked> aerial on the ground</label><br>
+  <label><input type="checkbox" id="showStreets" checked> streets</label><br>
+  <label><input type="checkbox" id="showBuildings" checked> buildings</label><br>
+  <label><input type="checkbox" id="showPoles" checked> signals, signs, lamps</label><br>
+  <small>left drag: pan, right drag: rotate, wheel: zoom</small>
+</div>
+<div id="status">building the scene…</div>
+<div id="legend"></div>
+<script type="module">
+import * as THREE from "three";
+import { MapControls } from "three/addons/controls/MapControls.js";
+
+const status = document.getElementById("status");
+const bbox = new URLSearchParams(location.search).get("bbox");
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color("#9cc4e8");
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.5, 20000);
+const controls = new MapControls(camera, renderer.domElement);
+controls.maxPolarAngle = Math.PI * 0.49;
+scene.add(new THREE.HemisphereLight("#ffffff", "#6b6255", 1.6));
+const sun = new THREE.DirectionalLight("#fff6e8", 2.2);
+sun.position.set(-300, 600, 400);
+scene.add(sun);
+
+function decode(base64) {
+  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+  return new Float32Array(bytes.buffer);
+}
+
+// World metres (x east, y south, z up) to three.js (x, z, y) around the scene centre.
+let origin = { x: 0, y: 0, z: 0 };
+function toThree(positions) {
+  const out = new Float32Array(positions.length);
+  for (let i = 0; i < positions.length; i += 3) {
+    out[i] = positions[i] - origin.x;
+    out[i + 1] = positions[i + 2] - origin.z;
+    out[i + 2] = positions[i + 1] - origin.y;
+  }
+  return out;
+}
+
+function triangleMesh(encoded, material) {
+  const geometry = new THREE.BufferGeometry();
+  if (!encoded.positions) return new THREE.Group();
+  geometry.setAttribute("position", new THREE.BufferAttribute(toThree(decode(encoded.positions)), 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(decode(encoded.colours), 3));
+  geometry.computeVertexNormals();
+  return new THREE.Mesh(geometry, material);
+}
+
+function terrainMesh(terrain) {
+  const cells = terrain.cells, heights = decode(terrain.heights);
+  const positions = new Float32Array((cells + 1) * (cells + 1) * 3);
+  const uvs = new Float32Array((cells + 1) * (cells + 1) * 2);
+  for (let row = 0; row <= cells; row++) {
+    for (let column = 0; column <= cells; column++) {
+      const index = row * (cells + 1) + column;
+      const x = terrain.x_min + (terrain.x_max - terrain.x_min) * column / cells;
+      const y = terrain.y_min + (terrain.y_max - terrain.y_min) * row / cells;
+      positions.set([x - origin.x, heights[index] - origin.z, y - origin.y], index * 3);
+      uvs.set([column / cells, 1 - row / cells], index * 2);
+    }
+  }
+  const indices = [];
+  for (let row = 0; row < cells; row++) {
+    for (let column = 0; column < cells; column++) {
+      const a = row * (cells + 1) + column, b = a + 1, c = a + cells + 1, d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  const texture = new THREE.TextureLoader().load(
+    `/aerial.jpg?world=${terrain.x_min},${terrain.y_min},${terrain.x_max},${terrain.y_max}`);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const aerialMaterial = new THREE.MeshLambertMaterial({ map: texture });
+  const plainMaterial = new THREE.MeshLambertMaterial({ color: "#8a9a6a" });
+  const mesh = new THREE.Mesh(geometry, aerialMaterial);
+  document.getElementById("showAerial").onchange = event => {
+    mesh.material = event.target.checked ? aerialMaterial : plainMaterial;
+  };
+  return mesh;
+}
+
+const POLE_HEADS = {
+  traffic_signals: { geometry: new THREE.BoxGeometry(0.35, 0.95, 0.3), color: "#202020", emissive: "#400" },
+  street_lamp:     { geometry: new THREE.SphereGeometry(0.3, 12, 8), color: "#fff6c0", emissive: "#554400" },
+  traffic_sign:    { geometry: new THREE.CylinderGeometry(0.32, 0.32, 0.04, 20).rotateX(Math.PI / 2), color: "#d01010" },
+  stop:            { geometry: new THREE.CylinderGeometry(0.4, 0.4, 0.04, 8).rotateX(Math.PI / 2), color: "#d01010" },
+  give_way:        { geometry: new THREE.CylinderGeometry(0.45, 0.45, 0.04, 3).rotateX(Math.PI / 2), color: "#ffffff" },
+  bus_stop:        { geometry: new THREE.BoxGeometry(0.5, 0.5, 0.05), color: "#f5d000" },
+};
+function poleGroup(poles) {
+  const group = new THREE.Group();
+  const poleMaterial = new THREE.MeshLambertMaterial({ color: "#7a7f86" });
+  for (const pole of poles) {
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, pole.height, 8), poleMaterial);
+    shaft.position.set(pole.x - origin.x, pole.z - origin.z + pole.height / 2, pole.y - origin.y);
+    group.add(shaft);
+    const head = POLE_HEADS[pole.kind];
+    const headMesh = new THREE.Mesh(head.geometry, new THREE.MeshLambertMaterial({ color: head.color, emissive: head.emissive || "#000" }));
+    headMesh.position.set(pole.x - origin.x, pole.z - origin.z + pole.height, pole.y - origin.y);
+    group.add(headMesh);
+  }
+  return group;
+}
+
+function toggle(id, object) {
+  document.getElementById(id).onchange = event => { object.visible = event.target.checked; };
+}
+
+async function load() {
+  const started = performance.now();
+  const response = await fetch(`/scene.json?bbox=${bbox}`, { cache: "no-store" });
+  if (!response.ok) {
+    status.textContent = "scene build failed:\n" + await response.text();
+    return;
+  }
+  const data = await response.json();
+  const terrain = data.terrain;
+  const heights = decode(terrain.heights);
+  origin = { x: (terrain.x_min + terrain.x_max) / 2, y: (terrain.y_min + terrain.y_max) / 2,
+             z: heights.reduce((a, b) => Math.min(a, b), Infinity) };
+
+  scene.add(terrainMesh(terrain));
+  const streets = triangleMesh(data.streets, new THREE.MeshLambertMaterial({
+    vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }));
+  const buildings = triangleMesh(data.buildings, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  const poles = poleGroup(data.poles);
+  scene.add(streets, buildings, poles);
+  toggle("showStreets", streets);
+  toggle("showBuildings", buildings);
+  toggle("showPoles", poles);
+
+  const size = Math.max(terrain.x_max - terrain.x_min, terrain.y_max - terrain.y_min);
+  camera.position.set(0, size * 0.45, size * 0.55);
+  controls.target.set(0, 0, 0);
+  controls.update();
+  document.getElementById("legend").innerHTML = "<b>Building class</b><br>" + Object.entries(data.building_classes)
+    .map(([name, colour]) => `<span style="background:${colour}"></span>${name}`).join("<br>");
+  status.textContent = `${Math.round(size)} m scene, ${data.poles.length} poles, built in ` +
+                       `${((performance.now() - started) / 1000).toFixed(1)} s`;
+}
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+load();
+</script>
+</body>
+</html>

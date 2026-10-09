@@ -16,12 +16,15 @@
   .sign-label { background: #c00; color: #fff; border: 0; font: 10px sans-serif; padding: 0 3px; box-shadow: none; }
   .sign-label::before { display: none; }
   #status { position: absolute; top: 10px; left: 60px; z-index: 1000; background: rgba(255,255,255,0.9); font: 12px sans-serif; padding: 3px 8px; white-space: pre; }
-  #reload { position: absolute; top: 80px; left: 10px; z-index: 1000; font: 13px sans-serif; padding: 4px 8px; cursor: pointer; }
+  #reload, #scene3d { position: absolute; left: 10px; z-index: 1000; font: 13px sans-serif; padding: 4px 8px; cursor: pointer; }
+  #reload { top: 80px; }
+  #scene3d { top: 112px; }
 </style>
 </head>
 <body>
 <div id="map"></div>
 <button id="reload" title="Rebuild the layers from the current code (R)">Reload layers</button>
+<button id="scene3d" title="Open a 3D reconstruction of the view (at most 1 km square around its centre)">3D view</button>
 <div id="status">loading…</div>
 <script>
 // Line styles by feature style; dashArray in screen pixels.
@@ -38,6 +41,8 @@ const LINE_STYLES = {
   railway:          { color: "#111111", weight: 3, dashArray: "8 6" },
   bridge:           { color: "#99bbee", weight: 1.5, fillOpacity: 0.35 },
   road_area:        { color: "#ff8c00", weight: 1, fillOpacity: 0.25 },
+  water_area:       { color: "#1e90ff", weight: 1, fillColor: "#1e90ff", fillOpacity: 0.35 },
+  waterway:         { color: "#1e90ff", weight: 3 },
   building:         { color: "#222", weight: 1, fillOpacity: 0.45 },
 };
 const POINT_STYLES = {
@@ -59,6 +64,7 @@ const LEGEND = [
   ["line", "footway", "footway"],
   ["line", "crossing_way", "crossing"],
   ["line", "railway", "railway"],
+  ["line", "waterway", "water"],
   ["point", "traffic_signals", "traffic signals"],
   ["point", "give_way", "give way"],
   ["point", "crossing", "crossing node"],
@@ -198,6 +204,7 @@ legend.addTo(map);
 map.setView([53.4880, 10.2120], 17);
 map.on("moveend", loadLayers);
 document.getElementById("reload").onclick = loadLayers;
+document.getElementById("scene3d").onclick = () => window.open(`/3d?bbox=${map.getBounds().toBBoxString()}`, "_blank");
 document.addEventListener("keydown", event => { if (event.key === "r" && !event.ctrlKey) loadLayers(); });
 loadLayers();
 </script>
