@@ -2,7 +2,7 @@
 # Headless screenshots of a map from given viewpoints (desktop render, not stereo).
 # Usage: Scripts/screenshot.sh <map name or /full/package/path> "<x,y,z,pitch,yaw;...>" [WxH]
 #   Coordinates in metres in world space (x east, y south, z up), pitch/yaw in degrees (yaw 0 = east, 90 = south).
-# A view may end in console commands run before it, separated by |: "x,y,z,pitch,yaw,Weather.Override Snow=1,Temperature=-3|Weather.SetTime 20 11".
+# A view may end in console commands run before it, separated by |: "x,y,z,pitch,yaw,Weather.Override Snow=1,Temperature=-3|Weather.SetTime 20 11" (day of the year first, then the hour: day 20 at 11:00, not hour 20; a night shot is e.g. Weather.SetTime 20 22).
 # Each shot waits for its shaders and textures, then SHOT_SETTLE seconds (default 2.5) for Lumen and TSR.
 # Optional env SHOT_DELAY=<seconds before the first shot, default 2>, CMDS="cvar 1,cvar2 0" adds console commands.
 # Images land in Saved/Screenshots/shot_NN.png (overwritten each run).
