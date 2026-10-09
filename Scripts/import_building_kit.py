@@ -48,14 +48,37 @@ def get_instance(name):
                                     unreal.MaterialInstanceConstantFactoryNew())
 
 
+def kit_master():
+    """A copy of the world's surface master that is allowed on instanced static meshes (the shared master isn't)."""
+    path = f"{FOLDER}/M_KitSurfaceMaster"
+    if not eal.does_asset_exist(path):
+        eal.duplicate_asset("/Game/World/Materials/M_SurfaceMaster", path)
+    master = unreal.load_asset(path)
+    master.set_editor_property("used_with_instanced_static_meshes", True)
+    mel.recompile_material(master)
+    eal.save_loaded_asset(master)
+    return master
+
+
+def copy_parameters(source, target):
+    """Copies the parameter overrides of the world's material instance into the kit instance."""
+    for key in ("scalar_parameter_values", "vector_parameter_values", "texture_parameter_values"):
+        target.set_editor_property(key, source.get_editor_property(key))
+    for switch in ("Parallax", "Cracks"):
+        mel.set_material_instance_static_switch_parameter_value(
+            target, switch, mel.get_material_instance_static_switch_parameter_value(source, switch))
+
+
 def create_materials():
     """MI_Kit_<Slot> for every slot; returns slot name -> material instance."""
     result = {}
-    for slot, (parent_path, tint) in TEXTURED.items():
+    master = kit_master()
+    for slot, (source_path, tint) in TEXTURED.items():
         instance = get_instance(f"MI_Kit_{slot}")
-        mel.set_material_instance_parent(instance, unreal.load_asset(parent_path))
+        mel.set_material_instance_parent(instance, master)
+        copy_parameters(unreal.load_asset(source_path), instance)
+        mel.set_material_instance_static_switch_parameter_value(instance, "Windows", False)
         if slot != "RoofTile":
-            mel.set_material_instance_static_switch_parameter_value(instance, "Windows", False)
             mel.set_material_instance_scalar_parameter_value(instance, "TintMin", tint)
             mel.set_material_instance_scalar_parameter_value(instance, "TintMax", tint)
         mel.update_material_instance(instance)
@@ -120,7 +143,7 @@ def report_bounds():
         mesh = unreal.load_asset(f"{FOLDER}/Meshes/{name}")
         if mesh:
             box = mesh.get_bounding_box()
-            unreal.log(f"KITBOUNDS {name} min {box.min} max {box.max}")
+            unreal.log_warning(f"KITBOUNDS {name} min {box.min} max {box.max}")
 
 
 import_meshes()

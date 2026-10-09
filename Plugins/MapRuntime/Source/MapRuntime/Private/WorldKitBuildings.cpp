@@ -8,18 +8,18 @@
 
 namespace
 {
-constexpr float MetresToCm = 100.f;
-constexpr float FoundationDepth = 1.0f;
+constexpr float KitMetresToCm = 100.f;
+constexpr float KitFoundationDepth = 1.0f;
 /** Class ids of the typology (osmimport/building_types.py CLASS_NAMES). */
-enum EBuildingClass : int32
+enum EKitBuildingClass : int32
 {
 	ClassGruenderzeit = 0, Class1920s = 1, ClassPostwar = 2, ClassSlab = 3, ClassTerraced = 4, ClassSemidetached = 5,
 	ClassDetached = 6, ClassVilla = 7, ClassModern = 8, ClassCommercial = 9, ClassFarmhouse = 10, ClassHalfTimbered = 15,
 };
 /** Roof shape ids of BTYP. */
-enum ERoofShapeId : int32
+enum EKitRoofShape : int32
 {
-	RoofFlat = 0, RoofGabled = 1, RoofHipped = 2, RoofHalfHipped = 3, RoofMansard = 4, RoofGambrel = 5, RoofPyramidal = 6,
+	KitRoofFlat = 0, KitRoofGabled = 1, KitRoofHipped = 2, KitRoofHalfHipped = 3, KitRoofMansard = 4, KitRoofGambrel = 5, KitRoofPyramidal = 6,
 };
 
 /** Piece names and dimensions of one kit style; an empty name means the style has no such piece. */
@@ -49,7 +49,7 @@ struct FKitStyle
 	bool bBalconies;
 };
 
-const FKitStyle Styles[] = {
+const FKitStyle KitStyles[] = {
 	{TEXT("brick"), 3.25f, 0.36f, 45.f, 0.42f, 0.10f, false, TEXT("Wall_Solid"), TEXT("Wall_Window"), TEXT("Wall_Door"), TEXT("Window"),
 		TEXT("Door"), TEXT("Sill"), TEXT("Lintel_Arch_Window"), TEXT("Lintel_Arch_Door"), TEXT("Door_Step"), TEXT("StringCourse"),
 		TEXT("Cornice"), TEXT("Dormer_Gable"), 1.64f, false},
@@ -62,27 +62,27 @@ const FKitStyle Styles[] = {
 };
 
 /** Style for a typology class, or null when the class keeps the plain extruded walls. */
-const FKitStyle* StyleForClass(int32 ClassId)
+const FKitStyle* KitStyleForClass(int32 ClassId)
 {
 	switch (ClassId)
 	{
 	case ClassGruenderzeit:
 	case Class1920s:
 	case ClassVilla:
-	case ClassCommercial: return &Styles[0];
+	case ClassCommercial: return &KitStyles[0];
 	case ClassPostwar:
 	case ClassTerraced:
 	case ClassSemidetached:
-	case ClassDetached: return &Styles[1];
+	case ClassDetached: return &KitStyles[1];
 	case ClassSlab:
-	case ClassModern: return &Styles[2];
+	case ClassModern: return &KitStyles[2];
 	case ClassFarmhouse:
-	case ClassHalfTimbered: return &Styles[3];
+	case ClassHalfTimbered: return &KitStyles[3];
 	default: return nullptr;
 	}
 }
 
-float Hash01(uint64 OsmId, int32 Salt)
+float KitHash01(uint64 OsmId, int32 Salt)
 {
 	uint64 Value = OsmId * 0x9E3779B97F4A7C15ull + uint64(Salt) * 0xBF58476D1CE4E5B9ull;
 	Value ^= Value >> 31;
@@ -91,13 +91,13 @@ float Hash01(uint64 OsmId, int32 Salt)
 	return float(Value & 0xFFFFFF) / float(0x1000000);
 }
 
-FVector3f ToCm(const FVector2f& Point, float ZMetres)
+FVector3f KitToCm(const FVector2f& Point, float ZMetres)
 {
-	return FVector3f(Point.X * MetresToCm, Point.Y * MetresToCm, ZMetres * MetresToCm);
+	return FVector3f(Point.X * KitMetresToCm, Point.Y * KitMetresToCm, ZMetres * KitMetresToCm);
 }
 
 /** Signed area of a ring: positive when it runs counter-clockwise in the (x, y) plane. */
-float SignedArea(const TArray<FVector2f>& Ring)
+float KitSignedArea(const TArray<FVector2f>& Ring)
 {
 	float Sum = 0.f;
 	for (int32 Index = 0; Index < Ring.Num(); ++Index)
@@ -125,10 +125,10 @@ struct FKitEdge
 };
 
 /** Edges of one ring with outward normals, and which vertices get corner posts. */
-void CollectEdges(const TArray<FVector2f>& Ring, bool bHole, TArray<FKitEdge>& Edges)
+void KitCollectEdges(const TArray<FVector2f>& Ring, bool bHole, TArray<FKitEdge>& Edges)
 {
 	const int32 Count = Ring.Num();
-	const float Orientation = SignedArea(Ring) > 0.f ? 1.f : -1.f;
+	const float Orientation = KitSignedArea(Ring) > 0.f ? 1.f : -1.f;
 	// The building is on the left of a counter-clockwise exterior ring, so outward is to the right of the travel direction.
 	const float OutwardSide = (bHole ? -1.f : 1.f) * Orientation;
 	TArray<bool> VertexHasPost;
@@ -168,7 +168,7 @@ void CollectEdges(const TArray<FVector2f>& Ring, bool bHole, TArray<FKitEdge>& E
 }
 
 /** Share of the exterior perimeter that runs parallel or perpendicular to the longest edge. */
-float OrthogonalShare(const TArray<FVector2f>& Ring)
+float KitOrthogonalShare(const TArray<FVector2f>& Ring)
 {
 	FVector2f Dominant = FVector2f(1.f, 0.f);
 	float Longest = 0.f;
@@ -202,7 +202,7 @@ float OrthogonalShare(const TArray<FVector2f>& Ring)
 }
 
 /** Bounding rectangle of the exterior ring in the frame of the ridge direction. */
-struct FRoofFrame
+struct FKitRoofFrame
 {
 	FVector2f Centre = FVector2f::ZeroVector;
 	/** Along the ridge and across it. */
@@ -215,9 +215,9 @@ struct FRoofFrame
 	FVector2f Point(float Along, float Across) const { return Centre + AlongAxis * Along + AcrossAxis * Across; }
 };
 
-FRoofFrame MakeRoofFrame(const TArray<FVector2f>& Ring, float RidgeYawDegrees)
+FKitRoofFrame MakeKitRoofFrame(const TArray<FVector2f>& Ring, float RidgeYawDegrees)
 {
-	FRoofFrame Frame;
+	FKitRoofFrame Frame;
 	const float Radians = FMath::DegreesToRadians(RidgeYawDegrees);
 	Frame.AlongAxis = FVector2f(FMath::Cos(Radians), FMath::Sin(Radians));
 	Frame.AcrossAxis = FVector2f(-Frame.AlongAxis.Y, Frame.AlongAxis.X);
@@ -237,7 +237,7 @@ FRoofFrame MakeRoofFrame(const TArray<FVector2f>& Ring, float RidgeYawDegrees)
 	const float MidAcross = (MaxAcross + MinAcross) * 0.5f;
 	Frame.Centre = Frame.AlongAxis * MidAlong + Frame.AcrossAxis * MidAcross;
 	const float BoxArea = FMath::Max(4.f * Frame.HalfAlong * Frame.HalfAcross, 0.01f);
-	Frame.Rectangularity = FMath::Abs(SignedArea(Ring)) / BoxArea;
+	Frame.Rectangularity = FMath::Abs(KitSignedArea(Ring)) / BoxArea;
 	return Frame;
 }
 
@@ -264,7 +264,7 @@ public:
 		TArray<FKitEdge> Edges;
 		for (int32 RingIndex = 0; RingIndex < Building.Footprint.Rings.Num(); ++RingIndex)
 		{
-			CollectEdges(Building.Footprint.Rings[RingIndex], RingIndex > 0, Edges);
+			KitCollectEdges(Building.Footprint.Rings[RingIndex], RingIndex > 0, Edges);
 		}
 		int32 FrontEdge = INDEX_NONE;
 		float BestFacing = 0.2f;
@@ -305,7 +305,7 @@ private:
 			return;
 		}
 		const FName Name(*FString::Printf(TEXT("%s_%s"), Style.Prefix, Piece));
-		Instances.Pieces.FindOrAdd(Name).Emplace(FRotator(0.f, YawDegrees, 0.f), FVector(ToCm(Point, ZMetres)), FVector(ScaleX, 1.f, ScaleZ));
+		Instances.Pieces.FindOrAdd(Name).Emplace(FRotator(0.f, YawDegrees, 0.f), FVector(KitToCm(Point, ZMetres)), FVector(ScaleX, 1.f, ScaleZ));
 		++Instances.NumInstances;
 	}
 
@@ -345,15 +345,15 @@ private:
 		const bool bPartyWall = bSide && IsPartyWall(Edge);
 		const int32 DoorBay = bFront && Bays >= 1 ? Bays / 2 : INDEX_NONE;
 		// Below the raised ground floor the wall continues into the ground, so sloping terrain leaves no gap.
-		const float FoundationScale = (Building.PlinthMetres + FoundationDepth) / Style.StoreyHeight;
+		const float FoundationScale = (Building.PlinthMetres + KitFoundationDepth) / Style.StoreyHeight;
 		for (int32 Bay = 0; Bay < Bays; ++Bay)
 		{
-			Place(Style.WallSolid, Edge.Start + Edge.Tangent * (StartOffset + Bay * BayWidth), Building.BaseZ - FoundationDepth,
+			Place(Style.WallSolid, Edge.Start + Edge.Tangent * (StartOffset + Bay * BayWidth), Building.BaseZ - KitFoundationDepth,
 				Edge.YawDegrees, Scale, FoundationScale);
 		}
 		if (Edge.bPostAtStart)
 		{
-			Place(TEXT("Corner_L"), Edge.Start, Building.BaseZ - FoundationDepth, Edge.YawDegrees, 1.f, FoundationScale);
+			Place(TEXT("Corner_L"), Edge.Start, Building.BaseZ - KitFoundationDepth, Edge.YawDegrees, 1.f, FoundationScale);
 		}
 		for (int32 Storey = 0; Storey < StoreyCount; ++Storey)
 		{
@@ -387,7 +387,7 @@ private:
 			return;
 		}
 		const bool bSolid = bPartyWall || Edge.Length < 2.2f || (bSide && (Bay % 2) == 1)
-			|| Hash01(Building.OsmId, EdgeIndex * 97 + Bay * 13 + Storey) < 0.04f;
+			|| KitHash01(Building.OsmId, EdgeIndex * 97 + Bay * 13 + Storey) < 0.04f;
 		if (bSolid)
 		{
 			Place(Style.WallSolid, Origin, Z, Yaw, ScaleX, ScaleZ);
@@ -459,7 +459,7 @@ private:
 			TArray<int32> Indices;
 			for (const FVector3f& Point : Points)
 			{
-				const FVector3f Offset = (Point - Points[0]) / MetresToCm;
+				const FVector3f Offset = (Point - Points[0]) / KitMetresToCm;
 				Indices.Add(RoofBuilder.AddVertex(Point, FVector2f(FVector3f::DotProduct(Offset, EaveDirection), -FMath::Abs(FVector3f::DotProduct(Offset, SlopeDirection)))));
 			}
 			for (int32 Index = 1; Index + 1 < Indices.Num(); ++Index)
@@ -475,8 +475,8 @@ private:
 		TArray<int32> Indices;
 		for (const FVector3f& Point : Points)
 		{
-			Indices.Add(RoofBuilder.AddVertex(Point, FVector2f(FVector3f::DotProduct(Point, FVector3f(Outward.Y, -Outward.X, 0.f)) / MetresToCm,
-				-Point.Z / MetresToCm)));
+			Indices.Add(RoofBuilder.AddVertex(Point, FVector2f(FVector3f::DotProduct(Point, FVector3f(Outward.Y, -Outward.X, 0.f)) / KitMetresToCm,
+				-Point.Z / KitMetresToCm)));
 		}
 		for (int32 Index = 1; Index + 1 < Indices.Num(); ++Index)
 		{
@@ -488,27 +488,27 @@ private:
 	bool BuildRoof()
 	{
 		const TArray<FVector2f>& Ring = Building.Footprint.Rings[0];
-		const FRoofFrame Frame = MakeRoofFrame(Ring, Building.RidgeYaw);
+		const FKitRoofFrame Frame = MakeKitRoofFrame(Ring, Building.RidgeYaw);
 		const int32 Shape = Building.TypedRoofShape;
-		const bool bPitchedShape = Shape == RoofGabled || Shape == RoofHipped || Shape == RoofHalfHipped || Shape == RoofMansard
-			|| Shape == RoofGambrel || Shape == RoofPyramidal;
+		const bool bPitchedShape = Shape == KitRoofGabled || Shape == KitRoofHipped || Shape == KitRoofHalfHipped || Shape == KitRoofMansard
+			|| Shape == KitRoofGambrel || Shape == KitRoofPyramidal;
 		const float Slope = FMath::Tan(FMath::DegreesToRadians(Style.PitchDegrees));
 		const float Overhang = Style.EaveOverhang;
-		const float Rise = (FMath::Min(Frame.HalfAcross, Frame.HalfAlong * (Shape == RoofGabled ? 100.f : 1.f)) + Overhang) * Slope;
+		const float Rise = (FMath::Min(Frame.HalfAcross, Frame.HalfAlong * (Shape == KitRoofGabled ? 100.f : 1.f)) + Overhang) * Slope;
 		const bool bFits = Frame.Rectangularity > 0.8f && Building.Footprint.Rings.Num() == 1 && Rise < 7.5f && Frame.HalfAcross > 1.5f;
 		if (Style.bFlatRoof || !bPitchedShape || !bFits)
 		{
 			return true;
 		}
 		const float EaveZ = WallTopZ + Style.EaveLift;
-		const bool bGable = Shape == RoofGabled || Shape == RoofGambrel;
-		BuildPitchedRoof(Frame, EaveZ, Slope, bGable, Shape == RoofPyramidal);
+		const bool bGable = Shape == KitRoofGabled || Shape == KitRoofGambrel;
+		BuildPitchedRoof(Frame, EaveZ, Slope, bGable, Shape == KitRoofPyramidal);
 		AddGutters(Frame, EaveZ, bGable);
 		AddRoofDetails(Frame, EaveZ, Slope, bGable);
 		return false;
 	}
 
-	void BuildPitchedRoof(const FRoofFrame& Frame, float EaveZ, float Slope, bool bGable, bool bPyramid)
+	void BuildPitchedRoof(const FKitRoofFrame& Frame, float EaveZ, float Slope, bool bGable, bool bPyramid)
 	{
 		const float Overhang = Style.EaveOverhang;
 		const float GableOverhang = 0.25f;
@@ -520,7 +520,7 @@ private:
 		const bool bApex = bPyramid || RidgeHalf < 0.3f;
 		RidgeHalf = bApex ? 0.f : RidgeHalf;
 		const float RidgeZ = EaveZ + (bApex ? FMath::Min(AcrossOuter, AlongOuter) : AcrossOuter) * Slope;
-		const auto P = [&](float Along, float Across, float Z) { return ToCm(Frame.Point(Along, Across), Z); };
+		const auto P = [&](float Along, float Across, float Z) { return KitToCm(Frame.Point(Along, Across), Z); };
 		const TArray<FVector3f> Front = {P(AlongOuter, -AcrossOuter, EaveZ), P(-AlongOuter, -AcrossOuter, EaveZ), P(-RidgeHalf, 0.f, RidgeZ), P(RidgeHalf, 0.f, RidgeZ)};
 		const TArray<FVector3f> Back = {P(-AlongOuter, AcrossOuter, EaveZ), P(AlongOuter, AcrossOuter, EaveZ), P(RidgeHalf, 0.f, RidgeZ), P(-RidgeHalf, 0.f, RidgeZ)};
 		AddRoofFace(Front, Materials.RoofTiles);
@@ -542,20 +542,20 @@ private:
 	}
 
 	/** The wall above the eave line at one end of a gabled roof, up to where the roof planes meet it. */
-	void AddGableEnd(const FRoofFrame& Frame, float AlongPosition, float Direction, float EaveZ, float Slope, float RidgeZ)
+	void AddGableEnd(const FKitRoofFrame& Frame, float AlongPosition, float Direction, float EaveZ, float Slope, float RidgeZ)
 	{
 		const float HalfAcross = Frame.HalfAcross;
 		const float BaseZ0 = WallTopZ;
 		const float PlaneZAtWall = EaveZ + Style.EaveOverhang * Slope;
 		const float TopZ = EaveZ + (HalfAcross + Style.EaveOverhang) * Slope;
-		const auto P = [&](float Across, float Z) { return ToCm(Frame.Point(AlongPosition, Across), Z); };
+		const auto P = [&](float Across, float Z) { return KitToCm(Frame.Point(AlongPosition, Across), Z); };
 		const FVector2f OutwardAxis = Frame.AlongAxis * Direction;
 		const TArray<FVector3f> Face = {P(-HalfAcross, BaseZ0), P(HalfAcross, BaseZ0), P(HalfAcross, PlaneZAtWall), P(0.f, TopZ), P(-HalfAcross, PlaneZAtWall)};
 		AddGableFace(Face, FVector3f(OutwardAxis.X, OutwardAxis.Y, 0.f));
 		(void)RidgeZ;
 	}
 
-	void PlaceRidge(const FRoofFrame& Frame, float RidgeLength, float RidgeZ)
+	void PlaceRidge(const FKitRoofFrame& Frame, float RidgeLength, float RidgeZ)
 	{
 		const int32 Pieces = FMath::Max(1, FMath::CeilToInt(RidgeLength / 2.f));
 		const float Scale = RidgeLength / (2.f * Pieces);
@@ -568,7 +568,7 @@ private:
 	}
 
 	/** Gutters under the long eaves (and the short ones of a hipped roof). */
-	void AddGutters(const FRoofFrame& Frame, float EaveZ, bool bGable)
+	void AddGutters(const FKitRoofFrame& Frame, float EaveZ, bool bGable)
 	{
 		if (Style.bFlatRoof || Style.EaveOverhang <= 0.f || FString(Style.Prefix) == TEXT("farm"))
 		{
@@ -584,7 +584,7 @@ private:
 	}
 
 	/** Gutter pieces along the roof rectangle's side facing Sign (along the across axis, or the along axis for the ends). */
-	void PlaceGutterSide(const FRoofFrame& Frame, float Sign, float EaveZ, bool bEnd)
+	void PlaceGutterSide(const FKitRoofFrame& Frame, float Sign, float EaveZ, bool bEnd)
 	{
 		const FVector2f Normal = bEnd ? Frame.AlongAxis * Sign : Frame.AcrossAxis * Sign;
 		const FVector2f Tangent(Normal.Y, -Normal.X);
@@ -601,25 +601,25 @@ private:
 	}
 
 	/** Dormers on the street slope and a chimney on the ridge. */
-	void AddRoofDetails(const FRoofFrame& Frame, float EaveZ, float Slope, bool bGable)
+	void AddRoofDetails(const FKitRoofFrame& Frame, float EaveZ, float Slope, bool bGable)
 	{
 		const bool bAttic = (Building.TypeFlags & 1) != 0;
 		if (bAttic && Style.Dormer && Style.Dormer[0] && Frame.HalfAlong * 2.f >= 6.f)
 		{
 			PlaceDormers(Frame, EaveZ, Slope);
 		}
-		if (Hash01(Building.OsmId, 777) < 0.6f && Frame.HalfAlong > 3.f)
+		if (KitHash01(Building.OsmId, 777) < 0.6f && Frame.HalfAlong > 3.f)
 		{
 			const FVector2f Direction = -Frame.AlongAxis;
 			const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X));
 			const float RidgeZ = EaveZ + (Frame.HalfAcross + Style.EaveOverhang) * Slope;
-			const float Along = Frame.HalfAlong - 1.8f - 2.f * Hash01(Building.OsmId, 778);
+			const float Along = Frame.HalfAlong - 1.8f - 2.f * KitHash01(Building.OsmId, 778);
 			Place(TEXT("Chimney"), Frame.Point(Along, 0.f) + Direction * 0.f - Frame.AcrossAxis * 0.4f, RidgeZ - 0.35f, Yaw, 1.f);
 		}
 		(void)bGable;
 	}
 
-	void PlaceDormers(const FRoofFrame& Frame, float EaveZ, float Slope)
+	void PlaceDormers(const FKitRoofFrame& Frame, float EaveZ, float Slope)
 	{
 		const float FacingAcross = FVector2f::DotProduct(Frame.AcrossAxis, FrontDirection);
 		const float Sign = FacingAcross >= 0.f ? 1.f : -1.f;
@@ -648,22 +648,22 @@ FString KitMeshPath(const FName& PieceName)
 
 bool IsKitBuilding(const FWorldBuilding& Building)
 {
-	if (!Building.bTyped || !StyleForClass(Building.ClassId) || Building.Footprint.Rings.IsEmpty())
+	if (!Building.bTyped || !KitStyleForClass(Building.ClassId) || Building.Footprint.Rings.IsEmpty())
 	{
 		return false;
 	}
 	const TArray<FVector2f>& Ring = Building.Footprint.Rings[0];
-	if (Ring.Num() < 4 || FMath::Abs(SignedArea(Ring)) < 25.f || Building.Storeys == 0)
+	if (Ring.Num() < 4 || FMath::Abs(KitSignedArea(Ring)) < 25.f || Building.Storeys == 0)
 	{
 		return false;
 	}
-	return OrthogonalShare(Ring) > 0.75f;
+	return KitOrthogonalShare(Ring) > 0.75f;
 }
 
 bool BuildKitBuilding(const FWorldTileData& Tile, const FWorldBuilding& Building, const FKitRoofMaterials& Materials,
 	FWorldKitInstances& Instances, FWorldMeshBuilder& RoofBuilder, float& FlatRoofZ)
 {
-	const FKitStyle* Style = StyleForClass(Building.ClassId);
+	const FKitStyle* Style = KitStyleForClass(Building.ClassId);
 	FKitAssembler Assembler(Building, *Style, Materials, Instances, RoofBuilder);
 	const bool bFlat = Assembler.Build();
 	++Instances.NumBuildings;
@@ -674,10 +674,10 @@ bool BuildKitBuilding(const FWorldTileData& Tile, const FWorldBuilding& Building
 
 namespace
 {
-constexpr int32 KitPiecesPerStep = 6;
+constexpr int32 KitPiecesPerStepCount = 6;
 
 /** Kit meshes by piece name, loaded on first use and kept alive; a missing mesh is remembered as null. */
-UStaticMesh* FindKitMesh(const FName& PieceName)
+UStaticMesh* FindKitMeshCached(const FName& PieceName)
 {
 	static TMap<FName, TStrongObjectPtr<UStaticMesh>> Cache;
 	if (const TStrongObjectPtr<UStaticMesh>* Found = Cache.Find(PieceName))
@@ -699,11 +699,11 @@ bool AddKitInstancesStep(AWorldTileActor& Actor, const FWorldKitInstances& Kit, 
 	TArray<FName> Names;
 	Kit.Pieces.GetKeys(Names);
 	Names.Sort(FNameLexicalLess());
-	const int32 First = Step * KitPiecesPerStep;
-	const int32 Last = FMath::Min(First + KitPiecesPerStep, Names.Num());
+	const int32 First = Step * KitPiecesPerStepCount;
+	const int32 Last = FMath::Min(First + KitPiecesPerStepCount, Names.Num());
 	for (int32 Index = First; Index < Last; ++Index)
 	{
-		Actor.AddKitInstances(FindKitMesh(Names[Index]), Kit.Pieces[Names[Index]]);
+		Actor.AddKitInstances(FindKitMeshCached(Names[Index]), Kit.Pieces[Names[Index]]);
 	}
 	return Last >= Names.Num();
 }
