@@ -50,6 +50,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "World")
 	FString MaterialFolder = TEXT("/Game/World/Materials");
 
+	/** Folder of the facade and roof materials from the scanned texture sets; M_<section> found here wins over MaterialFolder. */
+	UPROPERTY(EditAnywhere, Category = "World")
+	FString BuildingMaterialFolder = TEXT("/Game/World/Facades");
+
 	/** Plant model meshes by the model names in the world data. */
 	UPROPERTY(EditAnywhere, Category = "World")
 	TMap<FString, TSoftObjectPtr<UStaticMesh>> PlantModels;
@@ -120,6 +124,9 @@ private:
 
 	/** Material of a sign graphic: an instance of the sign master with the graphic's texture. */
 	UMaterialInterface* FindSignMaterial(const FString& GraphicName);
+
+	/** The facade or roof material of a section from BuildingMaterialFolder, or null (not a building section, switched off with -NoFacadeMaterials, or missing). */
+	UMaterialInterface* FindBuildingMaterial(const FString& Section) const;
 
 	/** Loads every M_* material in MaterialFolder up front. */
 	void PreloadMaterials();
