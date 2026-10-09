@@ -69,6 +69,9 @@ public:
 	/** How wet the roads are, 0 to 1: rises in rain and dries slowly afterwards. */
 	float GetWetness() const { return Wetness; }
 
+	/** How much of the ground is under snow, 0 to 1. */
+	float GetSnowCover() const { return SnowCover; }
+
 	/** Broadcast at every lightning flash. */
 	FOnLightningStrike OnLightning;
 

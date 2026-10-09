@@ -1,9 +1,11 @@
 #include "DriveTest.h"
 
+#include "CarMovementComponent.h"
 #include "CarPawn.h"
 #include "CarSettings.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Misc/CommandLine.h"
 #include "GameFramework/PlayerController.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDriveTest, Log, All);
@@ -55,7 +57,16 @@ ADriveTestRunner::ADriveTestRunner()
 void ADriveTestRunner::BeginPlay()
 {
 	Super::BeginPlay();
+	FCarSurfaceConditions Conditions;
+	if (FParse::Value(FCommandLine::Get(), TEXT("DriveTestSurface="), TestSurfaceName) && CarSurfaceGrip::TestPreset(TestSurfaceName, Conditions))
+	{
+		TestSurface = Conditions;
+	}
 	BuildSteps();
+	if (TestSurface.IsSet())
+	{
+		KeepSurfaceSteps();
+	}
 	Report(TEXT("Drive test started"));
 }
 
@@ -74,6 +85,7 @@ void ADriveTestRunner::AddPlace(float XM, float YM, float Yaw, bool bEngineRunni
 	AddStep(TEXT("place"), [this, XM, YM, Yaw, bEngineRunning]()
 	{
 		Input = FCarDriverInput();
+		ApplyTestSurface(false);
 		ShiftPhase = 0;
 		LaneY = YM;
 		ShiftRpm = 6200.f;
@@ -219,7 +231,7 @@ void ADriveTestRunner::BuildSteps()
 
 	// ---------------- 2. Full-throttle run: 0-50, 0-100, top speed ----------------
 	AddPlace(StartX, -30.f, 0.f, true);
-	AddStep(TEXT("acceleration"), [this]() { MaxValue = 0.f; bFlag = false; Value2 = -1.f; MinValue = -1.f; T160 = -1.f; MarkTime = 0.0; },
+	AddStep(TEXT("acceleration"), [this]() { MaxValue = 0.f; bFlag = false; Value2 = -1.f; MinValue = -1.f; T160 = -1.f; MarkTime = 0.0; ApplyTestSurface(true); },
 		[this](const FCarTelemetry& T)
 		{
 			SteerToLane(T);
@@ -253,7 +265,8 @@ void ADriveTestRunner::BuildSteps()
 				MaxValue = V;
 				MarkPosition = FVector(Since, T.EngagedGear, T.EngineRpm);
 			}
-			if (T.PositionM.X > 1850.f || Since > 120.f)
+			const bool bSurfaceDone = TestSurface.IsSet() && (Value2 >= 0.f || Since > 40.f);
+			if (bSurfaceDone || T.PositionM.X > 1850.f || Since > 120.f)
 			{
 				Report(FString::Printf(TEXT("accel: max %.1f km/h at %.1f s in gear %.0f (%.0f rpm), still accelerating %.2f km/h/s, stalls %d"),
 					MaxValue, MarkPosition.X, MarkPosition.Y, MarkPosition.Z, T.LocalAccelMps2.X * 3.6f, T.StallCount));
@@ -482,60 +495,12 @@ void ADriveTestRunner::BuildSteps()
 			return false;
 		});
 
-	// ---------------- 7. Braking 100-0 ----------------
-	AddPlace(StartX, -180.f, 0.f, true);
-	AddStep(TEXT("braking"), [this]() { bFlag = false; Counter = 0; Samples = 0; MaxValue = 0.f; Value2 = 0.f; },
-		[this](const FCarTelemetry& T)
-		{
-			SteerToLane(T);
-			if (Counter == 0)
-			{
-				DriveFlatOut(T, 4);
-				if (T.SpeedKmh >= 112.f)
-				{
-					Counter = 1; // coast with clutch pressed
-					MarkTime = T.SimTime;
-				}
-				return false;
-			}
-			if (Counter == 1 && T.SimTime - MarkTime > 1.5 && !bFlag)
-			{
-				bFlag = true; // once: coast-down diagnostics (clutch pressed: only drag + rolling resistance)
-				const float Vms = T.LocalVelocityMps.X;
-				Report(FString::Printf(TEXT("  coast %.0f km/h: decel %.3f m/s^2 (expected drag+rolling %.3f), tyre Fx %.0f/%.0f/%.0f/%.0f N, Fy %.0f/%.0f/%.0f/%.0f N, loads %.0f/%.0f/%.0f/%.0f"),
-					T.SpeedKmh, -T.LocalAccelMps2.X, (0.5f * 1.2f * 0.65f * Vms * Vms + 0.011f * 1300.f * 9.81f) / 1300.f,
-					T.ForceLongN[0], T.ForceLongN[1], T.ForceLongN[2], T.ForceLongN[3], T.ForceLatN[0], T.ForceLatN[1], T.ForceLatN[2], T.ForceLatN[3],
-					T.LoadN[0], T.LoadN[1], T.LoadN[2], T.LoadN[3]));
-			}
-			Input.Throttle = 0.f;
-			Input.Clutch = 1.f;
-			if (Counter == 1 && Prev.SpeedKmh > 100.f && T.SpeedKmh <= 100.f)
-			{
-				Counter = 2;
-				const float F = CrossFraction(Prev.SpeedKmh, T.SpeedKmh, 100.f);
-				MarkPosition = FMath::Lerp(Prev.PositionM, T.PositionM, F);
-				MarkTime = FMath::Lerp(Prev.SimTime, T.SimTime, double(F));
-			}
-			if (Counter == 2)
-			{
-				Input.Brake = 1.f;
-				Samples |= T.bAbsActive ? 1 : 0;
-				MaxValue = FMath::Max(MaxValue, -T.LocalAccelMps2.X);
-				if (T.SpeedKmh < 0.5f)
-				{
-					const float F = CrossFraction(Prev.SpeedKmh, T.SpeedKmh, 0.f);
-					const FVector StopPosition = FMath::Lerp(Prev.PositionM, T.PositionM, F);
-					const float Distance = FVector::Dist2D(StopPosition, MarkPosition);
-					const float Time = float(FMath::Lerp(Prev.SimTime, T.SimTime, double(F)) - MarkTime);
-					Report(FString::Printf(TEXT("braking 100-0: %.1f m in %.2f s (mean %.2f m/s^2 = %.2f g, peak %.2f m/s^2), ABS %s"),
-						Distance, Time, 27.78f / Time, 27.78f / Time / 9.81f, MaxValue, Samples ? TEXT("active") : TEXT("not triggered")));
-					Summary.Add(FString::Printf(TEXT("Braking 100-0: %.1f m (target ~36-40 m)"), Distance));
-					Input.Brake = 0.5f;
-					return true;
-				}
-			}
-			return false;
-		});
+	// ---------------- 7. Braking 100-0 (and 50-0 on a test surface) ----------------
+	if (TestSurface.IsSet())
+	{
+		AddBrakingStep(50.f);
+	}
+	AddBrakingStep(100.f);
 
 	// ---------------- 8. Ramp steer at 70 km/h: maximum lateral acceleration ----------------
 	AddPlace(-1500.f, 600.f, 0.f, true);
@@ -549,6 +514,7 @@ void ADriveTestRunner::BuildSteps()
 				DriveFlatOut(T, 3);
 				if (T.SpeedKmh >= 70.f && ShiftPhase == 3)
 				{
+					ApplyTestSurface(true);
 					bFlag = true;
 					MarkTime = T.SimTime;
 				}
@@ -579,6 +545,92 @@ void ADriveTestRunner::BuildSteps()
 					MaxValue, Value2, MinValue, T.SpeedKmh, T.SlipAngleDeg[0], T.SlipAngleDeg[2]));
 				Summary.Add(FString::Printf(TEXT("Max lateral acceleration (ramp steer): %.2f g (target ~0.9-1.0)"), MaxValue));
 				return true;
+			}
+			return false;
+		});
+}
+
+void ADriveTestRunner::ApplyTestSurface(bool bOn)
+{
+	ACarPawn* Pawn = Car.Get();
+	UCarMovementComponent* Movement = Pawn ? Pawn->GetCarMovement() : nullptr;
+	if (!Movement || !TestSurface.IsSet())
+	{
+		return;
+	}
+	Movement->SetSurfaceConditionsOverride(bOn ? TestSurface.GetValue() : FCarSurfaceConditions());
+}
+
+void ADriveTestRunner::KeepSurfaceSteps()
+{
+	const TSet<FString> Kept = {TEXT("acceleration"), TEXT("braking"), TEXT("ramp steer")};
+	TArray<FStep> Filtered;
+	for (int32 Index = 0; Index < Steps.Num(); ++Index)
+	{
+		const bool bKeep = Kept.Contains(Steps[Index].Name);
+		const bool bPlaceBeforeKept = Steps[Index].Name == TEXT("place") && Steps.IsValidIndex(Index + 1) && Kept.Contains(Steps[Index + 1].Name);
+		if (bKeep || bPlaceBeforeKept)
+		{
+			Filtered.Add(Steps[Index]);
+		}
+	}
+	Steps = MoveTemp(Filtered);
+	Report(FString::Printf(TEXT("surface test: %s (wetness %.2f, snow %.2f, %.0f C)"), *TestSurfaceName, TestSurface->Wetness, TestSurface->SnowCover, TestSurface->TemperatureCelsius));
+}
+
+void ADriveTestRunner::AddBrakingStep(float FromKmh)
+{
+	AddPlace(-1900.f, -180.f, 0.f, true);
+	AddStep(TEXT("braking"), [this]() { bFlag = false; Counter = 0; Samples = 0; MaxValue = 0.f; Value2 = 0.f; },
+		[this, FromKmh](const FCarTelemetry& T)
+		{
+			SteerToLane(T);
+			if (Counter == 0)
+			{
+				DriveFlatOut(T, 4);
+				if (T.SpeedKmh >= FromKmh + 12.f)
+				{
+					Counter = 1; // coast with clutch pressed
+					MarkTime = T.SimTime;
+				}
+				return false;
+			}
+			if (Counter == 1 && T.SimTime - MarkTime > 1.5 && !bFlag)
+			{
+				bFlag = true; // once: coast-down diagnostics (clutch pressed: only drag + rolling resistance)
+				const float Vms = T.LocalVelocityMps.X;
+				Report(FString::Printf(TEXT("  coast %.0f km/h: decel %.3f m/s^2 (expected drag+rolling %.3f), tyre Fx %.0f/%.0f/%.0f/%.0f N, Fy %.0f/%.0f/%.0f/%.0f N, loads %.0f/%.0f/%.0f/%.0f"),
+					T.SpeedKmh, -T.LocalAccelMps2.X, (0.5f * 1.2f * 0.65f * Vms * Vms + 0.011f * 1300.f * 9.81f) / 1300.f,
+					T.ForceLongN[0], T.ForceLongN[1], T.ForceLongN[2], T.ForceLongN[3], T.ForceLatN[0], T.ForceLatN[1], T.ForceLatN[2], T.ForceLatN[3],
+					T.LoadN[0], T.LoadN[1], T.LoadN[2], T.LoadN[3]));
+			}
+			Input.Throttle = 0.f;
+			Input.Clutch = 1.f;
+			if (Counter == 1 && Prev.SpeedKmh > FromKmh && T.SpeedKmh <= FromKmh)
+			{
+				Counter = 2;
+				ApplyTestSurface(true);
+				const float F = CrossFraction(Prev.SpeedKmh, T.SpeedKmh, FromKmh);
+				MarkPosition = FMath::Lerp(Prev.PositionM, T.PositionM, F);
+				MarkTime = FMath::Lerp(Prev.SimTime, T.SimTime, double(F));
+			}
+			if (Counter == 2)
+			{
+				Input.Brake = 1.f;
+				Samples |= T.bAbsActive ? 1 : 0;
+				MaxValue = FMath::Max(MaxValue, -T.LocalAccelMps2.X);
+				if (T.SpeedKmh < 0.5f)
+				{
+					const float F = CrossFraction(Prev.SpeedKmh, T.SpeedKmh, 0.f);
+					const FVector StopPosition = FMath::Lerp(Prev.PositionM, T.PositionM, F);
+					const float Distance = FVector::Dist2D(StopPosition, MarkPosition);
+					const float Time = float(FMath::Lerp(Prev.SimTime, T.SimTime, double(F)) - MarkTime);
+					Report(FString::Printf(TEXT("braking %.0f-0: %.1f m in %.2f s (mean %.2f m/s^2 = %.2f g, peak %.2f m/s^2), ABS %s"),
+						FromKmh, Distance, Time, FromKmh / 3.6f / Time, FromKmh / 3.6f / Time / 9.81f, MaxValue, Samples ? TEXT("active") : TEXT("not triggered")));
+					Summary.Add(FString::Printf(TEXT("Braking %.0f-0: %.1f m%s"), FromKmh, Distance, FromKmh > 99.f ? TEXT(" (dry target ~36-40 m)") : TEXT("")));
+					Input.Brake = 0.5f;
+					return true;
+				}
 			}
 			return false;
 		});
