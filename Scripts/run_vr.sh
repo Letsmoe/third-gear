@@ -2,7 +2,7 @@
 # Runs the game standalone in VR (much less GPU memory than the editor's VR Preview).
 # Start SteamVR + Steam Link first. Close the editor first if possible.
 # Usage: [MAP=<map name>] Scripts/run_vr.sh [screen percentage, default 85] [extra args...]
-#   MAP defaults to ProvingGround, e.g. MAP=bergedorf_test Scripts/run_vr.sh
+#   MAP defaults to Streamed; the start menu floats in front of you (D-pad and buttons on the wheel), -NoMenu skips it.
 #   Screen percentage < 100 renders fewer pixels and lets TSR upscale (saves VRAM + GPU time).
 set -euo pipefail
 
@@ -16,5 +16,5 @@ if ! pgrep -x vrserver >/dev/null; then
 	exit 1
 fi
 
-exec "$UE/Engine/Binaries/Linux/UnrealEditor" "$PROJECT" "/Game/Maps/${MAP:-ProvingGround}" -game -vr -log \
+exec "$UE/Engine/Binaries/Linux/UnrealEditor" "$PROJECT" "/Game/Maps/${MAP:-Streamed}" -game -vr -log \
 	-ExecCmds="r.ScreenPercentage $SCREEN_PERCENTAGE" "$@"

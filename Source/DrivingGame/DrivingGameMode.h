@@ -24,6 +24,9 @@ public:
 	 */
 	static bool UseFreeCamera();
 
+	/** True if this level uses the free-fly camera pawn: UseFreeCamera(), the start menu, or a free camera chosen in the menu. */
+	bool UsesFreeCameraPawn() const;
+
 private:
 	/** Ground point below a player-start transform (player starts sit at eye height above the road). */
 	FVector FindGroundBelow(const FVector& Location) const;

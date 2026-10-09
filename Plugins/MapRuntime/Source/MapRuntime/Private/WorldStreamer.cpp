@@ -116,6 +116,14 @@ bool AWorldStreamer::EnsureIndex()
 		return bIndexLoaded;
 	}
 	FParse::Value(FCommandLine::Get(), TEXT("Region="), Region);
+	// The start menu loads the level with ?Region=<name>; that choice wins over the command line.
+	for (const FString& Option : GetWorld()->URL.Op)
+	{
+		if (Option.StartsWith(TEXT("Region=")))
+		{
+			Region = Option.Mid(FCString::Strlen(TEXT("Region=")));
+		}
+	}
 	WorldDir = FindWorldDir(Region);
 	FString Json;
 	TSharedPtr<FJsonObject> Root;
