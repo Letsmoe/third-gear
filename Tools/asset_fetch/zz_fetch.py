@@ -1,4 +1,4 @@
-"""Add Zusatzzeichen (supplementary signs) SVGs from Commons and merge into _cache/signs.json. usage: zz_fetch.py <RawAssets dir>"""
+"""Add Zusatzzeichen (supplementary signs) SVGs from Commons and merge into _cache/signs.json. usage: zz_fetch.py <raw_assets dir>"""
 import sys,os,re,json,time,subprocess,urllib.parse
 raw=sys.argv[1];UA="driving-game-asset-fetch/1.0 (personal UE project; polite sequential requests)"
 T={'1001-30':'Zusatzzeichen 1001-30 - auf ... m, StVO 1992.svg','1000-10':'Zusatzzeichen 1000-10 - Richtungsangaben durch Pfeile, linksweisend, StVO 1992.svg',

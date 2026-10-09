@@ -1,4 +1,4 @@
-"""Imports the downloaded photo-scanned PBR texture sets from RawAssets/ into /Game/Textures/<Category>/<SetName>/
+"""Imports the downloaded photo-scanned PBR texture sets from the data root (raw_assets/, see Data/raw_assets.md) into /Game/Textures/<Category>/<SetName>/
 as T_<SetName>_<Map> with correct compression / sRGB / LOD-group settings. No materials are created.
 
 Run headless (editor must be closed):
@@ -8,10 +8,15 @@ Re-running re-imports (replace_existing) and re-applies the settings.
 """
 import glob
 import os
+import sys
+
 import unreal
 
 PROJECT_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-RAW_DIR = os.path.join(PROJECT_DIR, "RawAssets")
+sys.path.insert(0, os.path.join(PROJECT_DIR, "Tools", "bootstrap"))
+import data_root  # noqa: E402
+
+RAW_DIR = data_root.raw_assets_dir()
 DEST_ROOT = "/Game/Textures"
 
 # (category, source, set name). Kept as a pure literal list: Tools/asset_fetch/contact_sheet.py parses it.

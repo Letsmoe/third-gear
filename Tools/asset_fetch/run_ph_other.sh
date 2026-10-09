@@ -1,5 +1,6 @@
 #!/bin/bash
-R=$(cd "$(dirname "$0")/../.." && pwd)/RawAssets
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+R=${THIRD_GEAR_DATA:-$ROOT/External}/raw_assets
 F=$(cd "$(dirname "$0")/../.." && pwd)/Tools/asset_fetch/ph_fetch.py
 while pgrep -f run_ph_tex.sh >/dev/null; do sleep 20; done
 python3 -u -I $F $R hdri binnenalster:4k hausdorf_meadow:4k hausdorf_clear_sky:4k hamburg_canal:4k evening_road_01:4k narrow_moonlit_road:4k suburban_field_01:2k

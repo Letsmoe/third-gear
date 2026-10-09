@@ -1,4 +1,4 @@
-"""Fetch German StVO sign SVGs from Wikimedia Commons. usage: signs_fetch.py <RawAssets dir>
+"""Fetch German StVO sign SVGs from Wikimedia Commons. usage: signs_fetch.py <raw_assets dir>
 Looks up 'File:Zeichen <code> ...svg' via allpages prefix, picks newest StVO year, records license from extmetadata."""
 import sys,os,re,json,time,subprocess,urllib.request,urllib.parse
 raw=sys.argv[1]

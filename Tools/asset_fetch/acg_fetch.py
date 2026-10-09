@@ -1,6 +1,6 @@
-"""ambientCG fetcher (CC0). usage: acg_fetch.py <RawAssets dir> <catalog acg.json> <AssetId>:<attr e.g. 4K-PNG> ...
+"""ambientCG fetcher (CC0). usage: acg_fetch.py <raw_assets dir> <catalog acg.json> <AssetId>:<attr e.g. 4K-PNG> ...
 Downloads the zip to a temp name OUTSIDE the asset dir, extracts only image maps (no NormalGL, no scripts/other) into a fresh
-<RawAssets>/ambientcg/<AssetId>/, using safe basenames only. Appends record to <RawAssets>/_cache/records.jsonl"""
+<raw_assets>/ambientcg/<AssetId>/, using safe basenames only. Appends record to <raw_assets>/_cache/records.jsonl"""
 import sys,os,json,zipfile,time,urllib.request,re
 raw,cat=sys.argv[1],json.load(open(sys.argv[2]))
 UA="driving-game-asset-fetch/1.0 (personal UE project)"

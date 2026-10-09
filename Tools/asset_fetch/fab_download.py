@@ -3,7 +3,7 @@
 Uses the Epic login that Heroic/legendary stores (~/.config/heroic/legendaryConfig/legendary/user.json) and
 legendary's manifest/chunk parsers (pip install legendary-gl into a venv):
 
-    /tmp/fabdl/.venv/bin/python -I Tools/asset_fetch/fab_download.py <title substring> <out dir> [--list]
+    <data root>/venvs/fab/bin/python -I Tools/asset_fetch/fab_download.py <title substring> <out dir> [--list]
 
 Library: GET  https://www.fab.com/e/accounts/{account}/ue/library
 Manifest: POST https://www.fab.com/e/artifacts/{artifactId}/manifest {item_id, namespace, platform}

@@ -1,6 +1,6 @@
 """Poly Haven fetcher (CC0). Sequential, polite, md5-verified.
-usage: ph_fetch.py <RawAssets dir> <kind: tex|model|hdri> <id>:<res> [<id>:<res> ...]
-Each asset goes to <RawAssets>/polyhaven/<id>/ (must not exist). Appends a JSON record to <RawAssets>/_cache/records.jsonl
+usage: ph_fetch.py <raw_assets dir> <kind: tex|model|hdri> <id>:<res> [<id>:<res> ...]
+Each asset goes to <raw_assets>/polyhaven/<id>/ (must not exist). Appends a JSON record to <raw_assets>/_cache/records.jsonl
 Textures: Diffuse(jpg) nor_dx(png) Rough(jpg) AO(jpg) Displacement(png) [+Metal(jpg) if present]
 Models: glTF (jpg textures, ARM-packed) at given res. HDRI: .hdr
 """
