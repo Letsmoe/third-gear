@@ -26,9 +26,7 @@ SMALL_GENERA = {"Steinobst", "Apfelbaum", "Weissdorn", "Vogelbeere", "Mehlbeere"
 DEFAULT_HEIGHT_RATIO = 1.3  # mature linden/oak/maple street trees: ~20 m tall at ~15 m crown
 
 KEEP_OFF_ROAD = 0.4        # street trees whose trunk lands on the carriageway are pushed this far off it
-KERB_STRIP = 1.2           # pavement within this distance of the carriageway is the planting strip of street trees
-KERB_SNAP_OFFSET = 0.8     # register trees standing further out on the pavement are moved to this distance from the kerb
-WIDE_PAVEMENT_HALF_WIDTH = 2.0  # pavement this far from every edge is wide enough for a tree row: no snapping
+PAVEMENT_TRUNK_CLEARANCE = 0.5  # no trunk within this distance of a pavement, register street trees included
 BUILDING_TRUNK_CLEARANCE = 1.0  # every trunk stays this far from facades
 CROWN_FACADE_OVERLAP = 0.8      # a crown may reach this far past the nearest facade
 MIN_CLAMPED_CROWN = 2.5         # trees whose crown would shrink below this next to a building are dropped
@@ -184,11 +182,9 @@ def build(osm: OsmData, area: Area, ground: HeightGrid, road_ground, pavement, p
     building_index = shapely.STRtree(list(building_parts)) if len(building_parts) else None
     pavement_prep = pavement if pavement is not None else shapely.Polygon()
     shapely.prepare(pavement_prep)
-    # the kerb-side strip of the pavement, where street trees belong
-    walkable_pavement = pavement_prep.difference(road_ground.buffer(KERB_STRIP))
-    shapely.prepare(walkable_pavement)
-    wide_pavement = pavement_prep.buffer(-WIDE_PAVEMENT_HALF_WIDTH)
-    shapely.prepare(wide_pavement)
+    # Trees in tree pits on the pavement look wrong without the pit, so every plant keeps off the pavement.
+    pavement_clear = pavement_prep.buffer(PAVEMENT_TRUNK_CLEARANCE)
+    shapely.prepare(pavement_clear)
 
     def facade_distance(x, y):
         """Distance from (x, y) to the nearest building footprint (inf without buildings)."""
@@ -207,17 +203,15 @@ def build(osm: OsmData, area: Area, ground: HeightGrid, road_ground, pavement, p
         return allowed, height * (allowed / crown) ** 0.5
 
     def tree_position_allowed(model, x, y, source):
-        """Placement rules for every tree that is not a register street tree: clear of buildings and pavement."""
+        """Placement rules for every tree that is not a register street tree: clear of buildings."""
         if model == "shrub":
             return True
-        if facade_distance(x, y) < BUILDING_TRUNK_CLEARANCE:
-            return False
-        if source == "canopy":
-            return not shapely.contains_xy(pavement_prep, x, y)
-        return not shapely.contains_xy(walkable_pavement, x, y)
+        return facade_distance(x, y) >= BUILDING_TRUNK_CLEARANCE
 
     def add(model, x, y, crown, height, trunk, source, min_gap):
         if not (area.x_min <= x < area.x_max and area.y_min <= y < area.y_max):
+            return False
+        if shapely.contains_xy(pavement_clear, x, y):
             return False
         if not occ.free(x, y, min_gap):
             return False
@@ -239,20 +233,13 @@ def build(osm: OsmData, area: Area, ground: HeightGrid, road_ground, pavement, p
         return True
 
     def street_tree_position(x, y):
-        """Register position corrected for its ~1 m error: off the carriageway, out of buildings, onto the kerb strip."""
+        """Register position corrected for its ~1 m error: off the carriageway and out of buildings."""
         point = shapely.Point(x, y)
         if shapely.contains(road_prep, point):
             x, y = push_towards(road_prep.boundary, point, KEEP_OFF_ROAD)
         if building_index is not None and facade_distance(x, y) < BUILDING_TRUNK_CLEARANCE:
             nearest = building_index.nearest(point)
             x, y = push_away(building_parts[nearest], point, BUILDING_TRUNK_CLEARANCE)
-        elif shapely.contains(walkable_pavement, point) and not shapely.contains(wide_pavement, point):
-            edge = nearest_points(road_prep.boundary, point)[0]
-            away = np.array([x - edge.x, y - edge.y])
-            away /= max(np.linalg.norm(away), 1e-6)
-            snapped = shapely.Point(edge.x + away[0] * KERB_SNAP_OFFSET, edge.y + away[1] * KERB_SNAP_OFFSET)
-            if shapely.contains(pavement_prep, snapped):
-                x, y = snapped.x, snapped.y
         return x, y
 
     # 1) Real street trees: exact positions, species, crown size.
