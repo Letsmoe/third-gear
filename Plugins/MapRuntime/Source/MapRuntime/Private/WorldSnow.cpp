@@ -17,7 +17,7 @@ constexpr float SnowEdgeReach = 5.1f;
 /** Walls influence the snow within this distance, metres. */
 constexpr float SnowWallReach = 7.f;
 /** The least snow on any covered surface, metres. */
-constexpr float SnowMinimumDepth = 0.025f;
+constexpr float SnowMinimumDepth = 0.035f;
 constexpr float SnowMaximumDepth = 1.2f;
 /** Vertex colour scales. */
 constexpr float SnowDepthPerColorStep = 0.005f;
@@ -25,9 +25,9 @@ constexpr float SnowEdgeDistancePerColorStep = 0.02f;
 /** Largest flat block merged into two triangles, in cells. */
 constexpr int32 SnowMaxBlockCells = 8;
 /** Flatness tolerances for merging cells, metres. */
-constexpr float SnowSurfaceTolerance = 0.004f;
-constexpr float SnowDepthTolerance = 0.006f;
-constexpr float SnowEdgeTolerance = 0.25f;
+constexpr float SnowSurfaceTolerance = 0.012f;
+constexpr float SnowDepthTolerance = 0.012f;
+constexpr float SnowEdgeTolerance = 0.4f;
 
 /** Direction the prevailing wind blows towards over Hamburg (from west-southwest), x east and y south. */
 const FVector2f SnowWindDirection(0.94f, -0.34f);
@@ -603,9 +603,12 @@ private:
 					return false;
 				}
 				const TArray<float>& EdgeDistances = Class == ESnowClass::Road ? Samples.RoadEdge : Samples.FootEdge;
-				if (FMath::Abs(Samples.Surface[Index] - Predict(Samples.Surface, Samples, X0, Y0, Size, X, Y)) > SnowSurfaceTolerance
-					|| FMath::Abs(Samples.Depth[Index] - Predict(Samples.Depth, Samples, X0, Y0, Size, X, Y)) > SnowDepthTolerance
-					|| FMath::Abs(EdgeDistances[Index] - Predict(EdgeDistances, Samples, X0, Y0, Size, X, Y)) > SnowEdgeTolerance)
+				const bool bEdgeMatters = Class != ESnowClass::Lawn;
+				// Lawn snow is 15 cm deep, so it can stray a few centimetres from a plane without exposing the ground.
+				const float ToleranceScale = Class == ESnowClass::Lawn ? 3.f : 1.f;
+				if (FMath::Abs(Samples.Surface[Index] - Predict(Samples.Surface, Samples, X0, Y0, Size, X, Y)) > SnowSurfaceTolerance * ToleranceScale
+					|| FMath::Abs(Samples.Depth[Index] - Predict(Samples.Depth, Samples, X0, Y0, Size, X, Y)) > SnowDepthTolerance * ToleranceScale
+					|| (bEdgeMatters && FMath::Abs(EdgeDistances[Index] - Predict(EdgeDistances, Samples, X0, Y0, Size, X, Y)) > SnowEdgeTolerance))
 				{
 					return false;
 				}
