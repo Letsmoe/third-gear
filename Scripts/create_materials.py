@@ -46,6 +46,29 @@ float above = saturate((h - 0.5) / 0.05);
 return float2(inner, saturate(outer - inner)) * above;
 """
 
+# Lit windows at night: about a third of the windows glow warm, each with its own colour and brightness, from the
+# same window grid as WINDOW_HLSL. Returns luminance in cd/m2 before the glass mask.
+LIT_WINDOW_HLSL = """
+float h = -UV.y;
+float spacing = lerp(2.6, 3.6, Variation);
+float2 cell = floor(float2(UV.x / spacing, h / FloorHeight));
+// Integer hash of the window cell and the building: a sin() hash amplifies the vertex colour's interpolation noise
+// into a different random number per pixel, which speckled every window.
+uint3 key = uint3(int2(cell) + 4096, uint(floor(Variation * 255.0 + 0.5)));
+uint hash = key.x * 73856093u ^ key.y * 19349663u ^ key.z * 83492791u;
+hash = (hash ^ (hash >> 13)) * 1274126177u;
+float r = float(hash & 65535u) / 65535.0;
+float r2 = float((hash >> 16) & 65535u) / 65535.0;
+float lit = step(r, 0.28) * Night * step(0.5, h);
+// Inside the pane: the ceiling lamp lights the top more than the sill, and some windows have half-drawn curtains.
+float2 pane = frac(float2(UV.x / spacing, h / FloorHeight));
+float vertical = saturate((pane.y - 0.32) / 0.48);
+float interior = lerp(0.55, 1.0, vertical);
+float curtain = step(r2, 0.5) * (1.0 - 0.6 * saturate((abs(pane.x - 0.5) - 0.08) / 0.04));
+float3 warm = lerp(float3(1.0, 0.6, 0.32), float3(1.0, 0.8, 0.6), frac(r2 * 7.13));
+return lit * warm * interior * lerp(1.0, 0.75, curtain) * lerp(0.8, 3.0, frac(r * 3.7 + r2));
+"""
+
 # Wet surfaces from the weather (/Game/World/MPC_Weather). Ground gets fully wet, walls only damp. Standing water
 # collects in a low-frequency noise mask on level ground once the wetness is high. x = wetness, y = puddle.
 WET_MASK_HLSL = """
@@ -207,6 +230,32 @@ def add_wetness(m, color, rough, normal):
     return wet_color, wet_rough, wet_normal
 
 
+def add_lit_windows(m, texcoord, vertex_color, glass_mask):
+    """Emissive glow in a share of the facade windows at night (instances with the Windows switch only)."""
+    collection = unreal.load_asset(WEATHER_COLLECTION) if eal.does_asset_exist(WEATHER_COLLECTION) else None
+    if collection is None:
+        return
+    night = expr(m, unreal.MaterialExpressionCollectionParameter, -1000, 1900, collection=collection,
+                 parameter_name="Night")
+    lit = expr(m, unreal.MaterialExpressionCustom, -800, 1900, code=LIT_WINDOW_HLSL,
+               output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3, description="LitWindows",
+               inputs=[custom_input("UV"), custom_input("Variation"), custom_input("FloorHeight"),
+                       custom_input("Night")])
+    link(texcoord, "", lit, "UV")
+    link(vertex_color, "G", lit, "Variation")
+    link(scalar(m, "FloorHeight", 3.0, -1000, 2000), "", lit, "FloorHeight")
+    link(night, "", lit, "Night")
+    glowing = expr(m, unreal.MaterialExpressionMultiply, -550, 1900)
+    link(lit, "", glowing, "A")
+    link(glass_mask, "", glowing, "B")
+    black = expr(m, unreal.MaterialExpressionConstant3Vector, -550, 2050, constant=unreal.LinearColor(0, 0, 0, 1))
+    switch = expr(m, unreal.MaterialExpressionStaticSwitchParameter, -300, 1900, parameter_name="Windows",
+                  default_value=False)
+    link(glowing, "", switch, "True")
+    link(black, "", switch, "False")
+    mel.connect_material_property(switch, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+
+
 def build_master():
     if eal.does_asset_exist(MASTER):
         m = unreal.load_asset(MASTER)
@@ -293,6 +342,7 @@ def build_master():
     out_rough = switch(rough_glass, rough_scaled, -150, 200)
     out_normal = switch(normal_windows, normal, -150, -100)
     out_color, out_rough, out_normal = add_wetness(m, out_color, out_rough, out_normal)
+    add_lit_windows(m, texcoord, vcol, glass_mask)
     mel.connect_material_property(out_color, "", unreal.MaterialProperty.MP_BASE_COLOR)
     mel.connect_material_property(out_rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
     mel.connect_material_property(out_normal, "", unreal.MaterialProperty.MP_NORMAL)

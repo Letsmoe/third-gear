@@ -121,6 +121,13 @@ private:
 	float SecondsUntilSample = 0.f;
 	double ElapsedSeconds = 0.0;
 	float BaseSunLux = 75000.f;
+	/** Fog colour the level was made with, before the night's sky glow is added. */
+	FLinearColor BaseFogInscattering = FLinearColor::Black;
+	/** Sun altitude this frame, degrees. */
+	float SunAltitudeDegrees = 45.f;
+
+	/** 0 by day, 1 once the sun is 6 degrees below the horizon (civil twilight over). */
+	float NightFactor() const;
 
 	/** Values from -WeatherOverride, by name; applied over every sample. */
 	TMap<FString, float> Overrides;

@@ -20,6 +20,7 @@ SCALARS = {
     "WindDirectionY": 0.0,  # Unreal Y south
     "CloudCover": 0.0,
     "Thunder": 0.0,         # nearest thunderstorm's activity
+    "Night": 0.0,           # 1 once the sun is 6 degrees below the horizon: lit windows, lamps
 }
 
 
