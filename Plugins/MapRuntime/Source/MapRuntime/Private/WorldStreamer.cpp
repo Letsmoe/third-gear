@@ -490,8 +490,8 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 	const double StepSeconds = FPlatformTime::Seconds() - StartTime;
 	if (StepSeconds > 0.008)
 	{
-		UE_LOG(LogWorldStreamer, Log, TEXT("Tile %s detail %d: step %d of %d took %.1f ms"), *FPaths::GetBaseFilename(Tile.Path), Build.Detail,
-			Step, ChunkSteps + PlantSteps + 5, StepSeconds * 1000.0);
+		UE_LOG(LogWorldStreamer, Log, TEXT("Tile %s detail %d: step %d of %d took %.1f ms (furniture part %d)"), *FPaths::GetBaseFilename(Tile.Path), Build.Detail,
+			Step, ChunkSteps + PlantSteps + 5, StepSeconds * 1000.0, Job.FurnitureStep - 1);
 	}
 	Job.SpawnSeconds += StepSeconds;
 	Job.LongestStepSeconds = FMath::Max(Job.LongestStepSeconds, StepSeconds);

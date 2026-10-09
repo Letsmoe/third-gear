@@ -33,7 +33,7 @@ SOLIDS = {
     "LampHousing": ((0.45, 0.47, 0.48), 0.45, 0.4),
 }
 
-NIGHT_LENS_HLSL = "return Tint * Intensity * lerp(7000.0, 60.0, saturate(Night));"
+NIGHT_LENS_HLSL = "return Tint * Intensity * lerp(7000.0, 25.0, saturate(Night));"
 LAMP_LENS_HLSL = "return Tint * Night * 2500.0;"
 # Retroreflective sheeting returns light toward its source: at night the car's headlight cone lights the face.
 SIGN_RETRO_HLSL = """
