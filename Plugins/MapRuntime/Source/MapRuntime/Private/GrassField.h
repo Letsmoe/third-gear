@@ -54,10 +54,23 @@ public:
 	void Clear();
 
 private:
+	/** Which land cover weight a kind grows on. */
+	enum class ESource : uint8
+	{
+		Lawn,
+		Meadow,
+		Seam,
+	};
+
 	/** One kind of grass: how dense, how far, how big, and which tuft meshes it draws from. */
 	struct FKind
 	{
 		FName Name;
+		ESource Source = ESource::Lawn;
+		/** Above 0: the kind only grows in patches (flowers), this share of the area; 0 = everywhere. */
+		float PatchShare = 0.f;
+		/** How strongly slow noise varies the height of the tufts (0 = even, 0.5 = by up to +-50 %). */
+		float Unevenness = 0.f;
 		float SpacingCm = 30.f;
 		float RadiusCm = 2000.f;
 		FVector2f ScaleXY = FVector2f(1.f, 1.f);
