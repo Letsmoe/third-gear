@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "ChunkedPolygons.h"
 #include "Geometry.h"
 #include "HeightGrid.h"
 #include "OsmData.h"
@@ -14,14 +15,14 @@
  */
 namespace WorldBuilder
 {
-/** The water bodies of a region, merged and each with its level, found by bounding box. */
+/** The water bodies of a region, merged, each with its level, cut into chunks. */
 struct FWaterBodies
 {
-	std::vector<FWaterBody> Bodies;
-	FSpatialIndex Index;
+	std::vector<double> Levels;
+	FChunkedPolygons Pieces;
 
-	/** The bodies whose bounds overlap the box. */
-	std::vector<const FWaterBody*> Near(const FBox& Box) const;
+	/** The parts of the bodies inside a window, each with its level. */
+	std::vector<FWaterBody> InWindow(const FBox& Window) const;
 };
 
 /**
@@ -44,11 +45,8 @@ public:
 				  FPolygons& Unpaved) const;
 
 private:
-	std::vector<FPolygons> Polygons;
-	std::vector<bool> IsPaved;
-	FSpatialIndex Index;
-
-	void Add(FPolygons Polygon, bool bPaved);
+	/** Owner 1 is paved, 0 unpaved. */
+	FChunkedPolygons Pieces;
 };
 
 /** A number from a tag value as paths.py's _float reads it ("2,5 m" is 2.5), or 0 when it isn't one. */

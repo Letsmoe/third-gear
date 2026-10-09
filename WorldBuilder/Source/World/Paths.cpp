@@ -1,5 +1,7 @@
 #include "Paths.h"
 
+#include "PolygonQuery.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -119,12 +121,13 @@ double WaterLevel(const FPolygons& Polygon, const FTerrainGrid& Terrain)
 	const FBox Bounds = BoundsOf(Inner);
 	const double Area = (Bounds.X1 - Bounds.X0) * (Bounds.Y1 - Bounds.Y0);
 	const double Spacing = std::max(LevelSampleSpacing, std::sqrt(Area / MaximumLevelSamples));
+	const FPolygonQuery InnerQuery(Inner);
 	std::vector<double> Heights;
 	for (double Y = Bounds.Y0; Y < Bounds.Y1; Y += Spacing)
 	{
 		for (double X = Bounds.X0; X < Bounds.X1; X += Spacing)
 		{
-			if (Contains(Inner, X, Y))
+			if (InnerQuery.Contains(X, Y))
 			{
 				Heights.push_back(Terrain.Sample(X, Y));
 			}
@@ -168,12 +171,12 @@ double TagNumber(const std::string* Value)
 	return Number;
 }
 
-std::vector<const FWaterBody*> FWaterBodies::Near(const FBox& Box) const
+std::vector<FWaterBody> FWaterBodies::InWindow(const FBox& Window) const
 {
-	std::vector<const FWaterBody*> Result;
-	for (const int Item : Index.Query(Box))
+	std::vector<FWaterBody> Result;
+	for (auto& [Owner, Polygon] : Pieces.InWindow(Window))
 	{
-		Result.push_back(&Bodies[Item]);
+		Result.push_back({std::move(Polygon), Levels[Owner]});
 	}
 	return Result;
 }
@@ -217,13 +220,9 @@ FWaterBodies BuildWaterBodies(const FOsmData& Osm, const FTerrainGrid& Terrain, 
 		{
 			continue;
 		}
-		FWaterBody& Body = Result.Bodies.emplace_back();
-		Body.Polygon = ToPaths({Polygon});
-		Body.Level = WaterLevel(Body.Polygon, Terrain);
-	}
-	for (size_t Item = 0; Item < Result.Bodies.size(); ++Item)
-	{
-		Result.Index.Insert(BoundsOf(Result.Bodies[Item].Polygon), static_cast<int>(Item));
+		const FPolygons Paths = ToPaths({Polygon});
+		Result.Pieces.Add(static_cast<int>(Result.Levels.size()), Paths);
+		Result.Levels.push_back(WaterLevel(Paths, Terrain));
 	}
 	return Result;
 }
@@ -249,7 +248,7 @@ FPathSurfaces::FPathSurfaces(const FOsmData& Osm)
 		const std::string* Surface = FindTag(Tags, "surface");
 		const bool bPaved = Surface != nullptr ? PavedSurfaces.count(*Surface) > 0
 											   : TagIn(Tags, "highway", {"pedestrian", "footway", "cycleway"});
-		Add(BufferPolyline(Way.Points, Width / 2.0, ECapStyle::Round, 3), bPaved);
+		Pieces.Add(bPaved ? 1 : 0, BufferPolyline(Way.Points, Width / 2.0, ECapStyle::Round, 3));
 	}
 	for (const FOsmArea& Area : Osm.Areas)
 	{
@@ -261,15 +260,8 @@ FPathSurfaces::FPathSurfaces(const FOsmData& Osm)
 			continue;
 		}
 		const std::string* Surface = FindTag(Tags, "surface");
-		Add(AreaPaths(Area), Surface == nullptr || PavedSurfaces.count(*Surface) > 0);
+		Pieces.Add(Surface == nullptr || PavedSurfaces.count(*Surface) > 0 ? 1 : 0, AreaPaths(Area));
 	}
-}
-
-void FPathSurfaces::Add(FPolygons Polygon, bool bPaved)
-{
-	Index.Insert(BoundsOf(Polygon), static_cast<int>(Polygons.size()));
-	Polygons.push_back(std::move(Polygon));
-	IsPaved.push_back(bPaved);
 }
 
 void FPathSurfaces::InWindow(const FBox& Window, const FPolygons& Blocked, const FPolygons& Water, FPolygons& Paved,
@@ -277,14 +269,12 @@ void FPathSurfaces::InWindow(const FBox& Window, const FPolygons& Blocked, const
 {
 	FPolygons PavedPieces;
 	FPolygons UnpavedPieces;
-	for (const int Item : Index.Query(Window))
+	for (auto& [Owner, Polygon] : Pieces.InWindow(Window))
 	{
-		const FPolygons Clipped = ClipToBox(Polygons[Item], Window);
-		FPolygons& Target = IsPaved[Item] ? PavedPieces : UnpavedPieces;
-		Target.insert(Target.end(), Clipped.begin(), Clipped.end());
+		(Owner == 1 ? PavedPieces : UnpavedPieces) = std::move(Polygon);
 	}
-	const FPolygons PavedArea = Difference(UnionOf(PavedPieces), Blocked);
-	const FPolygons UnpavedArea = Difference(Difference(UnionOf(UnpavedPieces), Blocked), PavedArea);
+	const FPolygons PavedArea = Difference(PavedPieces, Blocked);
+	const FPolygons UnpavedArea = Difference(Difference(UnpavedPieces, Blocked), PavedArea);
 	Paved = Difference(PavedArea, Water);
 	Unpaved = Difference(UnpavedArea, Water);
 }

@@ -69,6 +69,10 @@ void CarveWaterBed(const FHeightGrid& Terrain, const FWaterBody& Body, std::vect
 FHeightGrid RoadHeightField(const FHeightGrid& Terrain, const FPolygons& RoadGround)
 {
 	const FMask Mask = RasterizePolygons(FrameOf(Terrain), RoadGround, false);
+	if (std::find(Mask.begin(), Mask.end(), 1) == Mask.end())
+	{
+		return Terrain;
+	}
 	const size_t CellCount = Mask.size();
 	std::vector<double> Weight(Mask.begin(), Mask.end());
 	std::vector<double> Smooth(CellCount);
@@ -104,14 +108,14 @@ FHeightGrid RoadHeightField(const FHeightGrid& Terrain, const FPolygons& RoadGro
 }
 
 FHeightGrid ConformTerrain(const FHeightGrid& Terrain, const FHeightGrid& RoadHeight, const FPolygons& RoadGround,
-						   const FPolygons& Pavement, const std::vector<const FWaterBody*>& Water)
+						   const FPolygons& Pavement, const std::vector<FWaterBody>& Water)
 {
 	const size_t CellCount = Terrain.Heights.size();
 	std::vector<double> Natural(Terrain.Heights.begin(), Terrain.Heights.end());
 	GaussianFilter(Natural, Terrain.Columns, Terrain.Rows, NaturalSmoothing);
-	for (const FWaterBody* Body : Water)
+	for (const FWaterBody& Body : Water)
 	{
-		CarveWaterBed(Terrain, *Body, Natural);
+		CarveWaterBed(Terrain, Body, Natural);
 	}
 
 	const FMask RoadMask = RasterizePolygons(FrameOf(Terrain), RoadGround, true);

@@ -3,9 +3,9 @@
 #include <optional>
 #include <vector>
 
+#include "ChunkedPolygons.h"
 #include "OsmData.h"
 #include "Raster.h"
-#include "SpatialIndex.h"
 
 /**
  * Ground cover per terrain vertex from OSM land use, as Tools/osmimport/osmimport/landcover.py: blend weights for
@@ -36,11 +36,7 @@ public:
 							   double BlurMetres = 3.0) const;
 
 private:
-	struct FClassPolygons
-	{
-		std::vector<FPolygons> Polygons;
-		FSpatialIndex Index;
-	};
-	FClassPolygons Classes[3];
+	/** Each class's areas, in chunks. */
+	FChunkedPolygons Classes[3];
 };
 }

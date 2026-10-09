@@ -39,6 +39,38 @@ constexpr float PathLift = 0.04f;
 
 const auto BuildStart = std::chrono::steady_clock::now();
 
+/** The stages of a tile, for the time spent in each, summed over all tiles and threads. */
+enum ETileStage
+{
+	StageTerrain,
+	StageObstacles,
+	StagePaths,
+	StageConform,
+	StageGrid,
+	StageSurfaces,
+	StageVegetation,
+	StageWrite,
+	StageCount,
+};
+const char* const StageNames[StageCount] = {"terrain window", "water and buildings", "paths", "conform", "grid",
+											"surfaces", "vegetation", "write"};
+std::atomic<int64_t> StageNanoseconds[StageCount];
+
+/** Measures from its creation to Next, adding the time to a stage. */
+class FStageClock
+{
+public:
+	void Next(ETileStage Stage)
+	{
+		const auto Now = std::chrono::steady_clock::now();
+		StageNanoseconds[Stage] += std::chrono::duration_cast<std::chrono::nanoseconds>(Now - Last).count();
+		Last = Now;
+	}
+
+private:
+	std::chrono::steady_clock::time_point Last = std::chrono::steady_clock::now();
+};
+
 /** Prints a message with the seconds since the build started. */
 void Log(const std::string& Message)
 {
@@ -94,14 +126,13 @@ struct FRegionInputs
 	const FVegetationSources* Vegetation = nullptr;
 };
 
-/** The union of the water bodies near a window, clipped to it. */
-FPolygons WaterInWindow(const std::vector<const FWaterBody*>& Bodies, const FBox& Window)
+/** The union of the water in a window. */
+FPolygons WaterInWindow(const std::vector<FWaterBody>& Bodies)
 {
 	FPolygons Pieces;
-	for (const FWaterBody* Body : Bodies)
+	for (const FWaterBody& Body : Bodies)
 	{
-		const FPolygons Clipped = ClipToBox(Body->Polygon, Window);
-		Pieces.insert(Pieces.end(), Clipped.begin(), Clipped.end());
+		Pieces.insert(Pieces.end(), Body.Polygon.begin(), Body.Polygon.end());
 	}
 	return UnionOf(Pieces);
 }
@@ -171,27 +202,34 @@ void BuildTile(const FTileBounds& Tile, const FRegionInputs& Inputs, const std::
 {
 	const FBox Box{Tile.X0, Tile.Y0, Tile.X1, Tile.Y1};
 	const FBox Window{Box.X0 - TileMargin, Box.Y0 - TileMargin, Box.X1 + TileMargin, Box.Y1 + TileMargin};
+	FStageClock Clock;
 	const FHeightGrid Terrain = Inputs.Terrain->FineWindow(Window.X0, Window.Y0, Window.X1, Window.Y1);
+	Clock.Next(StageTerrain);
 	// Roads and pavements come with the street model; until then they are empty.
 	const FPolygons RoadGround;
 	const FPolygons Pavement;
-	const std::vector<const FWaterBody*> Water = Inputs.Water->Near(Window);
-	const FPolygons WaterArea = WaterInWindow(Water, Window);
+	const std::vector<FWaterBody> Water = Inputs.Water->InWindow(Window);
+	const FPolygons WaterArea = WaterInWindow(Water);
 	const FPolygons Buildings = Inputs.Buildings->InWindow(Window);
+	Clock.Next(StageObstacles);
 	FPolygons Paved;
 	FPolygons Unpaved;
 	Inputs.Paths->InWindow(Window, Combined({&RoadGround, &Pavement, &Buildings}), WaterArea, Paved, Unpaved);
+	Clock.Next(StagePaths);
 
 	const FHeightGrid RoadHeight = RoadHeightField(Terrain, RoadGround);
 	const FHeightGrid Ground = ConformTerrain(Terrain, RoadHeight, RoadGround, Pavement, Water);
+	Clock.Next(StageConform);
 	FTileWriter Writer(Box);
 	WriteGrid(Writer, Ground, RoadHeight, *Inputs.Cover);
+	Clock.Next(StageGrid);
 	Writer.AddSurface("Path_Paved", Paved, EHeightMode::Terrain, {PathLift});
 	Writer.AddSurface("Path_Gravel", Unpaved, EHeightMode::Terrain, {PathLift});
-	for (const FWaterBody* Body : Water)
+	for (const FWaterBody& Body : Water)
 	{
-		Writer.AddSurface("Water", Body->Polygon, EHeightMode::Constant, {static_cast<float>(Body->Level)});
+		Writer.AddSurface("Water", Body.Polygon, EHeightMode::Constant, {static_cast<float>(Body.Level)});
 	}
+	Clock.Next(StageSurfaces);
 
 	const double Reach = FVegetationSources::WindowMargin();
 	FVegetationObstacles Obstacles;
@@ -202,8 +240,24 @@ void BuildTile(const FTileBounds& Tile, const FRegionInputs& Inputs, const std::
 	Obstacles.Water = WaterArea;
 	Obstacles.Paths = Combined({&Paved, &Unpaved});
 	WritePlants(Writer, Inputs.Vegetation->PlantsInTile(Box, Inputs.Extent, Obstacles), Ground);
+	Clock.Next(StageVegetation);
 	const std::string Name = "tile_" + std::to_string(Tile.IndexX) + "_" + std::to_string(Tile.IndexY) + ".tgtile";
 	Writer.Write((OutputDirectory / Name).string());
+	Clock.Next(StageWrite);
+}
+
+/** Prints the time each tile stage took, summed over all tiles (CPU seconds across the threads). */
+void LogStageTimes()
+{
+	std::string Line = "tile stages (CPU s):";
+	char Buffer[64];
+	for (int Stage = 0; Stage < StageCount; ++Stage)
+	{
+		std::snprintf(Buffer, sizeof(Buffer), " %s %.1f,", StageNames[Stage], StageNanoseconds[Stage].load() / 1e9);
+		Line += Buffer;
+	}
+	Line.pop_back();
+	Log(Line);
 }
 
 /** Runs the tiles on worker threads, each taking the next tile until none is left. */
@@ -286,7 +340,7 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 							 Region.YMax + TerrainMargin};
 	const FWaterBodies Water = BuildWaterBodies(Inputs.Osm, Terrain, TerrainExtent);
 	Inputs.Water = &Water;
-	Log(std::to_string(Water.Bodies.size()) + " water bodies");
+	Log(std::to_string(Water.Levels.size()) + " water bodies");
 	const FPathSurfaces Paths(Inputs.Osm);
 	Inputs.Paths = &Paths;
 	const FBuildingFootprints Buildings(Inputs.Osm.Buildings);
@@ -298,6 +352,7 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	const std::vector<FTileBounds> Tiles = Region.Tiles();
 	const unsigned Threads = Options.Threads > 0 ? Options.Threads : std::max(1u, std::thread::hardware_concurrency());
 	BuildTiles(Tiles, Inputs, OutputDirectory, Threads);
+	LogStageTimes();
 	WriteWorldJson(Region, Tiles, OutputDirectory / "world.json");
 	Log("wrote " + std::to_string(Tiles.size()) + " tiles to " + OutputDirectory.string() + " on "
 		+ std::to_string(Threads) + " threads");

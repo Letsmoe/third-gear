@@ -12,7 +12,7 @@
 
 #include "Paths.h"
 #include "Projection.h"
-#include "Raster.h"
+#include "PolygonQuery.h"
 
 namespace WorldBuilder
 {
@@ -48,8 +48,10 @@ constexpr double HardClearance = 1.5;
 constexpr double PathClearance = 0.8;
 /** The understorey band along a wood's edge, metres. */
 constexpr double WoodEdgeWidth = 6.0;
-/** Cell size of the obstacle masks, metres. */
-constexpr double MaskCell = 0.5;
+/** Facade distances beyond this make no difference to a crown, metres. */
+constexpr double FacadeSearchLimit = 20.0;
+/** How far the nearest road or building edge is looked for when a register tree is moved off it. */
+constexpr double OutlineSearchLimit = 50.0;
 /** Plants interact over a crown radius plus gaps; the tile's window reaches this far beyond it. */
 constexpr double PlantingMargin = 16.0;
 
@@ -188,81 +190,6 @@ FBox BoxAround(const FPolyline& Line)
 	return Box;
 }
 
-/** A mask of a window's cells and, on demand, the distance from each cell to the nearest marked one. */
-class FObstacleLayer
-{
-public:
-	FObstacleLayer(const FGridFrame& InFrame, FMask InMask) : Frame(InFrame), Mask(std::move(InMask)) {}
-
-	bool Contains(double X, double Y) const
-	{
-		const int64_t Cell = CellAt(X, Y);
-		return Cell >= 0 && Mask[Cell] != 0;
-	}
-
-	/** Distance from a point's cell to the nearest marked cell (0 inside, a large value without any). */
-	double Distance(double X, double Y) const
-	{
-		const int64_t Cell = CellAt(X, Y);
-		if (Cell < 0)
-		{
-			return 1e9;
-		}
-		const FDistanceField& Field = DistanceField();
-		return std::isfinite(Field.Distance[Cell]) ? Field.Distance[Cell] : 1e9;
-	}
-
-	/** The centre of the marked cell nearest to a point, or nothing when there is none. */
-	std::optional<FWorldPoint> Nearest(double X, double Y) const
-	{
-		const int64_t Cell = CellAt(X, Y);
-		if (Cell < 0 || DistanceField().Nearest[Cell] < 0)
-		{
-			return std::nullopt;
-		}
-		const int64_t Target = DistanceField().Nearest[Cell];
-		return FWorldPoint{Frame.X0 + (Target % Frame.Columns + 0.5) * Frame.CellSize,
-						   Frame.Y0 + (Target / Frame.Columns + 0.5) * Frame.CellSize};
-	}
-
-	const FMask& Cells() const { return Mask; }
-
-	int64_t CellAt(double X, double Y) const
-	{
-		const int Column = static_cast<int>(std::floor((X - Frame.X0) / Frame.CellSize));
-		const int Row = static_cast<int>(std::floor((Y - Frame.Y0) / Frame.CellSize));
-		if (Column < 0 || Row < 0 || Column >= Frame.Columns || Row >= Frame.Rows)
-		{
-			return -1;
-		}
-		return static_cast<int64_t>(Row) * Frame.Columns + Column;
-	}
-
-private:
-	FGridFrame Frame;
-	FMask Mask;
-	mutable std::unique_ptr<FDistanceField> CachedField;
-
-	const FDistanceField& DistanceField() const
-	{
-		if (!CachedField)
-		{
-			CachedField = std::make_unique<FDistanceField>(DistanceToFeatures(Mask, Frame.Columns, Frame.Rows, Frame.CellSize));
-		}
-		return *CachedField;
-	}
-};
-
-FMask Inverted(const FMask& Mask)
-{
-	FMask Result(Mask.size());
-	for (size_t Index = 0; Index < Mask.size(); ++Index)
-	{
-		Result[Index] = Mask[Index] ? 0 : 1;
-	}
-	return Result;
-}
-
 /** Rejects new plants too close to existing ones, and trunks under existing crowns (a grid hash). */
 class FOccupancy
 {
@@ -336,20 +263,14 @@ private:
 	}
 };
 
-/** The placement of one tile: its obstacle layers, occupancy and the plants placed so far. */
+/** The placement of one tile: what plants avoid, the occupancy and the plants placed so far. */
 class FPlanting
 {
 public:
 	FPlanting(const FVegetationSources& InSources, const FBox& InWindow, const FBox& InExtent,
 			  const FVegetationObstacles& Obstacles)
-		: Sources(InSources), Window(InWindow), Extent(InExtent), Frame(MakeFrame(InWindow)),
-		  Road(Frame, RasterizePolygons(Frame, Obstacles.RoadGround, false)),
-		  Pavement(Frame, RasterizePolygons(Frame, Obstacles.Pavement, false)),
-		  Buildings(Frame, RasterizePolygons(Frame, Obstacles.Buildings, false)),
-		  OutsideBuildings(Frame, Inverted(Buildings.Cells())), OffRoad(Frame, Inverted(Road.Cells())),
-		  Water(Frame, RasterizePolygons(Frame, Obstacles.Water, false)),
-		  Hard(Frame, Combined({&Road.Cells(), &Pavement.Cells(), &Buildings.Cells(), &Water.Cells()})),
-		  PathLayer(Frame, RasterizePolygons(Frame, Obstacles.Paths, false))
+		: Sources(InSources), Window(InWindow), Extent(InExtent), Road(Obstacles.RoadGround),
+		  Pavement(Obstacles.Pavement), Buildings(Obstacles.Buildings), Water(Obstacles.Water), PathArea(Obstacles.Paths)
 	{
 	}
 
@@ -361,60 +282,62 @@ public:
 	void PlaceAreas();
 
 private:
+	/** What a scatter places: wood trees, the understorey at a wood's edge, scrub or park trees. */
+	enum class EScatter
+	{
+		Wood,
+		WoodEdge,
+		Scrub,
+		Park,
+	};
+
 	const FVegetationSources& Sources;
 	FBox Window;
 	FBox Extent;
-	FGridFrame Frame;
-	FObstacleLayer Road;
-	FObstacleLayer Pavement;
-	FObstacleLayer Buildings;
-	FObstacleLayer OutsideBuildings;
-	FObstacleLayer OffRoad;
-	FObstacleLayer Water;
-	FObstacleLayer Hard;
-	FObstacleLayer PathLayer;
+	FPolygonQuery Road;
+	FPolygonQuery Pavement;
+	FPolygonQuery Buildings;
+	FPolygonQuery Water;
+	FPolygonQuery PathArea;
 	FOccupancy Occupancy;
 
-	static FGridFrame MakeFrame(const FBox& Box)
-	{
-		FGridFrame Result;
-		Result.CellSize = MaskCell;
-		Result.X0 = Box.X0;
-		Result.Y0 = Box.Y0;
-		Result.Columns = static_cast<int>(std::ceil((Box.X1 - Box.X0) / MaskCell));
-		Result.Rows = static_cast<int>(std::ceil((Box.Y1 - Box.Y0) / MaskCell));
-		return Result;
-	}
-
-	static FMask Combined(std::initializer_list<const FMask*> Masks)
-	{
-		FMask Result(Masks.begin()[0]->size(), 0);
-		for (const FMask* Mask : Masks)
-		{
-			for (size_t Index = 0; Index < Result.size(); ++Index)
-			{
-				Result[Index] |= (*Mask)[Index];
-			}
-		}
-		return Result;
-	}
-
 	bool InWindow(double X, double Y) const { return Window.X0 <= X && X < Window.X1 && Window.Y0 <= Y && Y < Window.Y1; }
+
+	/** Distance to roads, pavements, buildings and water (0 inside), at most Limit. */
+	double HardDistance(double X, double Y, double Limit) const
+	{
+		double Distance = Limit;
+		for (const FPolygonQuery* Layer : {&Road, &Pavement, &Buildings, &Water})
+		{
+			Distance = std::min(Distance, Layer->Distance(X, Y, Distance));
+		}
+		return Distance;
+	}
+
+	bool InHard(double X, double Y) const { return HardDistance(X, Y, 1e-9) <= 0.0; }
 
 	/** Where procedural plants may not go: near hard surfaces or paths. */
 	bool Blocked(double X, double Y) const
 	{
-		return Hard.Distance(X, Y) < HardClearance || PathLayer.Distance(X, Y) < PathClearance;
+		return HardDistance(X, Y, HardClearance) < HardClearance || PathArea.Distance(X, Y, PathClearance) < PathClearance;
 	}
 
-	double FacadeDistance(double X, double Y) const { return Buildings.Distance(X, Y); }
+	/** How far a free point is from the blocked area around hard surfaces and paths, at most Limit. */
+	double DistanceToBlocked(double X, double Y, double Limit) const
+	{
+		const double FromHard = HardDistance(X, Y, Limit + HardClearance) - HardClearance;
+		const double FromPaths = PathArea.Distance(X, Y, Limit + PathClearance) - PathClearance;
+		return std::max(0.0, std::min({Limit, FromHard, FromPaths}));
+	}
+
+	double FacadeDistance(double X, double Y) const { return Buildings.Distance(X, Y, FacadeSearchLimit); }
 
 	/** vegetation.py's add: the placement rules every plant goes through. */
 	bool Add(const char* Model, double X, double Y, double Crown, double Height, double Trunk, const char* Source,
 			 double MinimumGap)
 	{
 		const bool bInExtent = Extent.X0 <= X && X < Extent.X1 && Extent.Y0 <= Y && Y < Extent.Y1;
-		if (!bInExtent || !InWindow(X, Y) || Pavement.Distance(X, Y) < PavementTrunkClearance)
+		if (!bInExtent || !InWindow(X, Y) || Pavement.Distance(X, Y, PavementTrunkClearance) < PavementTrunkClearance)
 		{
 			return false;
 		}
@@ -470,7 +393,7 @@ private:
 		const double OriginalY = Y;
 		if (Road.Contains(X, Y))
 		{
-			if (const std::optional<FWorldPoint> Edge = OffRoad.Nearest(X, Y))
+			if (const std::optional<FWorldPoint> Edge = Road.NearestOutlinePoint(X, Y, OutlineSearchLimit))
 			{
 				const FWorldPoint Moved = MovedBeyond(*Edge, {X, Y}, KeepOffRoad, true);
 				X = Moved.X;
@@ -482,14 +405,12 @@ private:
 			return {X, Y};
 		}
 		// As vegetation.py, measured from the register position.
-		const bool bInside = Buildings.Contains(OriginalX, OriginalY);
-		const std::optional<FWorldPoint> Edge = bInside ? OutsideBuildings.Nearest(OriginalX, OriginalY)
-														: Buildings.Nearest(OriginalX, OriginalY);
+		const std::optional<FWorldPoint> Edge = Buildings.NearestOutlinePoint(OriginalX, OriginalY, OutlineSearchLimit);
 		if (!Edge)
 		{
 			return {X, Y};
 		}
-		return MovedBeyond(*Edge, {OriginalX, OriginalY}, BuildingTrunkClearance, bInside);
+		return MovedBeyond(*Edge, {OriginalX, OriginalY}, BuildingTrunkClearance, Buildings.Contains(OriginalX, OriginalY));
 	}
 
 	/** A point Distance from an edge point, away from (or, with bTowards, past it from) the reference point. */
@@ -507,17 +428,9 @@ private:
 		return {Edge.X + DirectionX * Distance, Edge.Y + DirectionY * Distance};
 	}
 
-	/** What a scatter places: wood trees, the understorey at a wood's edge, scrub or park trees. */
-	enum class EScatter
-	{
-		Wood,
-		WoodEdge,
-		Scrub,
-		Park,
-	};
-
-	void PlaceInArea(int AreaIndex);
-	void Scatter(EScatter Kind, const FMask& Allowed, double Spacing, double Keep, uint64_t Seed, const std::string& Leaf);
+	void PlaceInArea(int AreaIndex, const FPolygons& Clipped);
+	void Scatter(EScatter Kind, const FPolygonQuery& Area, const FBox& Bounds, double Spacing, double Keep, uint64_t Seed,
+				 const std::string& Leaf);
 	void PlaceScattered(EScatter Kind, double X, double Y, FRandom& Random, const std::string& Leaf);
 };
 
@@ -579,7 +492,7 @@ void FPlanting::PlaceTreeRowsAndHedges()
 		{
 			const double Height = TaggedHeight != 0.0 ? TaggedHeight : Random.Uniform(1.4, 2.2);
 			const double Crown = Random.Uniform(1.6, 2.2);
-			if (!Hard.Contains(Point.X, Point.Y))
+			if (!InHard(Point.X, Point.Y))
 			{
 				Add("shrub", Point.X, Point.Y, Crown, Height, 0.0, "hedge", 0.9);
 			}
@@ -589,83 +502,54 @@ void FPlanting::PlaceTreeRowsAndHedges()
 
 void FPlanting::PlaceAreas()
 {
-	for (const int Item : Sources.AreaIndex().Query(Window))
+	for (const auto& [AreaIndex, Polygon] : Sources.PlantedAreas().InWindow(Window))
 	{
-		PlaceInArea(Item);
+		PlaceInArea(AreaIndex, Polygon);
 	}
 }
 
-void FPlanting::PlaceInArea(int AreaIndex)
+void FPlanting::PlaceInArea(int AreaIndex, const FPolygons& Clipped)
 {
-	// The area's free cells: inside it and clear of everything plants avoid, on the part of the window it covers.
-	const FPolygons Clipped = ClipToBox(Sources.AreaPolygons()[AreaIndex], Window);
 	if (Clipped.empty())
 	{
 		return;
 	}
-	const FMask Inside = RasterizePolygons(Frame, Clipped, false);
-	FMask Free(Inside.size(), 0);
-	bool bAnyFree = false;
-	for (int Row = 0; Row < Frame.Rows; ++Row)
-	{
-		for (int Column = 0; Column < Frame.Columns; ++Column)
-		{
-			const size_t Cell = static_cast<size_t>(Row) * Frame.Columns + Column;
-			if (!Inside[Cell])
-			{
-				continue;
-			}
-			const double X = Frame.X0 + (Column + 0.5) * MaskCell;
-			const double Y = Frame.Y0 + (Row + 0.5) * MaskCell;
-			Free[Cell] = Blocked(X, Y) ? 0 : 1;
-			bAnyFree = bAnyFree || Free[Cell];
-		}
-	}
-	if (!bAnyFree)
-	{
-		return;
-	}
-	const FOsmArea& Area = Sources.Osm().Areas[Sources.AreaOsmIndices()[AreaIndex]];
-	const std::string* Landuse = FindTag(Area.Tags, "landuse");
-	const std::string* Natural = FindTag(Area.Tags, "natural");
-	const std::string* Leisure = FindTag(Area.Tags, "leisure");
+	const FPolygonQuery Area(Clipped);
+	const FBox Bounds = BoundsOf(Clipped);
+	const FOsmArea& Osm = Sources.Osm().Areas[AreaIndex];
+	const std::string* Landuse = FindTag(Osm.Tags, "landuse");
+	const std::string* Natural = FindTag(Osm.Tags, "natural");
+	const std::string* Leisure = FindTag(Osm.Tags, "leisure");
 	const bool bWood = (Landuse != nullptr && *Landuse == "forest") || (Natural != nullptr && *Natural == "wood");
-	const uint64_t AreaId = static_cast<uint64_t>(Area.Id) * 2 + (Area.bFromRelation ? 1 : 0);
-	const std::string* LeafTag = FindTag(Area.Tags, "leaf_type");
+	const uint64_t AreaId = static_cast<uint64_t>(Osm.Id) * 2 + (Osm.bFromRelation ? 1 : 0);
+	const std::string* LeafTag = FindTag(Osm.Tags, "leaf_type");
 	const std::string Leaf = LeafTag != nullptr ? *LeafTag : "mixed";
 	if (bWood)
 	{
-		Scatter(EScatter::Wood, Free, 6.5, 1.0, Mix2(SeedWood, AreaId), Leaf);
-		// The understorey along the wood's edge: free cells within the band of the free area's border.
-		const FDistanceField FromBorder = DistanceToFeatures(Inverted(Free), Frame.Columns, Frame.Rows, MaskCell);
-		FMask Edge(Free.size(), 0);
-		for (size_t Cell = 0; Cell < Free.size(); ++Cell)
-		{
-			Edge[Cell] = Free[Cell] && FromBorder.Distance[Cell] <= WoodEdgeWidth ? 1 : 0;
-		}
-		Scatter(EScatter::WoodEdge, Edge, 3.5, 0.6, Mix2(SeedWoodEdge, AreaId), Leaf);
+		Scatter(EScatter::Wood, Area, Bounds, 6.5, 1.0, Mix2(SeedWood, AreaId), Leaf);
+		Scatter(EScatter::WoodEdge, Area, Bounds, 3.5, 0.6, Mix2(SeedWoodEdge, AreaId), Leaf);
 		return;
 	}
 	if (Natural != nullptr && *Natural == "scrub")
 	{
-		Scatter(EScatter::Scrub, Free, 3.0, 0.7, Mix2(SeedScrub, AreaId), Leaf);
+		Scatter(EScatter::Scrub, Area, Bounds, 3.0, 0.7, Mix2(SeedScrub, AreaId), Leaf);
 		return;
 	}
 	const bool bPark = (Leisure != nullptr && *Leisure == "park")
 		|| (Landuse != nullptr && (*Landuse == "cemetery" || *Landuse == "village_green"));
 	if (bPark)
 	{
-		Scatter(EScatter::Park, Free, 16.0, 0.45, Mix2(SeedPark, AreaId), Leaf);
+		Scatter(EScatter::Park, Area, Bounds, 16.0, 0.45, Mix2(SeedPark, AreaId), Leaf);
 	}
 }
 
-void FPlanting::Scatter(EScatter Kind, const FMask& Allowed, double Spacing, double Keep, uint64_t Seed,
-						const std::string& Leaf)
+void FPlanting::Scatter(EScatter Kind, const FPolygonQuery& Area, const FBox& Bounds, double Spacing, double Keep,
+						uint64_t Seed, const std::string& Leaf)
 {
-	const int64_t FirstColumn = static_cast<int64_t>(std::floor(Window.X0 / Spacing)) - 1;
-	const int64_t LastColumn = static_cast<int64_t>(std::floor(Window.X1 / Spacing)) + 1;
-	const int64_t FirstRow = static_cast<int64_t>(std::floor(Window.Y0 / Spacing)) - 1;
-	const int64_t LastRow = static_cast<int64_t>(std::floor(Window.Y1 / Spacing)) + 1;
+	const int64_t FirstColumn = static_cast<int64_t>(std::floor(Bounds.X0 / Spacing)) - 1;
+	const int64_t LastColumn = static_cast<int64_t>(std::floor(Bounds.X1 / Spacing)) + 1;
+	const int64_t FirstRow = static_cast<int64_t>(std::floor(Bounds.Y0 / Spacing)) - 1;
+	const int64_t LastRow = static_cast<int64_t>(std::floor(Bounds.Y1 / Spacing)) + 1;
 	for (int64_t Row = FirstRow; Row <= LastRow; ++Row)
 	{
 		for (int64_t Column = FirstColumn; Column <= LastColumn; ++Column)
@@ -678,8 +562,14 @@ void FPlanting::Scatter(EScatter Kind, const FMask& Allowed, double Spacing, dou
 			{
 				continue;
 			}
-			const int64_t Cell = Road.CellAt(X, Y);
-			if (Cell < 0 || !Allowed[Cell])
+			// Free: inside the area and clear of everything plants avoid.
+			if (!InWindow(X, Y) || !Area.Contains(X, Y) || Blocked(X, Y))
+			{
+				continue;
+			}
+			// The understorey grows in the band along the free area's border.
+			if (Kind == EScatter::WoodEdge
+				&& std::min(Area.DistanceToOutline(X, Y, WoodEdgeWidth), DistanceToBlocked(X, Y, WoodEdgeWidth)) >= WoodEdgeWidth)
 			{
 				continue;
 			}
@@ -794,10 +684,7 @@ FVegetationSources::FVegetationSources(const FOsmData& Osm, std::vector<FStreetT
 		{
 			Polygons.push_back({Polygon.Rings});
 		}
-		FPolygons Paths = Clipper2Lib::Union(ToPaths(Polygons), Clipper2Lib::FillRule::EvenOdd, 4);
-		PlantedAreaIndex.Insert(BoundsOf(Paths), static_cast<int>(PlantedAreas.size()));
-		PlantedAreas.push_back(std::move(Paths));
-		PlantedAreaOsm.push_back(static_cast<int>(Item));
+		PlantedAreaPieces.Add(static_cast<int>(Item), Clipper2Lib::Union(ToPaths(Polygons), Clipper2Lib::FillRule::EvenOdd, 4));
 	}
 }
 

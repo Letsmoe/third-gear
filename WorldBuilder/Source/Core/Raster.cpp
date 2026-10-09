@@ -8,36 +8,70 @@ namespace WorldBuilder
 {
 namespace
 {
-/** The x coordinates where the polygons' edges cross a horizontal line, sorted, for even-odd filling. */
-std::vector<double> RowCrossings(const FPolygons& Polygons, double Y)
+/** A polygon edge that crosses some row centres: its lower end, its slope, and the rows whose centres it crosses. */
+struct FScanEdge
 {
-	std::vector<double> Crossings;
+	double StartX;
+	double StartY;
+	double InverseSlope;
+	int FirstRow;
+	int LastRow;
+};
+
+/** The edges of the polygons bucketed by the first row centre they cross (half-open in y, as even-odd needs). */
+std::vector<std::vector<FScanEdge>> EdgeTable(const FGridFrame& Frame, const FPolygons& Polygons)
+{
+	std::vector<std::vector<FScanEdge>> Table(Frame.Rows);
 	for (const Clipper2Lib::PathD& Ring : Polygons)
 	{
 		const size_t Count = Ring.size();
 		for (size_t Index = 0; Index < Count; ++Index)
 		{
-			const Clipper2Lib::PointD& Start = Ring[Index];
-			const Clipper2Lib::PointD& End = Ring[(Index + 1) % Count];
-			// Half-open in y, so a vertex exactly on the line is counted once.
-			if ((Start.y <= Y) == (End.y <= Y))
+			Clipper2Lib::PointD Low = Ring[Index];
+			Clipper2Lib::PointD High = Ring[(Index + 1) % Count];
+			if (Low.y == High.y)
 			{
 				continue;
 			}
-			Crossings.push_back(Start.x + (Y - Start.y) / (End.y - Start.y) * (End.x - Start.x));
+			if (Low.y > High.y)
+			{
+				std::swap(Low, High);
+			}
+			// Rows whose centre y lies in [Low.y, High.y).
+			const int FirstRow = std::max(0, static_cast<int>(std::ceil((Low.y - Frame.Y0) / Frame.CellSize - 0.5)));
+			const int LastRow = std::min(Frame.Rows - 1, static_cast<int>(std::ceil((High.y - Frame.Y0) / Frame.CellSize - 0.5)) - 1);
+			if (FirstRow > LastRow)
+			{
+				continue;
+			}
+			Table[FirstRow].push_back({Low.x, Low.y, (High.x - Low.x) / (High.y - Low.y), FirstRow, LastRow});
 		}
 	}
-	std::sort(Crossings.begin(), Crossings.end());
-	return Crossings;
+	return Table;
 }
 
-/** Marks the cells whose centres lie inside the polygons. */
+/** Marks the cells whose centres lie inside the polygons, row by row over the edges crossing each row. */
 void FillCellCentres(const FGridFrame& Frame, const FPolygons& Polygons, FMask& Mask)
 {
+	const std::vector<std::vector<FScanEdge>> Table = EdgeTable(Frame, Polygons);
+	std::vector<FScanEdge> Active;
+	std::vector<double> Crossings;
 	for (int Row = 0; Row < Frame.Rows; ++Row)
 	{
+		Active.erase(std::remove_if(Active.begin(), Active.end(), [Row](const FScanEdge& Edge) { return Edge.LastRow < Row; }),
+					 Active.end());
+		Active.insert(Active.end(), Table[Row].begin(), Table[Row].end());
+		if (Active.empty())
+		{
+			continue;
+		}
 		const double Y = Frame.Y0 + (Row + 0.5) * Frame.CellSize;
-		const std::vector<double> Crossings = RowCrossings(Polygons, Y);
+		Crossings.clear();
+		for (const FScanEdge& Edge : Active)
+		{
+			Crossings.push_back(Edge.StartX + (Y - Edge.StartY) * Edge.InverseSlope);
+		}
+		std::sort(Crossings.begin(), Crossings.end());
 		for (size_t Pair = 0; Pair + 1 < Crossings.size(); Pair += 2)
 		{
 			// Columns whose centre x lies in [enter, leave).
@@ -110,23 +144,26 @@ int ReflectIndex(int Index, int Count)
 	return Index;
 }
 
-/** Convolves one line of values (stride apart) with the kernel, in place. */
-void ConvolveLine(double* Values, int Count, size_t Stride, const std::vector<double>& Kernel, std::vector<double>& Scratch)
+/** Convolves one line of values (stride apart) with the kernel, in place, mirroring it past both ends. */
+void ConvolveLine(double* Values, int Count, size_t Stride, const std::vector<double>& Kernel, std::vector<double>& Padded)
 {
 	const int Radius = static_cast<int>(Kernel.size() / 2);
-	Scratch.assign(Count, 0.0);
-	for (int Index = 0; Index < Count; ++Index)
+	Padded.resize(Count + 2 * Radius);
+	for (int Index = -Radius; Index < Count + Radius; ++Index)
 	{
-		double Sum = 0.0;
-		for (int Offset = -Radius; Offset <= Radius; ++Offset)
-		{
-			Sum += Kernel[Offset + Radius] * Values[ReflectIndex(Index + Offset, Count) * Stride];
-		}
-		Scratch[Index] = Sum;
+		Padded[Index + Radius] = Values[ReflectIndex(Index, Count) * Stride];
 	}
+	const double* Weights = Kernel.data();
+	const int Taps = static_cast<int>(Kernel.size());
 	for (int Index = 0; Index < Count; ++Index)
 	{
-		Values[Index * Stride] = Scratch[Index];
+		const double* Window = Padded.data() + Index;
+		double Sum = 0.0;
+		for (int Tap = 0; Tap < Taps; ++Tap)
+		{
+			Sum += Weights[Tap] * Window[Tap];
+		}
+		Values[Index * Stride] = Sum;
 	}
 }
 
@@ -134,11 +171,12 @@ void ConvolveLine(double* Values, int Count, size_t Stride, const std::vector<do
  * One line of the Felzenszwalb and Huttenlocher squared distance transform: for every position, the smallest
  * (position - source)^2 + Cost[source] and the source it comes from.
  */
-void LowerEnvelope(const std::vector<double>& Cost, std::vector<double>& Result, std::vector<int>& Source)
+void LowerEnvelope(const std::vector<double>& Cost, std::vector<double>& Result, std::vector<int>& Source,
+				   std::vector<int>& Parabolas, std::vector<double>& Boundaries)
 {
 	const int Count = static_cast<int>(Cost.size());
-	std::vector<int> Parabolas(Count);
-	std::vector<double> Boundaries(Count + 1);
+	Parabolas.resize(Count);
+	Boundaries.resize(Count + 1);
 	int Top = -1;
 	for (int Position = 0; Position < Count; ++Position)
 	{
@@ -163,10 +201,12 @@ void LowerEnvelope(const std::vector<double>& Cost, std::vector<double>& Result,
 		Boundaries[Top] = Top == 0 ? -std::numeric_limits<double>::infinity() : Intersection;
 		Boundaries[Top + 1] = std::numeric_limits<double>::infinity();
 	}
-	Result.assign(Count, std::numeric_limits<double>::infinity());
-	Source.assign(Count, -1);
+	Result.resize(Count);
+	Source.resize(Count);
 	if (Top < 0)
 	{
+		std::fill(Result.begin(), Result.end(), std::numeric_limits<double>::infinity());
+		std::fill(Source.begin(), Source.end(), -1);
 		return;
 	}
 	int Parabola = 0;
@@ -208,15 +248,28 @@ FMask RasterizePolygons(const FGridFrame& Frame, const FPolygons& Polygons, bool
 void GaussianFilter(std::vector<double>& Values, int Columns, int Rows, double Sigma)
 {
 	const std::vector<double> Kernel = GaussianKernel(Sigma);
+	const int Radius = static_cast<int>(Kernel.size() / 2);
 	std::vector<double> Scratch;
 	for (int Row = 0; Row < Rows; ++Row)
 	{
 		ConvolveLine(Values.data() + static_cast<size_t>(Row) * Columns, Columns, 1, Kernel, Scratch);
 	}
-	for (int Column = 0; Column < Columns; ++Column)
+	// Down the columns, whole rows at a time, so memory is read in order.
+	std::vector<double> Result(Values.size(), 0.0);
+	for (int Row = 0; Row < Rows; ++Row)
 	{
-		ConvolveLine(Values.data() + Column, Rows, static_cast<size_t>(Columns), Kernel, Scratch);
+		double* Output = Result.data() + static_cast<size_t>(Row) * Columns;
+		for (int Tap = -Radius; Tap <= Radius; ++Tap)
+		{
+			const double Weight = Kernel[Tap + Radius];
+			const double* Input = Values.data() + static_cast<size_t>(ReflectIndex(Row + Tap, Rows)) * Columns;
+			for (int Column = 0; Column < Columns; ++Column)
+			{
+				Output[Column] += Weight * Input[Column];
+			}
+		}
 	}
+	Values.swap(Result);
 }
 
 FDistanceField DistanceToFeatures(const FMask& IsFeature, int Columns, int Rows, double CellSize)
@@ -228,13 +281,15 @@ FDistanceField DistanceToFeatures(const FMask& IsFeature, int Columns, int Rows,
 	std::vector<double> Cost(Rows);
 	std::vector<double> Result;
 	std::vector<int> Source;
+	std::vector<int> Parabolas;
+	std::vector<double> Boundaries;
 	for (int Column = 0; Column < Columns; ++Column)
 	{
 		for (int Row = 0; Row < Rows; ++Row)
 		{
 			Cost[Row] = IsFeature[static_cast<size_t>(Row) * Columns + Column] ? 0.0 : Infinity;
 		}
-		LowerEnvelope(Cost, Result, Source);
+		LowerEnvelope(Cost, Result, Source, Parabolas, Boundaries);
 		for (int Row = 0; Row < Rows; ++Row)
 		{
 			ColumnDistance[static_cast<size_t>(Row) * Columns + Column] = Result[Row];
@@ -250,7 +305,7 @@ FDistanceField DistanceToFeatures(const FMask& IsFeature, int Columns, int Rows,
 	{
 		const size_t RowStart = static_cast<size_t>(Row) * Columns;
 		std::copy(ColumnDistance.begin() + RowStart, ColumnDistance.begin() + RowStart + Columns, Cost.begin());
-		LowerEnvelope(Cost, Result, Source);
+		LowerEnvelope(Cost, Result, Source, Parabolas, Boundaries);
 		for (int Column = 0; Column < Columns; ++Column)
 		{
 			if (Source[Column] < 0)

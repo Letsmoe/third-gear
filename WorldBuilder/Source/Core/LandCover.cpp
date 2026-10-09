@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstring>
 
-#include "Geometry.h"
 
 namespace WorldBuilder
 {
@@ -81,11 +80,9 @@ FLandCover::FLandCover(const std::vector<FOsmArea>& Areas)
 		{
 			Polygons.push_back({Polygon.Rings});
 		}
-		FClassPolygons& Target = Classes[static_cast<int>(*Class)];
-		// Even-odd union orients outlines and holes consistently, which the non-zero union per tile relies on.
-		FPolygons Paths = Clipper2Lib::Union(ToPaths(Polygons), Clipper2Lib::FillRule::EvenOdd, 4);
-		Target.Index.Insert(BoundsOf(Paths), static_cast<int>(Target.Polygons.size()));
-		Target.Polygons.push_back(std::move(Paths));
+		// Even-odd union orients outlines and holes consistently, which the non-zero union per window relies on.
+		const int ClassIndex = static_cast<int>(*Class);
+		Classes[ClassIndex].Add(ClassIndex, Clipper2Lib::Union(ToPaths(Polygons), Clipper2Lib::FillRule::EvenOdd, 4));
 	}
 }
 
@@ -107,19 +104,12 @@ std::vector<float> FLandCover::Weights(double X0, double Y0, int Columns, int Ro
 	std::vector<float> Result(static_cast<size_t>(Columns) * Rows * 3, 0.0f);
 	for (int ClassIndex = 0; ClassIndex < 3; ++ClassIndex)
 	{
-		const FClassPolygons& Class = Classes[ClassIndex];
-		FPolygons Near;
-		for (const int Item : Class.Index.Query(Window))
-		{
-			const FPolygons Clipped = ClipToBox(Class.Polygons[Item], Window);
-			Near.insert(Near.end(), Clipped.begin(), Clipped.end());
-		}
+		const FPolygons Near = Classes[ClassIndex].UnionInWindow(Window);
 		if (Near.empty())
 		{
 			continue;
 		}
-		// Each area is rasterised whole; overlaps of areas of one class must not cancel out under even-odd filling.
-		const FMask Mask = RasterizePolygons(Frame, Clipper2Lib::Union(Near, Clipper2Lib::FillRule::NonZero, 4), false);
+		const FMask Mask = RasterizePolygons(Frame, Near, false);
 		std::vector<double> Values(Mask.begin(), Mask.end());
 		if (Sigma > 0.3)
 		{

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "ChunkedPolygons.h"
 #include "Geometry.h"
 #include "OsmData.h"
 #include "SpatialIndex.h"
@@ -74,9 +75,8 @@ public:
 	const FSpatialIndex& PointIndex() const { return TreePointIndex; }
 	const FSpatialIndex& RowIndex() const { return TreeRowIndex; }
 	const FSpatialIndex& HedgeIndex() const { return HedgeLineIndex; }
-	const FSpatialIndex& AreaIndex() const { return PlantedAreaIndex; }
-	const std::vector<FPolygons>& AreaPolygons() const { return PlantedAreas; }
-	const std::vector<int>& AreaOsmIndices() const { return PlantedAreaOsm; }
+	/** The planted areas (woods, scrub, parks) in chunks, by their index in Osm().Areas. */
+	const FChunkedPolygons& PlantedAreas() const { return PlantedAreaPieces; }
 
 private:
 	const FOsmData* OsmData;
@@ -85,9 +85,6 @@ private:
 	FSpatialIndex TreePointIndex;
 	FSpatialIndex TreeRowIndex;
 	FSpatialIndex HedgeLineIndex;
-	FSpatialIndex PlantedAreaIndex;
-	std::vector<FPolygons> PlantedAreas;
-	/** The index in Osm().Areas of each planted area. */
-	std::vector<int> PlantedAreaOsm;
+	FChunkedPolygons PlantedAreaPieces;
 };
 }

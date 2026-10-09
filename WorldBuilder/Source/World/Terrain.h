@@ -32,5 +32,5 @@ FHeightGrid RoadHeightField(const FHeightGrid& Terrain, const FPolygons& RoadGro
  * water bodies get a bed that deepens away from the bank.
  */
 FHeightGrid ConformTerrain(const FHeightGrid& Terrain, const FHeightGrid& RoadHeight, const FPolygons& RoadGround,
-						   const FPolygons& Pavement, const std::vector<const FWaterBody*>& Water);
+						   const FPolygons& Pavement, const std::vector<FWaterBody>& Water);
 }
