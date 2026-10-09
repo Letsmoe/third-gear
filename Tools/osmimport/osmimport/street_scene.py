@@ -27,7 +27,7 @@ RAILWAY_WIDTH = 2.8
 
 # Surface layers in drawing order: (name, colour, lift above the terrain in metres). Later layers lie on top.
 SURFACE_LAYERS = [
-    ("water", "#2f5f86", 0.03),
+    ("water", "#1d6b64", 0.03),
     ("footway", "#b9b4aa", 0.04),
     ("railway", "#5a4a3c", 0.05),
     ("carriageway", "#3c3d40", 0.06),
