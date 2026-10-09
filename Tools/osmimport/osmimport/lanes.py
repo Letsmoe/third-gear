@@ -248,8 +248,12 @@ class LaneBuilder:
     # ------------------------------------------------------------ road segments
 
     def _is_traffic_way(self, way):
-        """Whether cars drive on the way: not driveways, parking aisles and private or closed roads."""
+        """Whether cars drive on the way: not driveways, parking aisles and private or closed roads, and not streets
+        too narrow to pass parked cars (the AI cars don't give way to oncoming traffic)."""
         tags = way.tags
+        width = self.net.widths.get(way.id)
+        if width is not None and not parking.traffic_fits(tags, way.id, width):
+            return False
         if tags.get("highway") not in CLASS_TIER:
             return False
         if tags.get("highway") == "service" and tags.get("service") in PRIVATE_SERVICES:

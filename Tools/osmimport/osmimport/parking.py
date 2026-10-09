@@ -100,6 +100,17 @@ def parking_sides(tags, way_id, width):
     return sides
 
 
+def traffic_fits(tags, way_id, width):
+    """Whether moving cars (in both directions on a two-way street) can still pass the cars parked along the way.
+    AI cars do not give way to oncoming traffic, so lanes are only built where two cars fit beside the parked ones."""
+    sides = parking_sides(tags, way_id, width)
+    if not sides:
+        return True
+    free_width = width - PARKING_STRIP * len(sides)
+    needed = LANE_CLEARANCE * 2.0 if roads.is_oneway(tags) else 2.0 * LANE_CLEARANCE * 2.0 + 0.2
+    return free_width >= needed
+
+
 def lane_offset_with_parking(base_offset, width, travel, sides):
     """Offset of the lane of one direction of travel (positive towards its own kerb) after making room for parked cars.
 
