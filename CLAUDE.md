@@ -246,6 +246,25 @@ cracks), OSM buildings, water, measured trees (bDOM) in the tiles touching the d
 silhouettes (`Canopy_Far`) for woods further out, and a flat ground ring to 60 km. `import_osm_area.py <area>` adds it
 automatically when its manifest's `detail` matches (skip with `-nohorizon`).
 
+## Menu, weather, traffic
+- **Menu**: a launch without test switches opens the start menu (`GameFlow`, `UGameMenuSubsystem`, pages in `MenuPages`,
+  Slate in `SGameMenu`); Esc, F1 or the wheel's menu button open the pause menu. Desktop = full-screen overlay, VR = a
+  panel in front of the driver (`-MenuPanel3D` forces it on the desktop). `-NoMenu` and every test switch skip it;
+  `-MenuPage=<page>` opens a page for screenshots. Settings live in `UDrivingPreferences`, saved as per-user overrides.
+- **Weather visuals**: `UWeatherVisualsSubsystem` (`WeatherVisuals.*`) turns Isobar's state into sun, sky, clouds,
+  height fog (Koschmieder from the visibility), exposure, rain streaks (`ARainEffect`), lightning (`OnLightning`),
+  snow cover and the season (`SeasonAt`: Hamburg leaf phenology; falling leaves reuse the rain effect). Materials read it
+  from `/Game/World/MPC_Weather` (`Scripts/create_weather_parameters.py`): wetness and puddles, snow, fallen leaves, wind.
+  `create_materials.py` layers season (snow, leaves) then wetness over every surface; `SEASON_KEEP` says how much each
+  surface keeps. Test with `-WeatherHour=<h> -WeatherDay=<day of year> -WeatherOverride="CloudCover=1,Fog=0.8,Rain=8,
+  Snow=1,Temperature=-3,Wind=6,Thunder=1,FallenLeaves=0.5"`.
+- **Street furniture and rules**: `osmimport/furniture.py` places signals, signs and lamps (`POIS` tile section);
+  models from `Tools/furniture` (Blender), assets by `Scripts/create_furniture_assets.py` into `/Game/World/Furniture`.
+  `UTrafficSubsystem` (MapRuntime) runs signal phases and the pool of real lights at lamps and lenses (`tg.Night`
+  overrides night); `UTrafficRuleComponent` detects red lights and speeding with German tolerances, on the player and the
+  AI. `Scripts/rule_test.sh` checks it headless (`-RuleTest`); `Scripts/seat_shot.sh` with `-StartPose` shoots from a
+  given pose.
+
 ## Car & wheel
 - **Classes** (`Source/DrivingGame/`): `ACarPawn` (default pawn: mesh + attached meshes from settings, seated HMD camera
   at `DriverEyeLocation`, speed/gear/rpm text in front of the driver, keyboard + wheel input, FFB);
