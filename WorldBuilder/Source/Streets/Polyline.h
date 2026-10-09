@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <utility>
 #include <vector>
 
 /**
@@ -90,6 +91,9 @@ FStreetPolyline Bezier(const FStreetPoint& P0, const FStreetPoint& P1, const FSt
  */
 FStreetPolyline SmoothCurve(const FStreetPoint& Start, const FStreetPoint& StartDirection, const FStreetPoint& End,
 							const FStreetPoint& EndDirection, double Spacing);
+
+/** (arc length, distance) of the closest point of a polyline to a point; the first closest segment wins ties. */
+std::pair<double, double> ProjectOnPolyline(const FStreetPolyline& Line, const FStreetPoint& Point);
 
 /** The distance from a point to the nearest point of the polyline. */
 double DistanceTo(const FStreetPolyline& Line, const FStreetPoint& Point);

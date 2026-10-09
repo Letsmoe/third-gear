@@ -57,6 +57,16 @@ struct FParkingSide
 /** The sides cars park on along a way, right before left. */
 std::vector<FParkingSide> ParkingSides(const FTags& Tags, int64_t WayId, double Width);
 
+// Half the width of a moving car plus a hand's breadth.
+inline constexpr double LaneClearance = 0.9;
+
+/**
+ * Offset of the lane of one direction of travel (positive towards its own kerb) after making room for parked cars: the
+ * cars on the lane's own side push it towards the centre line, cars on the opposite side towards its own kerb. Without
+ * parked cars the base offset is returned unchanged.
+ */
+double LaneOffsetWithParking(double BaseOffset, double Width, int Travel, const std::vector<FParkingSide>& Sides);
+
 /** A parked car's pose on the plane, without the heights, which the height field gives (FinishParkedCar). */
 struct FParkedCar
 {

@@ -237,9 +237,8 @@ bool FRoadGraph::IsJunction(int64_t Node) const
 	return true;
 }
 
-bool FRoadGraph::CanTravel(int Way, int Travel) const
+bool CanTravelByTags(const FTags& Tags, int Travel)
 {
-	const FTags& Tags = Ways[Way].Tags;
 	const std::string Oneway = OsmTags::ValueOrEmpty(Tags, "oneway");
 	const std::string Highway = OsmTags::ValueOrEmpty(Tags, "highway");
 	if (IsRoundabout(Tags) || Oneway == "yes" || Oneway == "1" || Oneway == "true" || Highway == "motorway"
@@ -252,6 +251,11 @@ bool FRoadGraph::CanTravel(int Way, int Travel) const
 		return Travel == -1;
 	}
 	return true;
+}
+
+bool FRoadGraph::CanTravel(int Way, int Travel) const
+{
+	return CanTravelByTags(Ways[Way].Tags, Travel);
 }
 
 FPositionAndDirection FRoadGraph::PointAndDirection(int Way, double S, int Travel) const

@@ -20,6 +20,10 @@ struct FApproachRecord
 	double Direction[2] = {1.0, 0.0};
 	int Lanes = 1;
 	double SpeedKmh = 50.0;
+	/** Not in the file: +1 when vehicles move along increasing node index of the way. */
+	int Travel = 0;
+	/** Not in the file: where the stop line meets the way's centre line, unrounded. */
+	FStreetPoint StopPoint;
 };
 
 /** One signal phase in seconds. */

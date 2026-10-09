@@ -16,6 +16,7 @@
 #include <string>
 
 #include "Furniture.h"
+#include "Lanes.h"
 #include "OsmReader.h"
 #include "Parking.h"
 #include "Roads.h"
@@ -303,6 +304,14 @@ int RunOsm(int ArgumentCount, char** Arguments)
 		BuildParkedCars(Data, Graph, Furniture.Zebras, Surface, Buildings, std::nullopt);
 	std::fprintf(stderr, "parked cars %.2f s: %zu\n", SecondsSince(Start), Cars.size());
 	Start = std::chrono::steady_clock::now();
+	FLaneGraph Lanes = BuildLaneGraph(Model, Graph, Furniture, {-1e9, -1e9, 1e9, 1e9});
+	std::fprintf(stderr, "lane graph %.2f s: %zu lanes, %d good\n", SecondsSince(Start), Lanes.Lanes.size(),
+				 Lanes.GoodCount);
+	Start = std::chrono::steady_clock::now();
+	AssignLaneHeights(Lanes, MadeUpHeight);
+	const std::string LanesJson = LanesJsonText(Lanes);
+	std::fprintf(stderr, "lanes json %.2f s: %zu bytes\n", SecondsSince(Start), LanesJson.size());
+	Start = std::chrono::steady_clock::now();
 	const std::string Json = TrafficJsonText(Furniture.Network);
 	std::fprintf(stderr, "traffic json %.2f s: %zu bytes\n", SecondsSince(Start), Json.size());
 	return 0;
@@ -348,6 +357,12 @@ int main(int ArgumentCount, char** Arguments)
 	const std::vector<FParkedCar> Cars =
 		BuildParkedCars(Inputs.Data, Graph, Furniture.Zebras, Inputs.Carriageway, Inputs.Buildings, Region);
 	std::fprintf(stderr, "parked cars %.2f s: %zu\n", SecondsSince(Start), Cars.size());
+	Start = std::chrono::steady_clock::now();
+	FLaneGraph Lanes = BuildLaneGraph(Model, Graph, Furniture, Region);
+	std::fprintf(stderr, "lane graph %.2f s: %zu lanes, %d good\n", SecondsSince(Start), Lanes.Lanes.size(),
+				 Lanes.GoodCount);
+	AssignLaneHeights(Lanes, MadeUpHeight);
+	WriteLanesJson(Directory + "/lanes.json", Lanes);
 	WriteFurniture(Furniture, Cars, Directory);
 	WriteZebrasAndStopLines(Furniture, Inputs.Carriageway, Directory);
 	return 0;

@@ -14,6 +14,9 @@ namespace WorldBuilder
 /** Speed limit in km/h from the way's tags or the German default for its class and surroundings. 0 means no limit. */
 double ParseSpeed(const FTags& Tags, bool bUrban);
 
+/** Whether vehicles may move along increasing (Travel = +1) or decreasing (-1) node index of a way with these tags. */
+bool CanTravelByTags(const FTags& Tags, int Travel);
+
 /** Where a node lies on a way: the way's index in the graph and the node's index in the way. */
 struct FNodeEntry
 {

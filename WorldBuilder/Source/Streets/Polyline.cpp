@@ -230,6 +230,29 @@ FStreetPolyline SmoothCurve(const FStreetPoint& Start, const FStreetPoint& Start
 	return Bezier(Start, Start + StartDirection * Reach, End - EndDirection * Reach, End, Spacing);
 }
 
+std::pair<double, double> ProjectOnPolyline(const FStreetPolyline& Line, const FStreetPoint& Point)
+{
+	std::pair<double, double> Best = {0.0, 1e18};
+	double Travelled = 0.0;
+	for (size_t Index = 0; Index + 1 < Line.size(); ++Index)
+	{
+		const FStreetPoint Edge = Line[Index + 1] - Line[Index];
+		const double EdgeLength = std::hypot(Edge.X, Edge.Y);
+		if (EdgeLength < 1e-9)
+		{
+			continue;
+		}
+		const double T = std::min(std::max(Dot(Point - Line[Index], Edge) / (EdgeLength * EdgeLength), 0.0), 1.0);
+		const double Distance = Norm(Line[Index] + Edge * T - Point);
+		if (Distance < Best.second)
+		{
+			Best = {Travelled + T * EdgeLength, Distance};
+		}
+		Travelled += EdgeLength;
+	}
+	return Best;
+}
+
 double DistanceToSegment(const FStreetPoint& Start, const FStreetPoint& End, const FStreetPoint& Point)
 {
 	const FStreetPoint Edge = End - Start;

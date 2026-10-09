@@ -13,7 +13,6 @@ namespace WorldBuilder
 {
 namespace
 {
-// Half the width of a moving car plus a hand's breadth.
 constexpr double JunctionGap = 6.5;
 constexpr double SignalGap = 10.5;
 constexpr double CrossingGap = 8.5;
@@ -696,6 +695,38 @@ std::vector<FParkingSide> ParkingSides(const FTags& Tags, int64_t WayId, double 
 		Sides = {*Found};
 	}
 	return Sides;
+}
+
+double LaneOffsetWithParking(double BaseOffset, double Width, int Travel, const std::vector<FParkingSide>& Sides)
+{
+	if (Sides.empty())
+	{
+		return BaseOffset;
+	}
+	bool bOwnSide = false;
+	bool bOppositeSide = false;
+	for (const FParkingSide& Side : Sides)
+	{
+		bOwnSide = bOwnSide || Side.Sign == Travel;
+		bOppositeSide = bOppositeSide || Side.Sign == -Travel;
+	}
+	const double FreeEdge = Width / 2.0 - ParkingStrip;
+	double Offset = 0.0;
+	if (bOwnSide && bOppositeSide)
+	{
+		Offset = std::min(BaseOffset, std::max(FreeEdge - LaneClearance, LaneClearance));
+	}
+	else if (bOwnSide)
+	{
+		Offset = std::max(0.0, std::min(BaseOffset, FreeEdge - LaneClearance));
+	}
+	else
+	{
+		// Clear of the cars on the opposite side, and one car width from the oncoming lane that is pushed to the middle.
+		const double OncomingOffset = std::max(0.0, std::min(BaseOffset, FreeEdge - LaneClearance));
+		Offset = std::max({BaseOffset, LaneClearance - FreeEdge, 2.0 * LaneClearance - OncomingOffset});
+	}
+	return std::min(std::max(Offset, -(Width / 2.0 - LaneClearance)), Width / 2.0 - LaneClearance);
 }
 
 FParkedCarPose FinishParkedCar(const FParkedCar& Car, const std::function<double(double X, double Y)>& RoadHeight)

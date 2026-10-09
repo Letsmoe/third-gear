@@ -1370,6 +1370,8 @@ FTrafficNetwork FFurnitureBuilder::BuildNetwork()
 			Approach_.Direction[1] = RoundDecimals(Approach.Direction.Y, 4);
 			Approach_.Lanes = Approach.Lanes;
 			Approach_.SpeedKmh = Approach.SpeedKmh;
+			Approach_.Travel = Approach.Travel;
+			Approach_.StopPoint = Approach.StopPoint;
 			Record.Approaches.push_back(Approach_);
 			++ApproachId;
 		}
