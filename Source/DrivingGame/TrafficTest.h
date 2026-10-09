@@ -28,6 +28,9 @@ private:
 	/** Moves the camera along the lane graph by DeltaSeconds, taking a random good continuation at every lane end. */
 	void MoveViewer(float DeltaSeconds);
 
+	/** Parks an invisible stand-in for the player's car in the middle of a lane ahead of the camera (-TrafficTestBlocker). */
+	void PlaceBlocker();
+
 	void ReportProgress();
 	void Finish();
 
@@ -40,6 +43,10 @@ private:
 	int32 ViewerLane = INDEX_NONE;
 	float ViewerS = 0.f;
 	FRandomStream Random;
+
+	bool bBlocker = false;
+	UPROPERTY(Transient)
+	TObjectPtr<AActor> Blocker;
 
 	TArray<float> FrameMilliseconds;
 	double LastFrameStartSeconds = 0.0;

@@ -329,7 +329,7 @@ bool FAITrafficSimulation::IsOnMyLanes(const FSimCar& Car, const FSimCar& Other)
 	return false;
 }
 
-void FAITrafficSimulation::AddLeadCars(const FSimCar& Car, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const
+void FAITrafficSimulation::AddLeadCars(const FSimCar& Car, FObstacleList& Obstacles) const
 {
 	float BestGap = TNumericLimits<float>::Max();
 	float BestSpeed = 0.f;
@@ -367,7 +367,7 @@ void FAITrafficSimulation::AddLeadCars(const FSimCar& Car, TArray<FObstacle, TIn
 	}
 }
 
-void FAITrafficSimulation::AddAgentObstacles(const FSimCar& Car, const TArray<FSimAgent>& Agents, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const
+void FAITrafficSimulation::AddAgentObstacles(const FSimCar& Car, const TArray<FSimAgent>& Agents, FObstacleList& Obstacles) const
 {
 	struct FTarget
 	{
@@ -438,7 +438,7 @@ float FAITrafficSimulation::DesiredSpeed(const FSimCar& Car) const
 	return FMath::Max(Lanes->GetLane(Car.Route[Slot]).LimitMs() * Car.DesiredSpeedFactor, 2.f);
 }
 
-void FAITrafficSimulation::ScanLaneCurves(const FSimCar& Car, int32 Slot, const FTrafficLane& Lane, float Horizon, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const
+void FAITrafficSimulation::ScanLaneCurves(const FSimCar& Car, int32 Slot, const FTrafficLane& Lane, float Horizon, FObstacleList& Obstacles) const
 {
 	if (Lane.CurveSpeedMs.IsEmpty())
 	{
@@ -495,7 +495,7 @@ bool FAITrafficSimulation::MustStopForSignal(float GapM, float SpeedMs, int32 Ap
 	return false;
 }
 
-void FAITrafficSimulation::ScanLaneSignals(FSimCar& Car, int32 Slot, const FTrafficLane& Lane, double TrafficTimeSeconds, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const
+void FAITrafficSimulation::ScanLaneSignals(FSimCar& Car, int32 Slot, const FTrafficLane& Lane, double TrafficTimeSeconds, FObstacleList& Obstacles) const
 {
 	for (const FLaneStopLine& Stop : Lane.Stops)
 	{
@@ -523,7 +523,7 @@ void FAITrafficSimulation::ScanLaneSignals(FSimCar& Car, int32 Slot, const FTraf
 }
 
 void FAITrafficSimulation::ScanRoute(FSimCar& Car, double TrafficTimeSeconds, float DeltaSeconds, const TArray<FSimAgent>& Agents,
-	TArray<FObstacle, TInlineAllocator<48>>& Obstacles)
+	FObstacleList& Obstacles)
 {
 	const float Horizon = FMath::Clamp(Square(Car.SpeedMs) / (2.f * 2.f) + 50.f, HorizonMinimumM, HorizonMaximumM);
 	const int32 Count = Car.Route.Num();
@@ -707,7 +707,7 @@ bool FAITrafficSimulation::IsConnectionBlocked(FSimCar& Car, int32 Slot, const T
 	return false;
 }
 
-void FAITrafficSimulation::ScanJunctionEntry(FSimCar& Car, int32 Slot, float GapToLineM, float DeltaSeconds, TArray<FObstacle, TInlineAllocator<48>>& Obstacles,
+void FAITrafficSimulation::ScanJunctionEntry(FSimCar& Car, int32 Slot, float GapToLineM, float DeltaSeconds, FObstacleList& Obstacles,
 	const TArray<FSimAgent>& Agents)
 {
 	const FTrafficLane& Lane = Lanes->GetLane(Car.Route[Slot]);
@@ -751,7 +751,7 @@ void FAITrafficSimulation::ScanJunctionEntry(FSimCar& Car, int32 Slot, float Gap
 
 float FAITrafficSimulation::ComputeAcceleration(FSimCar& Car, double TrafficTimeSeconds, const TArray<FSimAgent>& Agents, float DeltaSeconds)
 {
-	TArray<FObstacle, TInlineAllocator<48>> Obstacles;
+	FObstacleList Obstacles;
 	ScanRoute(Car, TrafficTimeSeconds, DeltaSeconds, Agents, Obstacles);
 	AddLeadCars(Car, Obstacles);
 	AddAgentObstacles(Car, Agents, Obstacles);
@@ -835,7 +835,7 @@ void FAITrafficSimulation::UpdateSignals(FSimCar& Car) const
 	}
 }
 
-void FAITrafficSimulation::DetectContacts()
+void FAITrafficSimulation::DetectContacts(const TArray<FSimAgent>& Agents)
 {
 	TSet<uint64> Touching;
 	for (int32 Index = 0; Index < Cars.Num(); ++Index)
@@ -865,6 +865,28 @@ void FAITrafficSimulation::DetectContacts()
 		}
 	}
 	ContactPairs = MoveTemp(Touching);
+
+	TSet<uint64> TouchingAgents;
+	for (int32 AgentIndex = 0; AgentIndex < Agents.Num(); ++AgentIndex)
+	{
+		const FSimAgent& Agent = Agents[AgentIndex];
+		for (const TSharedPtr<FSimCar>& Car : Cars)
+		{
+			if (!RectanglesOverlap(Car->BodyCenter(), Car->Heading, Car->LengthM * 0.5f, Car->WidthM * 0.46f, Agent.Position, Agent.Forward,
+				Agent.HalfLengthM, Agent.HalfWidthM * 0.92f))
+			{
+				continue;
+			}
+			const uint64 Key = (uint64(AgentIndex + 1) << 32) | uint64(Car->Id);
+			TouchingAgents.Add(Key);
+			if (!AgentContactPairs.Contains(Key))
+			{
+				++Stats.AgentContacts;
+				UE_LOG(LogAITrafficSim, Warning, TEXT("AITRAFFIC contact with an outside vehicle at (%.1f, %.1f): %s"), Agent.Position.X, Agent.Position.Y, *Describe(*Car));
+			}
+		}
+	}
+	AgentContactPairs = MoveTemp(TouchingAgents);
 }
 
 bool FAITrafficSimulation::IsLegitimateWait(const FSimCar& Car)
@@ -944,7 +966,7 @@ void FAITrafficSimulation::StepOnce(float DeltaSeconds, double TrafficTimeSecond
 			}
 		}
 	}
-	DetectContacts();
+	DetectContacts(Agents);
 }
 
 void FAITrafficSimulation::Step(float DeltaSeconds, double TrafficTimeSeconds, const TArray<FSimAgent>& Agents)

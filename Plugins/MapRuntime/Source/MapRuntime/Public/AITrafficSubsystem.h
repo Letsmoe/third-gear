@@ -56,18 +56,46 @@ public:
 	void SetTargetCarCount(int32 Count) { TargetCarCount = Count; }
 
 private:
+	/** Loads lanes.json and sets up the simulation once the streamer has loaded the region; false until then or without data. */
 	bool TryStart();
+
+	/** The camera the traffic is kept around: position (cm) and horizontal view direction. */
 	bool GetViewer(FVector& OutLocationCm, FVector2D& OutForward) const;
-	void CollectAgents(TArray<FSimAgent>& OutAgents);
+
+	/** Collects the registered outside vehicles, with the speed they moved at since last frame. */
+	void CollectAgents(TArray<FSimAgent>& OutAgents, float DeltaTime);
+
+	/** Removes cars that are far from the viewer, or stuck behind it. */
 	void RemoveFarCars(const FVector& ViewerCm, const FVector2D& ViewerForward);
+
+	/** How many cars the density allows around the viewer: the road length nearby per car, capped by the target count. */
 	int32 CountAllowedCars(const FVector& ViewerCm) const;
+
+	/** Adds a car now and then while there are fewer than allowed. */
 	void SpawnCars(const FVector& ViewerCm, const FVector2D& ViewerForward);
+
+	/** Whether an outside vehicle such as the player's car is within DistanceM of a point (metres). */
+	bool IsNearExternalVehicle(const FVector& PositionM, float DistanceM) const;
+
+	/** Tries to put one car on a random lane out of the viewer's sight; false when no place was found. */
 	bool TrySpawnOne(const FVector& ViewerCm, const FVector2D& ViewerForward);
+
+	/** A model chosen by weight. */
 	int32 PickModelIndex();
+
+	/** Paint colour typical for German roads, or the model's fixed one. */
 	FLinearColor PickPaint(const FTrafficVehicleModel& Model);
+
+	/** Destroys the car's actor, keeping its violation counts in the totals, and removes it from the simulation. */
 	void RemoveCar(int32 CarId);
+
+	/** Moves every car's actor to its simulated pose and sets its lights. */
 	void UpdateActors();
+
+	/** Logs rule violations that cars have recorded since the last frame. */
 	void ReportNewViolations();
+
+	/** Moves the pool of real headlights to the nearest cars at night. */
 	void UpdateHeadlightPool(const FVector& ViewerCm, bool bNight);
 
 	FLaneNetwork Lanes;
@@ -92,6 +120,9 @@ private:
 		TWeakObjectPtr<AActor> Actor;
 		float HalfLengthM = 2.2f;
 		float HalfWidthM = 0.95f;
+		/** Where it was last frame, so its speed comes from how far it moved (a teleported or kinematic actor has no physics velocity). */
+		FVector2D LastPositionM = FVector2D::ZeroVector;
+		bool bHasLastPosition = false;
 	};
 	TArray<FExternalVehicle> ExternalVehicles;
 

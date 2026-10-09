@@ -86,6 +86,8 @@ struct FAITrafficStats
 	int32 Removed = 0;
 	/** Overlaps between two AI cars (each pair counted once per contact). */
 	int32 Collisions = 0;
+	/** Overlaps between an AI car and an outside vehicle such as the player's car. */
+	int32 AgentContacts = 0;
 	/** Cars that stood still for more than a minute for a reason other than a red light or the player (a fault). */
 	int32 Deadlocks = 0;
 	/** Cars that stood still for more than a minute, whatever the reason (a long red light counts). */
@@ -152,31 +154,81 @@ private:
 		int32 RouteSlot = 0;
 	};
 
+	using FObstacleList = TArray<FObstacle, TInlineAllocator<48>>;
+
+	/** One physics step of every car: decide, move, update poses, look for contacts and stuck cars. */
 	void StepOnce(float DeltaSeconds, double TrafficTimeSeconds, const TArray<FSimAgent>& Agents);
+
+	/** Recomputes where the car's lanes start relative to its front axle, and its axle positions, heading, pitch and steering. */
 	void UpdateGeometry(FSimCar& Car) const;
+
+	/** Keeps a few lanes of route ahead of the car and drops the lanes far behind it. */
 	void ExtendRoute(FSimCar& Car);
+
+	/** Picks the lane after Lane at random, weighted by turn and road importance, preferring the main loop of the graph. */
 	int32 ChooseNextLane(const FSimCar& Car, const FTrafficLane& Lane);
+
+	/** World position (metres) of the point on the route that is OffsetFromFrontAxleM along it (negative behind the front axle). */
 	FVector PointOnRoute(const FSimCar& Car, float OffsetFromFrontAxleM) const;
+
+	/** Registers every car on the lanes its body covers, and on the connections it is going to take. */
 	void BuildOccupancy();
+
+	/** The acceleration the car's driver chooses: free road, car following and every obstacle ahead combined. */
 	float ComputeAcceleration(FSimCar& Car, double TrafficTimeSeconds, const TArray<FSimAgent>& Agents, float DeltaSeconds);
+
+	/** The speed the driver wants where the front of the car is: the lane's limit times the driver's factor. */
 	float DesiredSpeed(const FSimCar& Car) const;
-	void ScanRoute(FSimCar& Car, double TrafficTimeSeconds, float DeltaSeconds, const TArray<FSimAgent>& Agents, TArray<FObstacle, TInlineAllocator<48>>& Obstacles);
-	void ScanLaneCurves(const FSimCar& Car, int32 Slot, const FTrafficLane& Lane, float Horizon, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const;
-	void ScanLaneSignals(FSimCar& Car, int32 Slot, const FTrafficLane& Lane, double TrafficTimeSeconds, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const;
+
+	/** Walks the route ahead and collects speed changes, curves, signals and junction entries as obstacles. */
+	void ScanRoute(FSimCar& Car, double TrafficTimeSeconds, float DeltaSeconds, const TArray<FSimAgent>& Agents, FObstacleList& Obstacles);
+
+	/** Adds the curve speeds of one lane that are slower than the lane's limit. */
+	void ScanLaneCurves(const FSimCar& Car, int32 Slot, const FTrafficLane& Lane, float Horizon, FObstacleList& Obstacles) const;
+
+	/** Adds a stop obstacle at every stop line of the lane whose signal the car has to stop for. */
+	void ScanLaneSignals(FSimCar& Car, int32 Slot, const FTrafficLane& Lane, double TrafficTimeSeconds, FObstacleList& Obstacles) const;
+
+	/** Whether a car GapM from the stop line at SpeedMs has to stop for the signal, now or at its predicted state on arrival. */
 	bool MustStopForSignal(float GapM, float SpeedMs, int32 ApproachId, double TrafficTimeSeconds) const;
-	void ScanJunctionEntry(FSimCar& Car, int32 Slot, float GapToLineM, float DeltaSeconds, TArray<FObstacle, TInlineAllocator<48>>& Obstacles, const TArray<FSimAgent>& Agents);
+
+	/** Handles the end of a road lane before a junction: stop sign hold, slow approach, and waiting for right of way and room. */
+	void ScanJunctionEntry(FSimCar& Car, int32 Slot, float GapToLineM, float DeltaSeconds, FObstacleList& Obstacles, const TArray<FSimAgent>& Agents);
+
+	/** Whether the car has to wait before taking the connection after the lane in Slot, and why (Reason, and the car it waits for). */
 	bool IsConnectionBlocked(FSimCar& Car, int32 Slot, const TArray<FSimAgent>& Agents, const TCHAR*& Reason, int32& BlockerId) const;
+
+	/** Whether the lane after Connection has no room for the car yet (a queue reaches back to its start). */
 	bool IsExitCongested(const FSimCar& Car, const FTrafficLane& Connection, int32& BlockerId) const;
+
+	/** Whether an outside vehicle is, or is predicted to be, on the connection while the car would be. */
 	bool IsBlockedByAgent(const FSimCar& Car, const FTrafficLane& Connection, float EnterSeconds, float ExitSeconds, const TArray<FSimAgent>& Agents) const;
+
+	/** Whether a car on the other connection of the conflict would be in the shared area while this car would be. */
 	bool ConflictBlocks(const FSimCar& Car, const FLaneConflict& Conflict, float MyEnterSeconds, float MyExitSeconds, int32& BlockerId) const;
-	void AddLeadCars(const FSimCar& Car, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const;
-	void AddAgentObstacles(const FSimCar& Car, const TArray<FSimAgent>& Agents, TArray<FObstacle, TInlineAllocator<48>>& Obstacles) const;
+
+	/** Adds the nearest car ahead on the route as an obstacle that is followed at a time headway. */
+	void AddLeadCars(const FSimCar& Car, FObstacleList& Obstacles) const;
+
+	/** Adds the first thing in the car's path among outside vehicles and cars not on its lanes (crossing traffic). */
+	void AddAgentObstacles(const FSimCar& Car, const TArray<FSimAgent>& Agents, FObstacleList& Obstacles) const;
+
+	/** Sets the indicator for a turn coming up within 35 m or under way. */
 	void UpdateSignals(FSimCar& Car) const;
+
+	/** Moves the car along its route by the acceleration over DeltaSeconds and switches to the next lane at a lane end. */
 	void Advance(FSimCar& Car, float DeltaSeconds, float Acceleration);
-	void DetectContacts();
+
+	/** Counts overlaps between AI cars and with outside vehicles, once per contact. */
+	void DetectContacts(const TArray<FSimAgent>& Agents);
+
 	/** Whether a car that has stood still for a minute is waiting for something that is not a fault (a red light, the player). */
 	bool IsLegitimateWait(const FSimCar& Car);
+
+	/** Time to cover DistanceM from SpeedMs, accelerating at AccelerationMs2 up to MaxSpeedMs. */
 	static float TimeToCover(float DistanceM, float SpeedMs, float AccelerationMs2, float MaxSpeedMs);
+
+	/** Whether Other occupies a lane of the car's route within sight, so car following already accounts for it. */
 	bool IsOnMyLanes(const FSimCar& Car, const FSimCar& Other) const;
 
 	const FLaneNetwork* Lanes = nullptr;
@@ -187,5 +239,6 @@ private:
 	TMap<int32, TArray<FOccupant>> Occupancy;
 	TMap<int32, TArray<FClaim>> Claims;
 	TSet<uint64> ContactPairs;
+	TSet<uint64> AgentContactPairs;
 	FAITrafficStats Stats;
 };

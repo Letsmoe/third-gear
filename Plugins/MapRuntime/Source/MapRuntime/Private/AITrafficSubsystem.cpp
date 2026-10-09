@@ -18,7 +18,7 @@
 DEFINE_LOG_CATEGORY_STATIC(LogAITraffic, Log, All);
 
 static TAutoConsoleVariable<int32> CVarSpawnAnywhere(TEXT("tg.TrafficSpawnAnywhere"), 0,
-	TEXT("For staging screenshots: 1 lets cars appear anywhere around the viewer, in view and close by; 2 puts them in front of the viewer, 20 to 140 m away. Normally they only appear out of sight."));
+	TEXT("For staging screenshots: 1 lets cars appear anywhere around the viewer, in view and close by; 2 puts them where the viewer looks, within 55 m of a point 40 m ahead. Normally they only appear out of sight."));
 static TAutoConsoleVariable<int32> CVarHeadlightLights(TEXT("tg.TrafficHeadlights"), 8,
 	TEXT("How many AI cars nearest the viewer get a real headlight at night."));
 static TAutoConsoleVariable<int32> CVarTrafficCars(TEXT("tg.TrafficCars"), 30, TEXT("How many AI cars the traffic aims for around the viewer."));
@@ -41,6 +41,8 @@ constexpr float BlinkPeriodSeconds = 0.7f;
 constexpr float NightHeadlightFactor = 0.35f;
 constexpr float StuckRemoveSeconds = 150.f;
 constexpr float RuleCheckDelaySeconds = 0.5f;
+constexpr float StagingFocusM = 40.f;
+constexpr float StagingRadiusM = 55.f;
 constexpr float HeadlightRangeM = 110.f;
 constexpr float HeadlightIntensityCandela = 9000.f;
 constexpr float HeadlightAttenuationCm = 5500.f;
@@ -156,16 +158,21 @@ bool UAITrafficSubsystem::GetViewer(FVector& OutLocationCm, FVector2D& OutForwar
 	return true;
 }
 
-void UAITrafficSubsystem::CollectAgents(TArray<FSimAgent>& OutAgents)
+void UAITrafficSubsystem::CollectAgents(TArray<FSimAgent>& OutAgents, float DeltaTime)
 {
 	ExternalVehicles.RemoveAll([](const FExternalVehicle& Vehicle) { return !Vehicle.Actor.IsValid(); });
-	for (const FExternalVehicle& Vehicle : ExternalVehicles)
+	for (FExternalVehicle& Vehicle : ExternalVehicles)
 	{
 		const AActor* Actor = Vehicle.Actor.Get();
 		FSimAgent& Agent = OutAgents.AddDefaulted_GetRef();
 		Agent.Position = FVector2D(Actor->GetActorLocation()) * 0.01;
 		Agent.Forward = FVector2D(Actor->GetActorForwardVector()).GetSafeNormal();
-		Agent.Velocity = FVector2D(Actor->GetVelocity()) * 0.01;
+		if (Vehicle.bHasLastPosition && DeltaTime > 1e-4f)
+		{
+			Agent.Velocity = (Agent.Position - Vehicle.LastPositionM) / DeltaTime;
+		}
+		Vehicle.LastPositionM = Agent.Position;
+		Vehicle.bHasLastPosition = true;
 		Agent.HalfLengthM = Vehicle.HalfLengthM;
 		Agent.HalfWidthM = Vehicle.HalfWidthM;
 	}
@@ -213,6 +220,19 @@ FLinearColor UAITrafficSubsystem::PickPaint(const FTrafficVehicleModel& Model)
 	return PaintPalette[0].Color;
 }
 
+bool UAITrafficSubsystem::IsNearExternalVehicle(const FVector& PositionM, float DistanceM) const
+{
+	for (const FExternalVehicle& Vehicle : ExternalVehicles)
+	{
+		const AActor* Actor = Vehicle.Actor.Get();
+		if (Actor && FVector2D::Distance(FVector2D(Actor->GetActorLocation()) * 0.01, FVector2D(PositionM)) < DistanceM)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 bool UAITrafficSubsystem::TrySpawnOne(const FVector& ViewerCm, const FVector2D& ViewerForward)
 {
 	const TArray<int32>& SpawnLanes = Lanes.GetSpawnLanes();
@@ -249,9 +269,9 @@ bool UAITrafficSubsystem::TrySpawnOne(const FVector& ViewerCm, const FVector2D& 
 		}
 		const FVector2D Direction = (FVector2D(Position) - Viewer) / Distance;
 		const float InFront = float(FVector2D::DotProduct(Direction, ViewerForward));
-		if (StagingMode == 2 && InFront < 0.6f)
+		if (StagingMode == 2 && FVector2D::Distance(FVector2D(Position), Viewer + ViewerForward * StagingFocusM) > StagingRadiusM)
 		{
-			continue;
+			continue;   // staging puts the cars where the viewer is looking
 		}
 		if (!bAnywhere && InFront > ViewConeCosine && Distance < VisibleSpawnDistanceM)
 		{
@@ -261,7 +281,7 @@ bool UAITrafficSubsystem::TrySpawnOne(const FVector& ViewerCm, const FVector2D& 
 		{
 			continue;
 		}
-		if (!Simulation.IsAreaFree(Position, SpawnClearanceM))
+		if (!Simulation.IsAreaFree(Position, SpawnClearanceM) || IsNearExternalVehicle(Position, SpawnClearanceM))
 		{
 			continue;
 		}
@@ -521,7 +541,7 @@ void UAITrafficSubsystem::Tick(float TickDeltaTime)
 	}
 	SecondsSinceSpawn += DeltaTime;
 	TArray<FSimAgent> Agents;
-	CollectAgents(Agents);
+	CollectAgents(Agents, DeltaTime);
 	RemoveFarCars(ViewerCm, ViewerForward);
 	SpawnCars(ViewerCm, ViewerForward);
 	Simulation.Step(FMath::Min(DeltaTime, 0.1f), Traffic->GetTrafficTime(), Agents);
