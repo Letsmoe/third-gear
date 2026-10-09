@@ -18,6 +18,9 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Tasks/Task.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "TrafficSubsystem.h"
+#include "WorldFurniture.h"
 #include "WorldTileActor.h"
 #include "WorldTileData.h"
 #include "WorldTileMesher.h"
@@ -29,6 +32,8 @@ namespace
 constexpr float EyeHeightCm = 120.f;
 constexpr float UpdateIntervalSeconds = 0.25f;
 constexpr int32 ShrubCullDistanceCm = 40000;
+/** Height the car is dropped from with -StartPose; the ground trace in the game mode reaches 80 m. */
+constexpr float StartPoseHeightCm = 4000.f;
 }
 
 /** One tile meshed at one detail level by a worker. */
@@ -52,6 +57,8 @@ struct FTileSpawnJob
 	int32 NextStep = 0;
 	double SpawnSeconds = 0.0;
 	double LongestStepSeconds = 0.0;
+	/** Next part of the street furniture to add (see AWorldTileActor::AddFurnitureStep). */
+	int32 FurnitureStep = 0;
 };
 
 /** State shared with worker tasks, which may still finish after the streamer is gone. */
@@ -145,6 +152,10 @@ bool AWorldStreamer::EnsureIndex()
 	}
 	AddHorizonTiles();
 	Start = Root->GetObjectField(TEXT("start"));
+	if (UTrafficSubsystem* Traffic = GetWorld()->GetSubsystem<UTrafficSubsystem>())
+	{
+		Traffic->LoadRegion(WorldDir);
+	}
 	Shared = MakeShared<FWorldStreamerShared>();
 	bIndexLoaded = true;
 	UE_LOG(LogWorldStreamer, Log, TEXT("World %s: %d tiles from %s"), *Region, Tiles.Num(), *WorldDir);
@@ -203,6 +214,63 @@ void AWorldStreamer::PrepareAssets()
 	}
 	MeshingContext = Context;
 	PreloadMaterials();
+	PrepareFurniture();
+}
+
+void AWorldStreamer::PrepareFurniture()
+{
+	const FString Folder = TEXT("/Game/World/Furniture/Meshes");
+	TArray<FString> Names = {FurnitureAssets::Lamp, FurnitureAssets::SignalPole, FurnitureAssets::SignalHead, FurnitureAssets::SignPlate,
+		FurnitureAssets::SignClamp};
+	for (const int32 Height : GetSignPoleHeightsCm())
+	{
+		Names.Add(FString::Printf(TEXT("SM_SignPole_%d"), Height));
+	}
+	for (const FString& Name : Names)
+	{
+		UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("%s/%s.%s"), *Folder, *Name, *Name), nullptr, LOAD_NoWarn);
+		if (Mesh)
+		{
+			FurnitureMeshes.Add(Name, Mesh);
+		}
+		else
+		{
+			UE_LOG(LogWorldStreamer, Warning, TEXT("Street furniture mesh %s missing; run Scripts/create_furniture_assets.py"), *Name);
+		}
+	}
+	SignMasterMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/World/Furniture/M_SignFace.M_SignFace"), nullptr, LOAD_NoWarn);
+	// Loading a sign texture the first time a tile needs it stalls that frame, so load them all up front.
+	TArray<FAssetData> Textures;
+	FAssetRegistryModule::GetRegistry().GetAssetsByPath(FName(TEXT("/Game/World/Furniture/Signs")), Textures);
+	for (const FAssetData& Asset : Textures)
+	{
+		if (UTexture* Texture = Cast<UTexture>(Asset.GetAsset()))
+		{
+			SignTextures.Add(Texture);
+		}
+	}
+}
+
+UMaterialInterface* AWorldStreamer::FindSignMaterial(const FString& GraphicName)
+{
+	if (TObjectPtr<UMaterialInterface>* Found = SignMaterials.Find(GraphicName))
+	{
+		return *Found;
+	}
+	UTexture* Texture = LoadObject<UTexture>(nullptr, *SignTexturePath(GraphicName), nullptr, LOAD_NoWarn);
+	UMaterialInterface* Material = nullptr;
+	if (Texture && SignMasterMaterial)
+	{
+		UMaterialInstanceDynamic* Instance = UMaterialInstanceDynamic::Create(SignMasterMaterial, this);
+		Instance->SetTextureParameterValue(TEXT("Graphic"), Texture);
+		Material = Instance;
+	}
+	else
+	{
+		UE_LOG(LogWorldStreamer, Warning, TEXT("Sign graphic %s missing"), *GraphicName);
+	}
+	SignMaterials.Add(GraphicName, Material);
+	return Material;
 }
 
 void AWorldStreamer::PreloadMaterials()
@@ -241,6 +309,15 @@ bool AWorldStreamer::GetStartTransform(FTransform& OutTransform)
 	if (!EnsureIndex() || !Start.IsValid())
 	{
 		return false;
+	}
+	// -StartPose=x,y,yaw (metres, degrees) starts somewhere else, e.g. at a signal junction; the car is dropped onto the ground.
+	FString Pose;
+	TArray<FString> Parts;
+	if (FParse::Value(FCommandLine::Get(), TEXT("StartPose="), Pose, /*bShouldStopOnSeparator=*/false) && Pose.ParseIntoArray(Parts, TEXT(",")) == 3)
+	{
+		OutTransform = FTransform(FRotator(0.0, FCString::Atod(*Parts[2]), 0.0),
+			FVector(FCString::Atod(*Parts[0]) * 100.0, FCString::Atod(*Parts[1]) * 100.0, StartPoseHeightCm));
+		return true;
 	}
 	const FVector Location(Start->GetNumberField(TEXT("x")) * 100.0, Start->GetNumberField(TEXT("y")) * 100.0,
 		Start->GetNumberField(TEXT("z")) * 100.0 + EyeHeightCm);
@@ -378,6 +455,31 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 		const TObjectPtr<UStaticMesh>* Model = LoadedPlantModels.Find(Group.Model);
 		Actor->AddPlants(Model ? Model->Get() : nullptr, Group.Transforms, Group.Model == TEXT("shrub") ? ShrubCullDistanceCm : 0);
 	}
+	else if (Step == ChunkSteps + 3 + PlantSteps)
+	{
+		if (Meshes.Furniture)
+		{
+			FFurnitureMeshes Furniture;
+			const auto Find = [this](const TCHAR* Name) { const TObjectPtr<UStaticMesh>* Mesh = FurnitureMeshes.Find(Name); return Mesh ? Mesh->Get() : nullptr; };
+			Furniture.Lamp = Find(FurnitureAssets::Lamp);
+			Furniture.SignalPole = Find(FurnitureAssets::SignalPole);
+			Furniture.SignalHead = Find(FurnitureAssets::SignalHead);
+			Furniture.SignPlate = Find(FurnitureAssets::SignPlate);
+			Furniture.SignClamp = Find(FurnitureAssets::SignClamp);
+			for (const int32 Height : GetSignPoleHeightsCm())
+			{
+				Furniture.SignPoles.Add(Height, Find(*FString::Printf(TEXT("SM_SignPole_%d"), Height)));
+			}
+			for (const TPair<FString, TArray<FTransform>>& Plates : Meshes.Furniture->SignPlates)
+			{
+				Furniture.SignMaterials.Add(Plates.Key, FindSignMaterial(Plates.Key));
+			}
+			if (!Actor->AddFurnitureStep(*Meshes.Furniture, Furniture, Job.FurnitureStep++))
+			{
+				--Job.NextStep; // more parts to add: come back to this step
+			}
+		}
+	}
 	else
 	{
 		if (bNear)
@@ -396,8 +498,8 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 	const double StepSeconds = FPlatformTime::Seconds() - StartTime;
 	if (StepSeconds > 0.008)
 	{
-		UE_LOG(LogWorldStreamer, Log, TEXT("Tile %s detail %d: step %d of %d took %.1f ms"), *FPaths::GetBaseFilename(Tile.Path), Build.Detail,
-			Step, ChunkSteps + PlantSteps + 4, StepSeconds * 1000.0);
+		UE_LOG(LogWorldStreamer, Log, TEXT("Tile %s detail %d: step %d of %d took %.1f ms (furniture part %d)"), *FPaths::GetBaseFilename(Tile.Path), Build.Detail,
+			Step, ChunkSteps + PlantSteps + 5, StepSeconds * 1000.0, Job.FurnitureStep - 1);
 	}
 	Job.SpawnSeconds += StepSeconds;
 	Job.LongestStepSeconds = FMath::Max(Job.LongestStepSeconds, StepSeconds);
@@ -456,6 +558,28 @@ void AWorldStreamer::EnableCollisionNear(const FVector& Location, int32 MaxChunk
 			return;
 		}
 		BestActor->EnableChunkCollision(BestChunk, bCookNow);
+	}
+}
+
+void AWorldStreamer::EnableFurnitureCollisionNear(const FVector& Location, int32 MaxComponents)
+{
+	const FVector2D Viewer(Location);
+	int32 Enabled = 0;
+	for (const FTileState& Tile : Tiles)
+	{
+		AWorldTileActor* Actor = Tile.Actor.Get();
+		if (!Actor || Tile.ShownDetail != int32(EWorldTileDetail::Near) || DistanceToBox2D(Tile.Bounds, Viewer) > CollisionDistance)
+		{
+			continue;
+		}
+		while (Enabled < MaxComponents && Actor->EnableNextFurnitureCollision())
+		{
+			++Enabled;
+		}
+		if (Enabled >= MaxComponents)
+		{
+			return;
+		}
 	}
 }
 
@@ -544,6 +668,7 @@ void AWorldStreamer::LoadAroundBlocking(const FVector& Location)
 	}
 	RunSpawnJobs(/*BudgetSeconds=*/MAX_dbl, /*bCookNow=*/true);
 	EnableCollisionNear(Location, MAX_int32, /*bCookNow=*/true);
+	EnableFurnitureCollisionNear(Location, MAX_int32);
 	UE_LOG(LogWorldStreamer, Log, TEXT("Loaded %d tiles around %s in %.2f s"), Builds.Num(), *Location.ToString(),
 		FPlatformTime::Seconds() - StartTime);
 }
@@ -604,6 +729,7 @@ void AWorldStreamer::Tick(float DeltaSeconds)
 	if (bHasViewer)
 	{
 		EnableCollisionNear(Location, 1, /*bCookNow=*/false);
+		EnableFurnitureCollisionNear(Location, 1);
 	}
 	SecondsSinceUpdate += DeltaSeconds;
 	if (bHasViewer && SecondsSinceUpdate >= UpdateIntervalSeconds)

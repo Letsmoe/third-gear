@@ -95,6 +95,24 @@ ACarPawn::ACarPawn(const FObjectInitializer& ObjectInitializer)
 		Dashboard->SetTextMaterial(TextMaterial);
 	}
 
+	// Rule violations appear just below the speed readout, small and in warning colour, and fade after a few seconds.
+	RuleMessage = CreateDefaultSubobject<UTextRenderComponent>(TEXT("RuleMessage"));
+	RuleMessage->SetupAttachment(CarMesh);
+	RuleMessage->SetRelativeLocation(Settings->DashboardLocation + FVector(0.f, 0.f, -4.f));
+	RuleMessage->SetRelativeRotation(FRotator(15.f, 180.f, 0.f));
+	RuleMessage->SetHorizontalAlignment(EHTA_Center);
+	RuleMessage->SetVerticalAlignment(EVRTA_TextCenter);
+	RuleMessage->SetWorldSize(1.8f);
+	RuleMessage->SetTextRenderColor(FColor(255, 90, 60));
+	RuleMessage->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	RuleMessage->SetCastShadow(false);
+	RuleMessage->SetText(FText::GetEmpty());
+	if (UMaterialInterface* TextMaterial = Settings->DashboardTextMaterial.LoadSynchronous())
+	{
+		RuleMessage->SetTextMaterial(TextMaterial);
+	}
+	RuleChecker = CreateDefaultSubobject<UTrafficRuleComponent>(TEXT("RuleChecker"));
+
 	CarAudio = CreateDefaultSubobject<UCarAudioComponent>(TEXT("CarAudio"));
 
 	AutoPossessPlayer = EAutoReceiveInput::Disabled;
@@ -117,6 +135,7 @@ FCarTelemetry ACarPawn::GetTelemetry() const
 void ACarPawn::BeginPlay()
 {
 	Super::BeginPlay();
+	RuleChecker->OnViolation.AddDynamic(this, &ACarPawn::OnRuleViolation);
 
 	if (IsHMDActive())
 	{
@@ -184,6 +203,21 @@ void ACarPawn::Tick(float DeltaSeconds)
 	const FCarTelemetry Telemetry = Movement->GetTelemetry();
 	UpdateForceFeedback(Telemetry);
 	UpdateDashboard(Telemetry);
+	if (RuleMessageHideTime > 0.0 && GetWorld()->GetTimeSeconds() > RuleMessageHideTime)
+	{
+		RuleMessage->SetText(FText::GetEmpty());
+		RuleMessageHideTime = 0.0;
+	}
+}
+
+void ACarPawn::OnRuleViolation(const FTrafficViolation& Violation)
+{
+	if (!Violation.bCounts)
+	{
+		return; // amber runs are only logged
+	}
+	RuleMessage->SetText(FText::FromString(Violation.Message));
+	RuleMessageHideTime = GetWorld()->GetTimeSeconds() + 6.0;
 }
 
 FCarDriverInput ACarPawn::GatherInput(float DeltaSeconds)

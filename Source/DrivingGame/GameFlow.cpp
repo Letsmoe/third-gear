@@ -18,6 +18,7 @@ bool HasBatchSwitch()
 	const TCHAR* CommandLine = FCommandLine::Get();
 	FString IgnoredValue;
 	return FParse::Param(CommandLine, TEXT("NoMenu")) || FParse::Param(CommandLine, TEXT("SeatShot")) || FParse::Param(CommandLine, TEXT("DriveTest"))
+		|| FParse::Param(CommandLine, TEXT("RuleTest"))
 		|| FParse::Param(CommandLine, TEXT("SpawnCar")) || FParse::Param(CommandLine, TEXT("FreeCam")) || FParse::Param(CommandLine, TEXT("benchmark"))
 		|| FParse::Value(CommandLine, TEXT("Shots="), IgnoredValue) || FParse::Value(CommandLine, TEXT("StreamTest="), IgnoredValue)
 		|| FParse::Value(CommandLine, TEXT("ProfileGPUAfter="), IgnoredValue);

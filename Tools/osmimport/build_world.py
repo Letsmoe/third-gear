@@ -4,7 +4,12 @@
 
 Output: <data root>/world/<region>/tile_<ix>_<iy>.tgtile and world.json (tile index, start pose, attribution).
 Only data goes in: terrain and road heights, land cover, surface outlines, marking lines, building footprints with
-their heights and styles, and plant positions. The game builds every mesh from it while you drive.
+their heights and styles, plant positions and street furniture (lamps, signal poles, signs). The game builds every mesh
+from it while you drive. traffic.json next to world.json holds the signal junctions with their approaches, stop lines
+and phases, and the speed limit of every road.
+
+--output-name writes to another folder under world/ (copy cache.pkl there first to use --reuse), so a tile format
+change can be tried without breaking the data other checkouts read.
 """
 import argparse
 import json
@@ -20,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bootstrap"))
 import data_root  # noqa: E402
 from build_area import MARKING_STYLE, SURFACE_SECTIONS, find_start  # noqa: E402
-from osmimport import buildings, canopy, dem, geo, landcover, osm, paths, roads, terrain, vegetation  # noqa: E402
+from osmimport import buildings, canopy, dem, furniture, geo, landcover, osm, paths, roads, terrain, vegetation  # noqa: E402
 from osmimport import worldtile  # noqa: E402
 
 GRID_CELL = 1.0
@@ -116,6 +121,60 @@ def write_markings(writer, net):
         writer.add_marking("Marking_White", MARKING_STYLES[kind], line, width, dash)
 
 
+def poi_ground_height(x, y, net, ground, on_pavement):
+    """Foot height of a pole: pavement level where it stands on the pavement, else the conformed terrain."""
+    if on_pavement:
+        return float(net.height.sample(x, y)) + roads.KERB_HEIGHT
+    return float(ground.sample(x, y))
+
+
+def write_stop_lines(writers, junctions):
+    """Painted stop lines (Haltlinie, 0.5 m wide) across each approach, just before the signal's line of sight."""
+    for junction in junctions:
+        for approach in junction["approaches"]:
+            x0, y0, x1, y1 = approach["stop_line"]
+            length = float(np.hypot(x1 - x0, y1 - y0))
+            if length < 1.0:
+                continue
+            ux, uy = (x1 - x0) / length, (y1 - y0) / length
+            back_x, back_y = -approach["direction"][0] * 0.25, -approach["direction"][1] * 0.25
+            inset = 0.15
+            line = shapely.LineString([(x0 + ux * inset + back_x, y0 + uy * inset + back_y),
+                                       (x1 - ux * inset + back_x, y1 - uy * inset + back_y)])
+            for writer in writers.values():
+                if writer.box.intersects(line):
+                    writer.add_marking("Marking_White", MARKING_STYLES["solid"], line, 0.5, None)
+
+
+def write_furniture(writers, area, builder, net, ground):
+    """Lamps, signal poles and signs into the tiles they stand in."""
+    pavement = net.pavement
+    shapely.prepare(pavement)
+
+    def foot_z(x, y):
+        return poi_ground_height(x, y, net, ground, pavement.contains(shapely.Point(x, y)))
+
+    for lamp in builder.lamps:
+        writer = writers.get(tile_key(area, lamp["x"], lamp["y"]))
+        if writer is not None:
+            mast = 7.0 if lamp["source"] == "osm" else 6.5
+            writer.add_poi(worldtile.POI_LAMP, lamp["x"], lamp["y"], foot_z(lamp["x"], lamp["y"]), lamp["yaw"],
+                           variant=0, param0=mast, param1=1.6, flags=1 if lamp["source"] == "osm" else 0)
+    for head in builder.heads:
+        writer = writers.get(tile_key(area, head["x"], head["y"]))
+        if writer is not None:
+            writer.add_poi(worldtile.POI_SIGNAL_HEAD, head["x"], head["y"], foot_z(head["x"], head["y"]), head["yaw"],
+                           param0=3.4, link=head["approach"], flags=1 if head["side"] == "left" else 0)
+    for sign in builder.signs:
+        writer = writers.get(tile_key(area, sign["x"], sign["y"]))
+        if writer is None:
+            continue
+        names = sign["names"]
+        second = writer.names(names[1]) if len(names) > 1 else worldtile.NO_VARIANT
+        writer.add_poi(worldtile.POI_SIGN, sign["x"], sign["y"], foot_z(sign["x"], sign["y"]), sign["yaw"],
+                       variant=writer.names(names[0]), variant2=second)
+
+
 def write_building(writer, osm_id, tags, footprint, ground):
     """One building footprint with its eave height, roof shape and look (decided by buildings.py's rules)."""
     btype, eave, roof = buildings.building_params(osm_id, tags, footprint)
@@ -151,10 +210,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("region", choices=sorted(geo.AREAS))
     parser.add_argument("--reuse", action="store_true", help="reuse the cached OSM, DEM, road and terrain step")
+    parser.add_argument("--output-name", help="folder under world/ to write to (default: the region name)")
     args = parser.parse_args()
     area = geo.AREAS[args.region]
     geodata = data_root.geodata_dir()
-    out_dir = data_root.world_dir(area.name)
+    out_dir = data_root.world_dir(args.output_name or area.name)
     os.makedirs(out_dir, exist_ok=True)
 
     data, heights, building_union, net, surfaces, ground = load_sources(
@@ -162,11 +222,18 @@ def main():
     plants, plant_z, canopy_grid = detect_plants(data, area, geodata, heights, building_union, net, surfaces, ground)
     cover = landcover.LandCover(data.areas)
 
+    builder = furniture.FurnitureBuilder(data, net, building_union)
+    traffic = builder.build()
+    log(f"furniture: {len(traffic['junctions'])} signal junctions, {len(builder.heads)} signal poles, "
+        f"{len(builder.signs)} signs, {len(builder.lamps)} lamps")
+
     writers = {(ix, iy): worldtile.TileWriter((x0, y0, x1, y1)) for ix, iy, x0, y0, x1, y1 in area.tiles()}
     for (ix, iy), writer in writers.items():
         write_grid(writer, (writer.x0, writer.y0, writer.x1, writer.y1), ground, net, cover, canopy_grid)
         write_surfaces(writer, net, surfaces)
         write_markings(writer, net)
+    write_stop_lines(writers, traffic["junctions"])
+    write_furniture(writers, area, builder, net, ground)
     for osm_id, tags, footprint in building_footprints(data):
         point = footprint.representative_point()
         writer = writers.get(tile_key(area, point.x, point.y))
@@ -192,8 +259,11 @@ def main():
         "bounds_m": [area.x_min, area.y_min, area.x_max, area.y_max],
         "tiles": tiles,
         "start": find_start(net),
+        "traffic": "traffic.json",
         "attribution": ATTRIBUTION,
     }
+    with open(os.path.join(out_dir, "traffic.json"), "w") as f:
+        json.dump(traffic, f, separators=(",", ":"))
     with open(os.path.join(out_dir, "world.json"), "w") as f:
         json.dump(world, f, indent=1)
     size = sum(os.path.getsize(os.path.join(out_dir, t["file"])) for t in tiles)

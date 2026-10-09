@@ -1,0 +1,72 @@
+# Third Gear texture set. Every prompt keeps the capture tail: CHORD reads baked lighting as colour, so the photo has
+# to look like a flat-lit scan. Never name an unwanted thing in a prompt, not even negated; use `negative`.
+#
+# Optional per material:
+#   seed_image      photo (path under raw_assets) the latent starts from, with seed_denoise strength; fixes
+#                   top-down organic ground that text-to-image turns into mud
+#   albedo_mean     target mean reflectance (linear albedo) of the colour map
+#   roughness_scale, roughness_offset, detail (normal micro detail), ao_strength
+# One 4096 px tile stands for `tile_m` metres in Scripts/create_materials.py.
+
+defaults:
+  size: 4096
+  base_size: 1024
+  refine_size: 1024
+  base_steps: 32
+  refine_steps: 20
+  refine_denoise: 0.3
+  cfg: 5.5
+  seed: 1
+  seed_denoise: 0.55
+  saturation: 1.0
+  photo_detail: 0.8
+  dit_size: 2048
+  flux_steps: 6
+  zimage_steps: 8
+  seam_band: 0.2
+  seam_denoise: 0.7
+  detail: 0.5
+  detail_radius: 6
+  ao_strength: 0.6
+  roughness_scale: 1.0
+  roughness_offset: 0.0
+  roughness_min: 0.05
+  negative: >-
+    blurry, soft focus, vignette, drop shadow, cast shadow, baked lighting, specular highlights, glare, wet,
+    watermark, text, border, frame, perspective, depth of field, object, low detail, illustration, render, cartoon
+
+materials:
+  # Only what no scan covers well. Poly Haven and ambientCG have good asphalt, slabs, paving, cobbles, clinker
+  # brick, plaster and clay roofs (see Scripts/import_textures.py); generated asphalt, paving and brick came out worse
+  # than those scans, so they are not kept here.
+  - name: lawn
+    seed: 2121
+    albedo_mean: 0.17
+    detail: 0.8
+    roughness_min: 0.7
+    prompt: >-
+      top-down photograph of a green lawn in northern Germany, short dense grass with fine blades, mixed fresh green
+      and olive green, a little clover and a few daisy leaves, thick even turf with no bare soil,
+      overcast diffuse daylight, flat lighting, no shadows, sharp focus, high resolution macro photography of turf
+
+  - name: roof_tiles_anthracite
+    seed: 1717
+    albedo_mean: 0.07
+    detail: 1.0
+    roughness_min: 0.6
+    prompt: >-
+      straight-on photograph of a roof surface covered with anthracite dark grey concrete roof tiles, Dachsteine,
+      each tile with a wide flat middle and two narrow ribs, overlapping in regular horizontal rows with the
+      side joints offset, matt dark grey with slight colour variation between tiles, a little dust,
+      overcast diffuse daylight, flat lighting, no shadows, sharp focus, high resolution
+
+  - name: lawn_leaf_litter
+    seed: 3131
+    albedo_mean: 0.13
+    detail: 0.9
+    roughness_min: 0.7
+    prompt: >-
+      top-down photograph of a shaded green lawn under trees in northern Germany, short grass still mostly green,
+      scattered fallen brown and yellow leaves and a few small twigs lying on the grass, about one fifth of the ground
+      covered by leaves, the rest green grass blades and a little moss,
+      overcast diffuse daylight, flat lighting, no shadows, sharp focus, high resolution macro photography of turf

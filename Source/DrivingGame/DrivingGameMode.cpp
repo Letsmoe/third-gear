@@ -9,6 +9,7 @@
 #include "AudioTest.h"
 #include "DriveTest.h"
 #include "GameFlow.h"
+#include "RuleTest.h"
 #include "StreamTest.h"
 #include "GameFramework/PlayerStart.h"
 #include "SeatedVRPawn.h"
@@ -28,7 +29,7 @@ bool ADrivingGameMode::UseFreeCamera()
 {
 	FString Value;
 	return FParse::Param(FCommandLine::Get(), TEXT("FreeCam")) || FParse::Value(FCommandLine::Get(), TEXT("Shots="), Value)
-		|| FParse::Value(FCommandLine::Get(), TEXT("StreamTest="), Value);
+		|| FParse::Value(FCommandLine::Get(), TEXT("StreamTest="), Value) || FParse::Param(FCommandLine::Get(), TEXT("RuleTest"));
 }
 
 bool ADrivingGameMode::UsesFreeCameraPawn() const
@@ -46,7 +47,7 @@ FVector ADrivingGameMode::FindGroundBelow(const FVector& Location) const
 	// First static surface below the player start (ignoring the player start's own capsule, pawns etc.).
 	TArray<FHitResult> Hits;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(CarSpawnTrace), /*bTraceComplex=*/true);
-	GetWorld()->LineTraceMultiByObjectType(Hits, Location, Location - FVector(0, 0, 1000), FCollisionObjectQueryParams(ECC_WorldStatic), Params);
+	GetWorld()->LineTraceMultiByObjectType(Hits, Location, Location - FVector(0, 0, 8000), FCollisionObjectQueryParams(ECC_WorldStatic), Params);
 	for (const FHitResult& Hit : Hits)
 	{
 		if (Hit.bBlockingHit && !Cast<APlayerStart>(Hit.GetActor()) && !Cast<APawn>(Hit.GetActor()))
@@ -55,7 +56,7 @@ FVector ADrivingGameMode::FindGroundBelow(const FVector& Location) const
 		}
 	}
 	FHitResult Hit;
-	if (GetWorld()->LineTraceSingleByObjectType(Hit, Location, Location - FVector(0, 0, 1000), FCollisionObjectQueryParams(ECC_WorldStatic), Params))
+	if (GetWorld()->LineTraceSingleByObjectType(Hit, Location, Location - FVector(0, 0, 8000), FCollisionObjectQueryParams(ECC_WorldStatic), Params))
 	{
 		return Hit.ImpactPoint;
 	}
@@ -141,6 +142,12 @@ void ADrivingGameMode::BeginPlay()
 	if (FParse::Param(FCommandLine::Get(), TEXT("AudioTest")) && !UseFreeCamera())
 	{
 		GetWorld()->SpawnActor<AAudioTestRunner>();
+	}
+
+	// Rule checker test on the real signals and roads of the region (see Scripts/rule_test.sh).
+	if (FParse::Param(FCommandLine::Get(), TEXT("RuleTest")))
+	{
+		GetWorld()->SpawnActor<ARuleTestRunner>();
 	}
 
 	// Automated run through the generated world (see Scripts/stream_test.sh).
