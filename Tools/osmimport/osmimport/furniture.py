@@ -190,6 +190,7 @@ class FurnitureBuilder:
         self.junctions = []
         self.signs = []
         self.lamps = []
+        self.zebras = []  # zebra crossings on a road: dict with x, y, direction (unit, along the road), width
         self.heads = []   # poles carrying signal heads: dict with approach, x, y, yaw, height, side
         self._road_tree = STRtree([self.graph.lines[w.id] for w in ways])
         self._road_ways = ways
@@ -559,9 +560,28 @@ class FurnitureBuilder:
             elif tags.get("highway") == "crossing" and tags.get("crossing") in {"zebra", "marked"} \
                     or tags.get("crossing_ref") == "zebra":
                 names = ["Zeichen_350"]
+                self._add_zebra(point)
             if not names:
                 continue
             self._place_point_sign(point, names)
+
+    def _add_zebra(self, point):
+        """Records a zebra crossing's centre, the road direction there and the carriageway width, for the stripes.
+        Nodes on a road junction are skipped; there is no single crossing direction."""
+        entries = self.graph.at_node.get(point.id)
+        if entries:
+            if self.graph.is_junction(point.id):
+                return
+            way, index = entries[0]
+            s = self.graph.node_s(way, index)
+        else:
+            found = self.nearest_way(point.x, point.y, max_distance=6.0)
+            if found is None:
+                return
+            way, s, _ = found
+        position, direction = self.graph.point_and_direction(way, s, +1)
+        self.zebras.append({"x": float(position[0]), "y": float(position[1]), "direction": (float(direction[0]), float(direction[1])),
+                            "width": float(self.graph.widths[way.id])})
 
     def _names_from_tags(self, tags):
         """Graphic names for traffic_sign=DE:250,1020-30[...] values we can show."""

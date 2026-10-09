@@ -114,11 +114,52 @@ def write_surfaces(writer, net, surfaces):
         writer.add_surface("Road_Asphalt", polygon, worldtile.HEIGHT_RAMP, [z_start, z_end, *start, *end])
 
 
-def write_markings(writer, net):
-    """Lane and edge marking lines."""
+def write_markings(writer, net, cutout=None):
+    """Lane and edge marking lines; cutout (a polygon) is left unpainted, where zebra stripes go."""
     for kind, line in net.markings:
         width, dash = MARKING_STYLE[kind]
-        writer.add_marking("Marking_White", MARKING_STYLES[kind], line, width, dash)
+        parts = [line]
+        if cutout is not None:
+            remaining = line.difference(cutout)
+            parts = [part for part in getattr(remaining, "geoms", [remaining])
+                     if isinstance(part, shapely.LineString) and not part.is_empty]
+        for part in parts:
+            writer.add_marking("Marking_White", MARKING_STYLES[kind], part, width, dash)
+
+
+ZEBRA_BAR_WIDTH = 0.5
+ZEBRA_BAR_LENGTH = 3.5
+ZEBRA_BAR_LENGTH_WIDE_ROAD = 4.0
+ZEBRA_WIDE_ROAD = 7.5
+
+
+def zebra_bars(zebra):
+    """The white bars of one zebra crossing (Fuss\u00fcbergang): 0.5 m bars with 0.5 m gaps, parallel to the road and
+    spread across the carriageway, centred on it. Returns (bar centre lines, outline polygon of the whole crossing)."""
+    ux, uy = zebra["direction"]
+    nx, ny = -uy, ux
+    width = zebra["width"]
+    length = ZEBRA_BAR_LENGTH_WIDE_ROAD if width >= ZEBRA_WIDE_ROAD else ZEBRA_BAR_LENGTH
+    count = max(int((width - ZEBRA_BAR_WIDTH) / (2 * ZEBRA_BAR_WIDTH)) + 1, 1)
+    first = -(count - 1) * ZEBRA_BAR_WIDTH  # bars are 1 m apart centre to centre
+    bars = []
+    for index in range(count):
+        lateral = first + index * 2 * ZEBRA_BAR_WIDTH
+        cx, cy = zebra["x"] + nx * lateral, zebra["y"] + ny * lateral
+        bars.append(shapely.LineString([(cx - ux * length / 2, cy - uy * length / 2),
+                                        (cx + ux * length / 2, cy + uy * length / 2)]))
+    outline = shapely.MultiLineString(bars).buffer(ZEBRA_BAR_WIDTH, cap_style="flat").convex_hull
+    return bars, outline
+
+
+def write_zebras(writers, zebras):
+    """Zebra stripes into the tiles they touch."""
+    for zebra in zebras:
+        bars, _ = zebra_bars(zebra)
+        for bar in bars:
+            for writer in writers.values():
+                if writer.box.intersects(bar):
+                    writer.add_marking("Marking_White", MARKING_STYLES["solid"], bar, ZEBRA_BAR_WIDTH, None)
 
 
 def poi_ground_height(x, y, net, ground, on_pavement):
@@ -227,12 +268,17 @@ def main():
     log(f"furniture: {len(traffic['junctions'])} signal junctions, {len(builder.heads)} signal poles, "
         f"{len(builder.signs)} signs, {len(builder.lamps)} lamps")
 
+    zebra_cutout = shapely.union_all([zebra_bars(z)[1] for z in builder.zebras]) if builder.zebras else None
+    zebra_nodes = sum(1 for point in data.points if point.tags.get("highway") == "crossing"
+                      and (point.tags.get("crossing") in {"zebra", "marked"} or point.tags.get("crossing_ref") == "zebra"))
+    log(f"zebra crossings: {len(builder.zebras)} striped of {zebra_nodes} crossing nodes tagged zebra or marked")
     writers = {(ix, iy): worldtile.TileWriter((x0, y0, x1, y1)) for ix, iy, x0, y0, x1, y1 in area.tiles()}
     for (ix, iy), writer in writers.items():
         write_grid(writer, (writer.x0, writer.y0, writer.x1, writer.y1), ground, net, cover, canopy_grid)
         write_surfaces(writer, net, surfaces)
-        write_markings(writer, net)
+        write_markings(writer, net, zebra_cutout)
     write_stop_lines(writers, traffic["junctions"])
+    write_zebras(writers, builder.zebras)
     write_furniture(writers, area, builder, net, ground)
     for osm_id, tags, footprint in building_footprints(data):
         point = footprint.representative_point()
