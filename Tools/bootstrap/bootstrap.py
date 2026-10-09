@@ -164,6 +164,17 @@ def materials_run():
     run_editor_script("create_materials.py")
 
 
+def facades_done():
+    """The Megascans texture sets are imported and the facade materials exist."""
+    return os.path.exists(os.path.join(REPO, "Content", "World", "Facades", "M_Facade_Brick.uasset"))
+
+
+def facades_run():
+    """Imports the Megascans from the data root's raw assets (Fab content, downloaded by hand) and builds the facade materials."""
+    run_editor_script("import_megascans.py")
+    run_editor_script("create_facade_materials.py")
+
+
 def trees_done():
     """The tree models have been baked."""
     return has_files(os.path.join(REPO, "Content", "Vegetation"), "**/*.uasset")
@@ -223,6 +234,7 @@ STEPS = {
     "car": (car_done, car_run),
     "textures": (textures_done, textures_run),
     "materials": (materials_done, materials_run),
+    "facades": (facades_done, facades_run),
     "trees": (trees_done, trees_run),
     "grass": (grass_done, grass_run),
     "leaves": (leaves_done, leaves_run),

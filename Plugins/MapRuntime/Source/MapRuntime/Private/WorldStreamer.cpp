@@ -315,14 +315,30 @@ void AWorldStreamer::PreloadMaterials()
 	}
 }
 
+UMaterialInterface* AWorldStreamer::FindBuildingMaterial(const FString& Section) const
+{
+	// The scanned facade and roof materials (Scripts/create_facade_materials.py) replace the plain ones where they exist.
+	const bool bBuildingSection = Section.StartsWith(TEXT("Facade_")) || Section.StartsWith(TEXT("Roof_"));
+	if (!bBuildingSection || FParse::Param(FCommandLine::Get(), TEXT("NoFacadeMaterials")))
+	{
+		return nullptr;
+	}
+	const FString Path = FString::Printf(TEXT("%s/M_%s.M_%s"), *BuildingMaterialFolder, *Section, *Section);
+	return LoadObject<UMaterialInterface>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+}
+
 UMaterialInterface* AWorldStreamer::FindMaterial(const FString& Section)
 {
 	if (TObjectPtr<UMaterialInterface>* Found = Materials.Find(Section))
 	{
 		return *Found;
 	}
+	UMaterialInterface* Material = FindBuildingMaterial(Section);
 	const FString Path = FString::Printf(TEXT("%s/M_%s.M_%s"), *MaterialFolder, *Section, *Section);
-	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *Path, nullptr, LOAD_NoWarn);
+	if (!Material)
+	{
+		Material = LoadObject<UMaterialInterface>(nullptr, *Path, nullptr, LOAD_NoWarn);
+	}
 	if (!Material)
 	{
 		UE_LOG(LogWorldStreamer, Warning, TEXT("Material %s missing; run Scripts/create_materials.py"), *Path);

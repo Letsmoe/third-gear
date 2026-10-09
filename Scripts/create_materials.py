@@ -769,11 +769,12 @@ def build_water():
     eal.save_loaded_asset(m)
 
 
-master = build_master()
-for section, (set_path, tile_size, opts) in SECTIONS.items():
-    build_instance(master, section, set_path, tile_size, opts)
-for section, (color, roughness, metallic) in PLAIN.items():
-    build_plain(section, color, roughness, metallic)
-build_water()
-build_terrain_master()
-unreal.log_warning(f"create_materials: master + {len(SECTIONS)} instances + water done")
+if __name__ == "__main__":  # other scripts (create_facade_materials.py) import the helpers above
+    master = build_master()
+    for section, (set_path, tile_size, opts) in SECTIONS.items():
+        build_instance(master, section, set_path, tile_size, opts)
+    for section, (color, roughness, metallic) in PLAIN.items():
+        build_plain(section, color, roughness, metallic)
+    build_water()
+    build_terrain_master()
+    unreal.log_warning(f"create_materials: master + {len(SECTIONS)} instances + water done")
