@@ -15,7 +15,7 @@
   .tags tr.derived td { color: #06c; }
   .sign-label { background: #c00; color: #fff; border: 0; font: 10px sans-serif; padding: 0 3px; box-shadow: none; }
   .sign-label::before { display: none; }
-  #status { position: absolute; bottom: 8px; left: 8px; z-index: 1000; background: rgba(255,255,255,0.9); font: 12px sans-serif; padding: 3px 8px; white-space: pre; }
+  #status { position: absolute; top: 10px; left: 60px; z-index: 1000; background: rgba(255,255,255,0.9); font: 12px sans-serif; padding: 3px 8px; white-space: pre; }
   #reload { position: absolute; top: 80px; left: 10px; z-index: 1000; font: 13px sans-serif; padding: 4px 8px; cursor: pointer; }
 </style>
 </head>
@@ -38,6 +38,7 @@ const LINE_STYLES = {
   railway:          { color: "#111111", weight: 3, dashArray: "8 6" },
   bridge:           { color: "#99bbee", weight: 1.5, fillOpacity: 0.35 },
   road_area:        { color: "#ff8c00", weight: 1, fillOpacity: 0.25 },
+  building:         { color: "#222", weight: 1, fillOpacity: 0.45 },
 };
 const POINT_STYLES = {
   traffic_signals: { color: "#000", fillColor: "#ff2020", radius: 6 },
@@ -101,7 +102,10 @@ function popupHtml(properties) {
 
 function makeLayer(collection) {
   return L.geoJSON(collection, {
-    style: feature => LINE_STYLES[feature.properties.style] || { color: "#f0f" },
+    style: feature => {
+      const style = LINE_STYLES[feature.properties.style] || { color: "#f0f" };
+      return feature.properties.fill ? { ...style, fillColor: feature.properties.fill } : style;
+    },
     pointToLayer: (feature, latlng) => {
       const style = POINT_STYLES[feature.properties.style] || { color: "#000", fillColor: "#f0f", radius: 4 };
       return L.circleMarker(latlng, { ...style, weight: 1.5, fillOpacity: 0.95 });
@@ -131,6 +135,17 @@ function showOutlines(outlines) {
   }
 }
 
+const buildingLegend = L.control({ position: "bottomleft" });
+buildingLegend.onAdd = () => L.DomUtil.create("div", "legend");
+buildingLegend.addTo(map);
+
+function showBuildingLegend(classes) {
+  buildingLegend.getContainer().innerHTML = "<strong>Building class</strong><br>" +
+    Object.entries(classes).map(([name, colour]) =>
+      `<span style="display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:middle;background:${colour};opacity:0.8"></span>${name}`
+    ).join("<br>");
+}
+
 async function loadLayers() {
   const status = document.getElementById("status");
   if (pending) pending.abort();
@@ -151,6 +166,7 @@ async function loadLayers() {
   }
   const data = await response.json();
   showOutlines(data.outlines);
+  showBuildingLegend(data.building_classes);
   for (const group of Object.values(groups)) group.clearLayers();
   if (data.too_wide) {
     status.textContent = "zoom in to see the streets";

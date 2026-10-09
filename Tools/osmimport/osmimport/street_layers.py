@@ -6,7 +6,7 @@ Every feature carries a `style` the viewer page colours by and the OSM tags show
 import shapely
 from pyproj import Transformer
 
-from . import roads
+from . import building_types, roads
 from .geo import Area
 from .osm import OsmData
 
@@ -16,6 +16,27 @@ BRIDGE_MARGIN = 1.0
 RAIL_TRACK_WIDTH = 3.0
 PATH_BRIDGE_WIDTH = 2.0
 POINT_KINDS = {"traffic_signals", "stop", "give_way", "crossing", "street_lamp", "bus_stop", "mini_roundabout"}
+
+# Fill colour of each building class in the viewer, grouped by kind: old town warm, postwar grey and blue, houses
+# green, non-residential violet and brown.
+BUILDING_CLASS_COLOURS = {
+    "gruenderzeit_clinker": "#c0392b", "brick_block_1920s": "#e67e22", "halftimbered_town": "#f1c40f",
+    "postwar_plaster": "#95a5a6", "slab_block": "#34495e", "modern": "#3498db",
+    "terraced": "#27ae60", "semidetached": "#2ecc71", "detached_postwar": "#a3e635", "villa": "#16a085",
+    "vierlande_farmhouse": "#8d6e63", "commercial_groundfloor": "#e84393", "retail_centre": "#9b59b6",
+    "public": "#6c5ce7", "industrial_hall": "#5d4037", "shed_garage": "#bdbdbd",
+}
+BUILDING_FLAGS = {
+    building_types.FLAG_ATTIC_HABITABLE: "habitable attic", building_types.FLAG_SHOP_GROUND_FLOOR: "shop ground floor",
+    building_types.FLAG_CLOSED_LEFT: "party wall left", building_types.FLAG_CLOSED_RIGHT: "party wall right",
+    building_types.FLAG_CORNER: "street corner", building_types.FLAG_COMPLEX_FOOTPRINT: "complex footprint",
+    building_types.FLAG_BARN: "barn", building_types.FLAG_TOWER: "tower block",
+}
+BUILDING_TAG_BITS = {
+    building_types.TAG_CLASS: "class", building_types.TAG_LEVELS: "levels", building_types.TAG_ROOF_SHAPE: "roof shape",
+    building_types.TAG_HEIGHT: "height", building_types.TAG_START_DATE: "start date",
+    building_types.TAG_ROOF_LEVELS: "roof levels",
+}
 
 _utm_to_wgs = Transformer.from_crs(25832, 4326, always_xy=True)
 
@@ -157,9 +178,34 @@ def add_road_area(layers: Layers, osm_id: int, tags: dict, geometry):
     layers.add("Road areas", geometry, "road_area", _properties("area", osm_id, tags))
 
 
-def build(data: OsmData) -> Layers:
-    """All street layers for the loaded OSM data, as OSM tags them."""
+def _bit_names(value: int, names: dict) -> str:
+    """The names of the bits set in value, comma separated, or "none"."""
+    set_names = [name for bit, name in names.items() if value & bit]
+    if not set_names:
+        return "none"
+    return ", ".join(set_names)
+
+
+def add_building(layers: Layers, osm_id: int, tags: dict, footprint, building_type):
+    """A building footprint, coloured by the class building_types.py gives it, with the whole typing in its pop-up."""
+    class_name = building_types.CLASS_NAMES[building_type.class_id]
+    properties = _properties(
+        "building", osm_id, tags, building_class=class_name,
+        roof=f"{building_types.ROOF_NAMES[building_type.roof_shape]}, {building_type.pitch_degrees:.0f}°",
+        storeys=building_type.storeys, attic_levels=building_type.attic_levels,
+        eave_height_m=round(building_type.eave_height, 1), storey_height_m=round(building_type.storey_height, 2),
+        footprint_m2=round(footprint.area), features=_bit_names(building_type.flags, BUILDING_FLAGS),
+        from_tags=_bit_names(building_type.tag_bits, BUILDING_TAG_BITS))
+    properties["fill"] = BUILDING_CLASS_COLOURS[class_name]
+    layers.add("Buildings", footprint, "building", properties)
+
+
+def build(data: OsmData, buildings=()) -> Layers:
+    """All street layers for the loaded OSM data, as OSM tags them, plus the given typed buildings
+    ((osm_id, tags, footprint, BuildingType) tuples)."""
     layers = Layers()
+    for osm_id, tags, footprint, building_type in buildings:
+        add_building(layers, osm_id, tags, footprint, building_type)
     for osm_id, tags, geometry in data.areas:
         if "area:highway" in tags:
             add_road_area(layers, osm_id, tags, geometry)

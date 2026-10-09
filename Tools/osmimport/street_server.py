@@ -2,7 +2,7 @@
 
   Tools/osmimport/.venv/bin/python -I Tools/osmimport/street_server.py [--port 8988]
 
-Then open http://127.0.0.1:8988/. The whole OSM extract is loaded once (about 10 s); the page asks for the features in
+Then open http://127.0.0.1:8988/. The whole OSM extract is loaded and its buildings typed once (about 25 s); the page asks for the features in
 its viewport, which are rebuilt from a freshly reloaded `osmimport/street_layers.py` on every request, so a change to it
 shows after a browser refresh without a restart.
 """
@@ -21,7 +21,8 @@ import shapely  # noqa: E402
 from pyproj import Transformer  # noqa: E402
 
 import data_root  # noqa: E402
-from osmimport import geo, osm, street_layers  # noqa: E402
+from build_world import building_footprints  # noqa: E402
+from osmimport import building_types, geo, osm, street_layers  # noqa: E402
 
 PAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "street_viewer.html")
 # The world frame of every region (same origin), wide enough to take the whole extract.
@@ -33,10 +34,15 @@ _wgs_to_utm = Transformer.from_crs(4326, 25832, always_xy=True)
 
 
 class ViewportIndex:
-    """The loaded OSM data with a spatial index, to cut out the part inside a viewport."""
+    """The loaded OSM data and the typed buildings with a spatial index, to cut out the part inside a viewport."""
 
     def __init__(self, data: osm.OsmData):
         self.data = data
+        footprints = list(building_footprints(data))
+        typer = building_types.BuildingTyper(footprints, data.roads, data.footways, data.areas)
+        self.buildings = [(osm_id, tags, footprint, typer.classify(index))
+                          for index, (osm_id, tags, footprint) in enumerate(footprints)]
+        self.building_tree = shapely.STRtree([footprint for _, _, footprint in footprints])
         self.way_lists = {"roads": data.roads, "footways": data.footways, "railways": data.railways}
         self.way_trees = {name: shapely.STRtree([shapely.LineString(way.xy) for way in ways])
                           for name, ways in self.way_lists.items()}
@@ -51,6 +57,10 @@ class ViewportIndex:
         subset.areas = [self.data.areas[index] for index in self.area_tree.query(box)]
         subset.points = [self.data.points[index] for index in self.point_tree.query(box)]
         return subset
+
+    def buildings_in(self, box) -> list:
+        """The typed buildings touching the world rectangle."""
+        return [self.buildings[index] for index in self.building_tree.query(box)]
 
 
 def viewport_box(query: dict):
@@ -87,12 +97,13 @@ class StreetViewerHandler(http.server.BaseHTTPRequestHandler):
         try:
             module = importlib.reload(street_layers)
             box = viewport_box(query)
-            body = {"outlines": region_outlines(module), "layers": {}, "too_wide": False}
+            body = {"outlines": region_outlines(module), "layers": {}, "too_wide": False,
+                    "building_classes": module.BUILDING_CLASS_COLOURS}
             x_min, y_min, x_max, y_max = box.bounds
             if max(x_max - x_min, y_max - y_min) > MAX_VIEWPORT_METRES:
                 body["too_wide"] = True
             else:
-                layers = module.build(self.index.subset(box))
+                layers = module.build(self.index.subset(box), self.index.buildings_in(box))
                 body["layers"] = module.to_geojson(layers, WHOLE_EXTRACT)
         except Exception:
             self.respond(500, "text/plain; charset=utf-8", traceback.format_exc().encode())
