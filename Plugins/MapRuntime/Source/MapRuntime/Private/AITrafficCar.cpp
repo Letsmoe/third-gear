@@ -192,6 +192,12 @@ void AAITrafficCar::Initialize(const FTrafficVehicleModel& Model, const FLinearC
 		MakeMesh(*FString::Printf(TEXT("Wheel%d"), Index), Model.Wheels[Index], Spin, -Centre);
 	}
 
+	for (int32 Slot = 0; Slot < BodyComponent->GetNumMaterials(); ++Slot)
+	{
+		UMaterialInterface* SlotMaterial = BodyComponent->GetMaterial(Slot);
+		UE_LOG(LogAITrafficCar, Verbose, TEXT("AITRAFFIC body slot %s %d: %s (%s)"), *Model.Folder, Slot, SlotMaterial ? *SlotMaterial->GetName() : TEXT("none"),
+			*Model.Body->GetStaticMaterials()[Slot].MaterialSlotName.ToString());
+	}
 	// Paint and lights get their own material instances so every car can look different.
 	if (Model.PaintSlot != INDEX_NONE)
 	{

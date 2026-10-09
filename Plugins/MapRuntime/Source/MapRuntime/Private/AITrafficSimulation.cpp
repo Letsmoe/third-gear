@@ -20,7 +20,7 @@ constexpr float ConflictMarginSeconds = 0.8f;
 constexpr float JunctionAccelerationMs2 = 2.0f;
 constexpr float JunctionMaxSpeedMs = 7.f;
 constexpr float PatientSeconds = 25.f;
-constexpr float CongestionPatientSeconds = 90.f;
+constexpr float CongestionPatientSeconds = 25.f;
 constexpr float DeadlockSeconds = 60.f;
 constexpr float LongWaitLogSeconds = 40.f;
 /** A red light lasts longer than a minute at the biggest junctions; a car waiting longer than this has a problem. */
