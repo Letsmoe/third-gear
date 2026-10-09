@@ -249,6 +249,28 @@ void AWorldStreamer::LoadPlantWindMaterials(const FString& ModelKey, const UStat
 	LoadedPlantWindMaterials.Add(ModelKey, MoveTemp(SlotMaterials));
 }
 
+namespace
+{
+/**
+ * Adds a parked car model's meshes and paint to the streamer's references and roots them. The model list is static
+ * and outlives the world, so after a map travel the next streamer would otherwise get assets the garbage collector
+ * already freed.
+ */
+void KeepParkedModelAssets(const FTrafficVehicleModel& Model, TArray<TObjectPtr<UObject>>& Out)
+{
+	TArray<TObjectPtr<UObject>> ModelAssets;
+	Model.CollectAssets(ModelAssets);
+	for (UObject* Asset : ModelAssets)
+	{
+		if (Asset)
+		{
+			Asset->AddToRoot();
+		}
+	}
+	Out.Append(ModelAssets);
+}
+}
+
 void AWorldStreamer::PrepareParkedCars()
 {
 	if (ParkedCars::IsDisabled())
@@ -259,7 +281,7 @@ void AWorldStreamer::PrepareParkedCars()
 	{
 		if (Model->Load())
 		{
-			Model->CollectAssets(ParkedCarAssets);
+			KeepParkedModelAssets(*Model, ParkedCarAssets);
 		}
 	}
 	ParkedCarCollider = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
