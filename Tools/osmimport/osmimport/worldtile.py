@@ -1,0 +1,159 @@
+"""World data tiles (.tgtile): the compact per-tile data the game turns into meshes and instances at runtime.
+
+Read by Plugins/MapRuntime (WorldTileData.cpp); keep both in sync and bump VERSION on any change.
+
+File (little-endian):
+  char[4] "TGT1", u32 version, f64 x0, f64 y0 (tile corner, world metres), f32 size_x, f32 size_y, u32 section_count
+  per section: char[4] tag, u32 raw_size, u32 compressed_size, zlib data
+
+Positions inside a tile are f32 metres relative to (x0, y0); heights are absolute metres above NHN.
+World frame as in geo.py: x east, y south.
+
+Sections:
+  NAME  string table: u32 count, per string u16 length + utf-8. Records refer to material and model names by index.
+  GRID  u32 nx, u32 ny, f32 cell, f32 base_z; u16 terrain[ny*nx], u16 road[ny*nx] (cm above base_z, row-major,
+        row 0 at y0), u8 cover[ny*nx*3] (landcover blend weights: meadow, field, forest)
+  SURF  u32 count; per polygon: u16 material, u8 height_mode, u8 pad, f32 params[6], u32 ring_count,
+        per ring u32 n + f32 xy[n*2] (ring 0 is the outline, the rest are holes; no repeated end point)
+  MARK  u32 count; per line: u16 material, u8 style, u8 pad, f32 width, f32 dash_on, f32 dash_off, f32 phase,
+        u32 n, f32 xy[n*2]
+  BLDG  u32 count; per building: u64 osm_id, u16 facade, u16 roof, u8 roof_shape, u8 tint, u8 variation, u8 pad,
+        f32 base_z, f32 eave_height, f32 roof_rectangle[8] (gabled roofs: the footprint's minimum rotated rectangle,
+        4 corners), u32 ring_count, rings as in SURF
+  VEGE  u32 count; per plant: u16 model, u16 pad, f32 x, y, z, yaw, crown, height, trunk
+"""
+import struct
+import zlib
+
+import numpy as np
+import shapely
+
+VERSION = 1
+
+# SURF height modes: how the runtime gets z for a vertex
+HEIGHT_ROAD = 0        # road height grid + params[0]
+HEIGHT_TERRAIN = 1     # terrain grid + params[0]
+HEIGHT_CONSTANT = 2    # params[0]
+HEIGHT_RAMP = 3        # params[0] at (params[2], params[3]) to params[1] at (params[4], params[5]), linear along the axis
+
+ROOF_FLAT = 0
+ROOF_GABLED = 1
+
+
+class NameTable:
+    """Interns strings (material and model names) to u16 indices."""
+
+    def __init__(self):
+        self.names = []
+        self.index = {}
+
+    def __call__(self, name):
+        if name not in self.index:
+            self.index[name] = len(self.names)
+            self.names.append(name)
+        return self.index[name]
+
+    def pack(self):
+        out = [struct.pack("<I", len(self.names))]
+        for name in self.names:
+            data = name.encode("utf-8")
+            out.append(struct.pack("<H", len(data)) + data)
+        return b"".join(out)
+
+
+def _polygons(geom):
+    """Non-empty polygons of any geometry."""
+    if geom is None or geom.is_empty:
+        return []
+    if isinstance(geom, shapely.Polygon):
+        return [geom]
+    return [g for part in getattr(geom, "geoms", []) for g in _polygons(part)]
+
+
+def _pack_rings(polygon, origin):
+    """Ring count and rings of a polygon, relative to origin, without the repeated end point."""
+    rings = [polygon.exterior, *polygon.interiors]
+    out = [struct.pack("<I", len(rings))]
+    for ring in rings:
+        xy = np.asarray(ring.coords, dtype=np.float64)[:-1] - origin
+        out.append(struct.pack("<I", len(xy)) + xy.astype("<f4").tobytes())
+    return b"".join(out)
+
+
+class TileWriter:
+    """Collects one tile's records and writes the .tgtile file."""
+
+    def __init__(self, bounds):
+        self.x0, self.y0, self.x1, self.y1 = bounds
+        self.origin = np.array([self.x0, self.y0])
+        self.box = shapely.box(*bounds)
+        self.names = NameTable()
+        self.grid = None
+        self.surfaces = []
+        self.markings = []
+        self.buildings = []
+        self.plants = []
+
+    def set_grid(self, terrain, road, cover, cell):
+        """terrain, road: (ny, nx) heights in metres at the tile's vertex grid; cover: (ny, nx, 3) weights 0..1."""
+        base = float(np.floor(min(terrain.min(), road.min())))
+        to_cm = lambda z: np.clip(np.round((z - base) * 100.0), 0, 65535).astype("<u2")  # noqa: E731
+        ny, nx = terrain.shape
+        self.grid = b"".join([
+            struct.pack("<IIff", nx, ny, cell, base),
+            to_cm(terrain).tobytes(), to_cm(road).tobytes(),
+            np.clip(np.round(cover * 255.0), 0, 255).astype(np.uint8).tobytes(),
+        ])
+
+    def add_surface(self, material, geom, height_mode, params=()):
+        """Adds the part of geom inside the tile as draped surface polygons."""
+        params = (list(params) + [0.0] * 6)[:6]
+        for polygon in _polygons(geom.intersection(self.box)):
+            if polygon.area < 0.05:
+                continue
+            self.surfaces.append(struct.pack("<HBx6f", self.names(material), height_mode, *params)
+                                 + _pack_rings(polygon, self.origin))
+
+    def add_marking(self, material, style, line, width, dash):
+        """Adds the part of a marking line inside the tile; the phase keeps dashes continuous across tiles."""
+        on, off = dash if dash else (0.0, 0.0)
+        clipped = line.intersection(self.box)
+        for part in getattr(clipped, "geoms", [clipped]):
+            if not isinstance(part, shapely.LineString) or part.length < 0.3:
+                continue
+            phase = float(line.project(shapely.Point(part.coords[0])))
+            xy = np.asarray(part.coords, dtype=np.float64) - self.origin
+            self.markings.append(struct.pack("<HBx4fI", self.names(material), style, width, on, off, phase, len(xy))
+                                 + xy.astype("<f4").tobytes())
+
+    def add_building(self, osm_id, facade, roof, roof_shape, tint, variation, base_z, eave_height, footprint,
+                     roof_rectangle=None):
+        """Adds a whole building (it belongs to the tile its representative point lies in).
+        roof_rectangle: (4, 2) world corners of the gabled roof's rectangle, or None."""
+        corners = np.zeros((4, 2))
+        if roof_rectangle is not None:
+            corners = np.asarray(roof_rectangle, dtype=np.float64)[:4] - self.origin
+        self.buildings.append(struct.pack("<QHHBBBxff", osm_id & 0xFFFFFFFFFFFFFFFF, self.names(facade),
+                                          self.names(roof), roof_shape, tint, variation, base_z, eave_height)
+                              + corners.astype("<f4").tobytes() + _pack_rings(footprint, self.origin))
+
+    def add_plant(self, model, x, y, z, yaw, crown, height, trunk):
+        """Adds one tree or shrub at world position (x, y, z)."""
+        self.plants.append(struct.pack("<H2x7f", self.names(model), x - self.x0, y - self.y0, z, yaw, crown,
+                                       height, trunk))
+
+    def is_empty(self):
+        return self.grid is None
+
+    def write(self, path):
+        sections = [(b"NAME", self.names.pack()), (b"GRID", self.grid)]
+        for tag, records in ((b"SURF", self.surfaces), (b"MARK", self.markings), (b"BLDG", self.buildings),
+                             (b"VEGE", self.plants)):
+            sections.append((tag, struct.pack("<I", len(records)) + b"".join(records)))
+        with open(path, "wb") as f:
+            f.write(b"TGT1" + struct.pack("<Iddff", VERSION, self.x0, self.y0, self.x1 - self.x0, self.y1 - self.y0))
+            f.write(struct.pack("<I", len(sections)))
+            for tag, raw in sections:
+                packed = zlib.compress(raw, 6)
+                f.write(tag + struct.pack("<II", len(raw), len(packed)))
+                f.write(packed)

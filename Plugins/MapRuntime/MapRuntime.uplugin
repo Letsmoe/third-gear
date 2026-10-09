@@ -3,9 +3,15 @@
 	"Version": 1,
 	"VersionName": "0.1",
 	"FriendlyName": "Map Runtime",
-	"Description": "Runtime actors for the OSM-generated world (vegetation instances, trunk collision, ...).",
+	"Description": "The world generated at runtime from compiled world data tiles (AWorldStreamer), and vegetation actors.",
 	"Category": "World",
 	"CanContainContent": false,
+	"Plugins": [
+		{
+			"Name": "GeometryProcessing",
+			"Enabled": true
+		}
+	],
 	"Modules": [
 		{
 			"Name": "MapRuntime",

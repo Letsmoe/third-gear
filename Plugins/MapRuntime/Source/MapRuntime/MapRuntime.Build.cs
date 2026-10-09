@@ -17,6 +17,11 @@ public class MapRuntime : ModuleRules
 		{
 			"Projects",
 			"RenderCore",
+			"GeometryCore",
+			"GeometryFramework",
+			"GeometryAlgorithms",
+			"Json",
+			"AssetRegistry",
 		});
 	}
 }
