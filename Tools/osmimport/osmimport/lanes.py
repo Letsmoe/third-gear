@@ -24,7 +24,7 @@ import shapely
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
 
-from . import furniture, roads
+from . import furniture, parking, roads
 
 LANE_SPACING = 1.5
 CONNECTION_SPACING = 0.75
@@ -312,9 +312,14 @@ class LaneBuilder:
         """The directions of travel (+1 along the node order, -1 against it) the way allows."""
         return [travel for travel in (+1, -1) if self.graph.can_travel(way, travel)]
 
-    def _lane_offset(self, way):
-        """Distance of the right-hand lane's centre line from the way's centre line."""
+    def _lane_offset(self, way, travel=+1):
+        """Distance of the right-hand lane's centre line from the way's centre line, making room for parked cars."""
         width = self.net.widths[way.id]
+        base = self._base_lane_offset(way, width)
+        return parking.lane_offset_with_parking(base, width, travel, parking.parking_sides(way.tags, way.id, width))
+
+    def _base_lane_offset(self, way, width):
+        """The lane offset on a street without parked cars."""
         total_lanes = max(roads.road_lanes(way.tags), 1)
         lane_width = width / total_lanes
         if roads.is_oneway(way.tags):
@@ -326,7 +331,7 @@ class LaneBuilder:
     def _raw_lane_path(self, segment, travel):
         """The lane centre line of a segment in one direction, before junction trimming."""
         xy = segment.xy if travel > 0 else segment.xy[::-1]
-        return offset_polyline(xy, self._lane_offset(segment.way))
+        return offset_polyline(xy, self._lane_offset(segment.way, travel))
 
     def build_road_lanes(self):
         """A lane per segment and direction, trimmed at junctions, smoothed and resampled."""
@@ -371,7 +376,7 @@ class LaneBuilder:
                         continue
                     s, distance = project_on_polyline(raw, stop)
                     # The stop point is on the way's centre line and the lane is offset from it: compare against that offset.
-                    mismatch = abs(distance - self._lane_offset(segment.way))
+                    mismatch = abs(distance - abs(self._lane_offset(segment.way, approach.travel)))
                     if mismatch > 4.0:
                         continue
                     if best is None or mismatch < best[0]:

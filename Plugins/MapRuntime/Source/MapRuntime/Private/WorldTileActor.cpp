@@ -7,6 +7,10 @@
 #include "UDynamicMesh.h"
 #include "TrafficNetwork.h"
 #include "TrafficSubsystem.h"
+#include "AITrafficCar.h"
+#include "AITrafficSubsystem.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "ParkedCars.h"
 #include "WorldFurniture.h"
 #include "WorldTileMesher.h"
 #include "Kismet/KismetMaterialLibrary.h"
@@ -172,13 +176,13 @@ void AWorldTileActor::EnableChunkCollision(int32 Chunk, bool bCookNow)
 }
 
 UInstancedStaticMeshComponent* AWorldTileActor::AddFurnitureInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow,
-	bool bCollision)
+	bool bCollision, int32 CullDistanceCm)
 {
 	if (!Mesh || Transforms.IsEmpty())
 	{
 		return nullptr;
 	}
-	UInstancedStaticMeshComponent* Component = AddInstances(Mesh, Transforms, 0);
+	UInstancedStaticMeshComponent* Component = AddInstances(Mesh, Transforms, CullDistanceCm);
 	Component->SetCastShadow(bCastShadow);
 	if (bCollision)
 	{
@@ -242,9 +246,97 @@ bool AWorldTileActor::AddFurnitureStep(const FWorldFurnitureInstances& Furniture
 			}
 		});
 	}
+	if (!Furniture.ParkedCars.IsEmpty())
+	{
+		Parts.Add([&]() { AddParkedCarColliders(Furniture, Meshes); });
+		for (int32 ModelIndex = 0; ModelIndex < Meshes.ParkedModels.Num(); ++ModelIndex)
+		{
+			Parts.Add([&, ModelIndex]() { AddParkedCarBodies(Furniture, Meshes, ModelIndex); });
+			Parts.Add([&, ModelIndex]() { AddParkedCarGlassAndWheels(Furniture, Meshes, ModelIndex); });
+		}
+	}
 	Parts.Add([&]() { RegisterFurnitureLights(Furniture); });
 	Parts[Step]();
 	return Step + 1 >= Parts.Num();
+}
+
+namespace
+{
+/** Parked cars are drawn out to these distances; beyond them the street's cars are too small to tell from the buildings' shade. */
+constexpr int32 ParkedBodyCullCm = 22000;
+constexpr int32 ParkedGlassCullCm = 16000;
+constexpr int32 ParkedWheelCullCm = 10000;
+}
+
+void AWorldTileActor::AddParkedCarColliders(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes)
+{
+	TArray<FTransform> Boxes;
+	for (const FParkedCarPlacement& Car : Furniture.ParkedCars)
+	{
+		if (Meshes.ParkedModels.IsValidIndex(Car.ModelIndex) && Meshes.ParkedModels[Car.ModelIndex])
+		{
+			Boxes.Add(ParkedCars::ColliderTransform(*Meshes.ParkedModels[Car.ModelIndex], Car.Pose));
+		}
+	}
+	if (UInstancedStaticMeshComponent* Component = AddFurnitureInstances(Meshes.ParkedCollider, Boxes, false, true))
+	{
+		Component->SetVisibility(false);
+	}
+}
+
+void AWorldTileActor::AddParkedCarBodies(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes, int32 ModelIndex)
+{
+	const FTrafficVehicleModel* Model = Meshes.ParkedModels[ModelIndex];
+	if (!Model || !Model->Body)
+	{
+		return;
+	}
+	TMap<int32, TArray<FTransform>> ByPaint;
+	for (const FParkedCarPlacement& Car : Furniture.ParkedCars)
+	{
+		if (Car.ModelIndex == ModelIndex)
+		{
+			ByPaint.FindOrAdd(Car.PaintIndex).Add(ParkedCars::MeshTransform(*Model, Car.Pose));
+		}
+	}
+	for (const TPair<int32, TArray<FTransform>>& Paint : ByPaint)
+	{
+		UInstancedStaticMeshComponent* Component = AddFurnitureInstances(Model->Body, Paint.Value, true, false, ParkedBodyCullCm);
+		if (!Component || Model->PaintSlot == INDEX_NONE)
+		{
+			continue;
+		}
+		if (Model->TrafficPaint)
+		{
+			Component->SetMaterial(Model->PaintSlot, Model->TrafficPaint);
+		}
+		if (UMaterialInstanceDynamic* Instance = Component->CreateDynamicMaterialInstance(Model->PaintSlot))
+		{
+			Instance->SetVectorParameterValue(TEXT("BaseColor"), UAITrafficSubsystem::GetPaintPaletteColor(Paint.Key));
+		}
+	}
+}
+
+void AWorldTileActor::AddParkedCarGlassAndWheels(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes, int32 ModelIndex)
+{
+	const FTrafficVehicleModel* Model = Meshes.ParkedModels[ModelIndex];
+	if (!Model)
+	{
+		return;
+	}
+	TArray<FTransform> Poses;
+	for (const FParkedCarPlacement& Car : Furniture.ParkedCars)
+	{
+		if (Car.ModelIndex == ModelIndex)
+		{
+			Poses.Add(ParkedCars::MeshTransform(*Model, Car.Pose));
+		}
+	}
+	AddFurnitureInstances(Model->Glass, Poses, false, false, ParkedGlassCullCm);
+	for (UStaticMesh* Wheel : Model->Wheels)
+	{
+		AddFurnitureInstances(Wheel, Poses, false, false, ParkedWheelCullCm);
+	}
 }
 
 void AWorldTileActor::RegisterFurnitureLights(const FWorldFurnitureInstances& Furniture)

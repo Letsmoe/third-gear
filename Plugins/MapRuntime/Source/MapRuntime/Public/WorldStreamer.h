@@ -115,6 +115,9 @@ private:
 	/** Loads the street furniture meshes and the sign master material. */
 	void PrepareFurniture();
 
+	/** Loads the parked car models (shared with the AI traffic) and the cube their collision boxes are made of. */
+	void PrepareParkedCars();
+
 	/** Material of a sign graphic: an instance of the sign master with the graphic's texture. */
 	UMaterialInterface* FindSignMaterial(const FString& GraphicName);
 
@@ -178,6 +181,12 @@ private:
 	/** Street furniture meshes by asset name, and the sign materials by graphic name. */
 	UPROPERTY(Transient)
 	TMap<FString, TObjectPtr<UStaticMesh>> FurnitureMeshes;
+
+	/** The parked car models' meshes (the model structs only hold raw pointers) and the collision cube. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UObject>> ParkedCarAssets;
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> ParkedCarCollider;
 	UPROPERTY(Transient)
 	TMap<FString, TObjectPtr<UMaterialInterface>> SignMaterials;
 	UPROPERTY(Transient)

@@ -16,6 +16,14 @@ struct FFurnitureLight
 	float LensOffsetsCm[3] = {};
 };
 
+/** One parked car of a tile: the model, the paint and the pose (cm, relative to the tile corner, origin on the ground under the middle of the car). */
+struct FParkedCarPlacement
+{
+	int32 ModelIndex = 0;
+	int32 PaintIndex = 0;
+	FTransform Pose;
+};
+
 /** Instance transforms (cm, relative to the tile corner) of the street furniture of one tile. Built on worker threads. */
 struct FWorldFurnitureInstances
 {
@@ -30,8 +38,9 @@ struct FWorldFurnitureInstances
 	/** Sign poles by visible height in cm. */
 	TMap<int32, TArray<FTransform>> SignPoles;
 	TArray<FFurnitureLight> Lights;
+	TArray<FParkedCarPlacement> ParkedCars;
 
-	bool IsEmpty() const { return Lamps.IsEmpty() && SignalPoles.IsEmpty() && SignPlates.IsEmpty(); }
+	bool IsEmpty() const { return Lamps.IsEmpty() && SignalPoles.IsEmpty() && SignPlates.IsEmpty() && ParkedCars.IsEmpty(); }
 };
 
 /** Turns the tile's POIS records into instance transforms. */
