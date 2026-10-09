@@ -100,6 +100,10 @@ void UTrafficRuleComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	}
 	PreviousLocation = Location;
 	bHasPreviousLocation = true;
+	if (bUseExternalSpeed)
+	{
+		SpeedKmh = ExternalSpeedKmh;
+	}
 
 	const FVector Front = Location + Forward * FrontOffsetCm;
 	UpdateSignal(Front, Forward);

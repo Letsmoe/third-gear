@@ -89,6 +89,7 @@ bool UTrafficSubsystem::LoadRegion(const FString& WorldDir)
 		UE_LOG(LogTraffic, Warning, TEXT("No traffic data: %s"), *Error);
 		return false;
 	}
+	RegionDirectory = WorldDir;
 	UE_LOG(LogTraffic, Log, TEXT("Traffic: %d signal junctions, %d approaches"), Network.GetJunctions().Num(), Network.GetApproaches().Num());
 	return true;
 }

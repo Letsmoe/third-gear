@@ -325,6 +325,19 @@ bool AWorldStreamer::GetStartTransform(FTransform& OutTransform)
 	return true;
 }
 
+bool AWorldStreamer::IsNearTileShownAt(const FVector& Location) const
+{
+	const FVector2D Point(Location.X, Location.Y);
+	for (const FTileState& Tile : Tiles)
+	{
+		if (!Tile.bHorizon && Tile.ShownDetail == int32(EWorldTileDetail::Near) && Tile.Bounds.IsInside(Point))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 int32 AWorldStreamer::WantedDetail(const FTileState& Tile, const FVector2D& Location) const
 {
 	if (Tile.bHorizon)

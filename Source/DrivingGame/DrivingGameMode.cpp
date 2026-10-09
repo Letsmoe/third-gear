@@ -11,6 +11,7 @@
 #include "GameFlow.h"
 #include "RuleTest.h"
 #include "StreamTest.h"
+#include "TrafficTest.h"
 #include "GameFramework/PlayerStart.h"
 #include "SeatedVRPawn.h"
 #include "HAL/FileManager.h"
@@ -29,7 +30,8 @@ bool ADrivingGameMode::UseFreeCamera()
 {
 	FString Value;
 	return FParse::Param(FCommandLine::Get(), TEXT("FreeCam")) || FParse::Value(FCommandLine::Get(), TEXT("Shots="), Value)
-		|| FParse::Value(FCommandLine::Get(), TEXT("StreamTest="), Value) || FParse::Param(FCommandLine::Get(), TEXT("RuleTest"));
+		|| FParse::Value(FCommandLine::Get(), TEXT("StreamTest="), Value) || FParse::Param(FCommandLine::Get(), TEXT("RuleTest"))
+		|| FParse::Value(FCommandLine::Get(), TEXT("TrafficTest="), Value);
 }
 
 bool ADrivingGameMode::UsesFreeCameraPawn() const
@@ -148,6 +150,13 @@ void ADrivingGameMode::BeginPlay()
 	if (FParse::Param(FCommandLine::Get(), TEXT("RuleTest")))
 	{
 		GetWorld()->SpawnActor<ARuleTestRunner>();
+	}
+
+	// AI traffic test: the free camera rides the lane graph while cars spawn around it (see Scripts/traffic_test.sh).
+	FString TrafficTestMinutes;
+	if (FParse::Value(FCommandLine::Get(), TEXT("TrafficTest="), TrafficTestMinutes))
+	{
+		GetWorld()->SpawnActor<ATrafficTestRunner>();
 	}
 
 	// Automated run through the generated world (see Scripts/stream_test.sh).
