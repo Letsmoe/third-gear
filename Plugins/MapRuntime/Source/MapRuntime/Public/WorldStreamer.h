@@ -8,6 +8,7 @@ class AWorldTileActor;
 class UMaterialInterface;
 class UStaticMesh;
 struct FWorldStreamerShared;
+struct FFurnitureMeshes;
 struct FWorldTileBuild;
 
 /**
@@ -100,6 +101,12 @@ private:
 	/** Resolves materials and plant models and measures the models; called once before the first build. */
 	void PrepareAssets();
 
+	/** Loads the street furniture meshes and the sign master material. */
+	void PrepareFurniture();
+
+	/** Material of a sign graphic: an instance of the sign master with the graphic's texture. */
+	UMaterialInterface* FindSignMaterial(const FString& GraphicName);
+
 	/** Loads every M_* material in MaterialFolder up front. */
 	void PreloadMaterials();
 
@@ -144,6 +151,14 @@ private:
 
 	UPROPERTY(Transient)
 	TMap<FString, TObjectPtr<UStaticMesh>> LoadedPlantModels;
+
+	/** Street furniture meshes by asset name, and the sign materials by graphic name. */
+	UPROPERTY(Transient)
+	TMap<FString, TObjectPtr<UStaticMesh>> FurnitureMeshes;
+	UPROPERTY(Transient)
+	TMap<FString, TObjectPtr<UMaterialInterface>> SignMaterials;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> SignMasterMaterial;
 
 	/** Finished builds being spawned, nearest first. */
 	TArray<TSharedPtr<struct FTileSpawnJob>> SpawnJobs;

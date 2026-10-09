@@ -22,6 +22,14 @@ Sections:
         f32 base_z, f32 eave_height, f32 roof_rectangle[8] (gabled roofs: the footprint's minimum rotated rectangle,
         4 corners), u32 ring_count, rings as in SURF
   VEGE  u32 count; per plant: u16 model, u16 pad, f32 x, y, z, yaw, crown, height, trunk
+  POIS  street furniture, u32 count; per object (36 bytes): u8 kind (POI_*), u8 flags, u16 variant, u16 variant2,
+        u16 pad, f32 x, y (tile-relative), z (absolute, at the foot), yaw (degrees, see below), param0, param1,
+        u32 link. Yaw is the direction of travel the object faces: a sign or signal head is read by drivers moving
+        that way (its face looks back against it); for a lamp it is the direction from the pole to the road.
+        LAMP: variant 0, param0 mast height m, param1 arm length m, flags 1 = lamp placed from OSM (else from lit=yes).
+        SIGNAL_HEAD: link = approach id in traffic.json, param0 pole height m, flags 1 = pole on the left.
+        SIGN: variant = name of the graphic (Zeichen_274-30), variant2 = name of an additional sign below it or 0xFFFF.
+        Signal junctions, phases and the speed limit ways are in traffic.json next to world.json.
 """
 import struct
 import zlib
@@ -29,7 +37,12 @@ import zlib
 import numpy as np
 import shapely
 
-VERSION = 1
+VERSION = 2
+
+POI_LAMP = 0
+POI_SIGNAL_HEAD = 1
+POI_SIGN = 2
+NO_VARIANT = 0xFFFF
 
 # GRID terrain value of a hole
 HOLE = 0xFFFF
@@ -97,6 +110,7 @@ class TileWriter:
         self.markings = []
         self.buildings = []
         self.plants = []
+        self.pois = []
 
     def set_grid(self, terrain, road, cover, cell, holes=None):
         """terrain, road: (ny, nx) heights in metres at the tile's vertex grid; cover: (ny, nx, 3) weights 0..1;
@@ -150,13 +164,18 @@ class TileWriter:
         self.plants.append(struct.pack("<H2x7f", self.names(model), x - self.x0, y - self.y0, z, yaw, crown,
                                        height, trunk))
 
+    def add_poi(self, kind, x, y, z, yaw, variant=0, variant2=NO_VARIANT, param0=0.0, param1=0.0, link=0, flags=0):
+        """Adds one piece of street furniture at world position (x, y), foot height z; see the POIS section."""
+        self.pois.append(struct.pack("<BBHHxx6fI", kind, flags, variant, variant2,
+                                     x - self.x0, y - self.y0, z, yaw, param0, param1, link))
+
     def is_empty(self):
         return self.grid is None
 
     def write(self, path):
         sections = [(b"NAME", self.names.pack()), (b"GRID", self.grid)]
         for tag, records in ((b"SURF", self.surfaces), (b"MARK", self.markings), (b"BLDG", self.buildings),
-                             (b"VEGE", self.plants)):
+                             (b"VEGE", self.plants), (b"POIS", self.pois)):
             sections.append((tag, struct.pack("<I", len(records)) + b"".join(records)))
         with open(path, "wb") as f:
             f.write(b"TGT1" + struct.pack("<Iddff", VERSION, self.x0, self.y0, self.x1 - self.x0, self.y1 - self.y0))

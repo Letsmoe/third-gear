@@ -2,6 +2,7 @@
 
 #include "ConstrainedDelaunay2.h"
 #include "Polygon2.h"
+#include "WorldFurniture.h"
 #include "WorldTileData.h"
 
 using namespace UE::Geometry;
@@ -619,6 +620,11 @@ FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDeta
 		BuildBuilding(Tile, Building, Meshes);
 	}
 	BuildPlants(Tile, Detail, Context, Meshes);
+	if (Detail == EWorldTileDetail::Near && !Tile.Pois.IsEmpty())
+	{
+		Meshes.Furniture = MakeShared<FWorldFurnitureInstances>();
+		BuildWorldFurniture(Tile, *Meshes.Furniture);
+	}
 	const int32 PerSide = Settings.ChunksPerSide;
 	const FVector2f ChunkSize = Tile.Size * MetresToCm / float(PerSide);
 	Meshes.ChunksPerSide = PerSide;

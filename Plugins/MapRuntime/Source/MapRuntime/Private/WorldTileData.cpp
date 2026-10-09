@@ -5,7 +5,7 @@
 
 namespace
 {
-constexpr uint32 TileFormatVersion = 1;
+constexpr uint32 TileFormatVersion = 2;
 
 /** Four ASCII characters as the little-endian u32 they are stored as. */
 constexpr uint32 MakeTag(const char (&Text)[5])
@@ -187,6 +187,27 @@ void ReadPlants(FByteReader& Reader, TArray<FWorldPlant>& Plants)
 	}
 }
 
+void ReadPois(FByteReader& Reader, TArray<FWorldPoi>& Pois)
+{
+	const uint32 Count = Reader.Get<uint32>();
+	for (uint32 Index = 0; Index < Count && !Reader.HasFailed(); ++Index)
+	{
+		FWorldPoi& Poi = Pois.AddDefaulted_GetRef();
+		Poi.Kind = static_cast<EWorldPoiKind>(Reader.Get<uint8>());
+		Poi.Flags = Reader.Get<uint8>();
+		Poi.Variant = Reader.Get<uint16>();
+		Poi.Variant2 = Reader.Get<uint16>();
+		Reader.Skip(2);
+		Poi.Position.X = Reader.Get<float>();
+		Poi.Position.Y = Reader.Get<float>();
+		Poi.Position.Z = Reader.Get<float>();
+		Poi.YawDegrees = Reader.Get<float>();
+		Poi.Param0 = Reader.Get<float>();
+		Poi.Param1 = Reader.Get<float>();
+		Poi.Link = Reader.Get<uint32>();
+	}
+}
+
 /** Decompresses one section and hands it to the reader for its tag. Unknown tags are skipped. */
 bool ReadSection(uint32 Tag, TConstArrayView<uint8> Raw, FWorldTileData& Out)
 {
@@ -199,6 +220,7 @@ bool ReadSection(uint32 Tag, TConstArrayView<uint8> Raw, FWorldTileData& Out)
 	case MakeTag("MARK"): ReadMarkings(Reader, Out.Markings); break;
 	case MakeTag("BLDG"): ReadBuildings(Reader, Out.Buildings); break;
 	case MakeTag("VEGE"): ReadPlants(Reader, Out.Plants); break;
+	case MakeTag("POIS"): ReadPois(Reader, Out.Pois); break;
 	default: break;
 	}
 	return !Reader.HasFailed();
@@ -290,9 +312,15 @@ bool FWorldTileData::Load(const FString& Path, FWorldTileData& Out, FString& Err
 	FByteReader Reader(Bytes);
 	const uint32 Magic = Reader.Get<uint32>();
 	const uint32 Version = Reader.Get<uint32>();
-	if (Magic != MakeTag("TGT1") || Version != TileFormatVersion)
+	if (Magic != MakeTag("TGT1"))
 	{
-		Error = FString::Printf(TEXT("%s: not a version %u world tile"), *Path, TileFormatVersion);
+		Error = FString::Printf(TEXT("%s: not a world tile"), *Path);
+		return false;
+	}
+	if (Version != TileFormatVersion)
+	{
+		Error = FString::Printf(TEXT("%s: world tile format version %u, this build reads version %u; rebuild the world with Tools/osmimport/build_world.py"),
+			*Path, Version, TileFormatVersion);
 		return false;
 	}
 	Out.Origin.X = Reader.Get<double>();

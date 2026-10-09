@@ -18,6 +18,9 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Tasks/Task.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "TrafficSubsystem.h"
+#include "WorldFurniture.h"
 #include "WorldTileActor.h"
 #include "WorldTileData.h"
 #include "WorldTileMesher.h"
@@ -137,6 +140,10 @@ bool AWorldStreamer::EnsureIndex()
 	}
 	AddHorizonTiles();
 	Start = Root->GetObjectField(TEXT("start"));
+	if (UTrafficSubsystem* Traffic = GetWorld()->GetSubsystem<UTrafficSubsystem>())
+	{
+		Traffic->LoadRegion(WorldDir);
+	}
 	Shared = MakeShared<FWorldStreamerShared>();
 	bIndexLoaded = true;
 	UE_LOG(LogWorldStreamer, Log, TEXT("World %s: %d tiles from %s"), *Region, Tiles.Num(), *WorldDir);
@@ -195,6 +202,53 @@ void AWorldStreamer::PrepareAssets()
 	}
 	MeshingContext = Context;
 	PreloadMaterials();
+	PrepareFurniture();
+}
+
+void AWorldStreamer::PrepareFurniture()
+{
+	const FString Folder = TEXT("/Game/World/Furniture/Meshes");
+	TArray<FString> Names = {FurnitureAssets::Lamp, FurnitureAssets::SignalPole, FurnitureAssets::SignalHead, FurnitureAssets::SignPlate,
+		FurnitureAssets::SignClamp};
+	for (const int32 Height : GetSignPoleHeightsCm())
+	{
+		Names.Add(FString::Printf(TEXT("SM_SignPole_%d"), Height));
+	}
+	for (const FString& Name : Names)
+	{
+		UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("%s/%s.%s"), *Folder, *Name, *Name), nullptr, LOAD_NoWarn);
+		if (Mesh)
+		{
+			FurnitureMeshes.Add(Name, Mesh);
+		}
+		else
+		{
+			UE_LOG(LogWorldStreamer, Warning, TEXT("Street furniture mesh %s missing; run Scripts/create_furniture_assets.py"), *Name);
+		}
+	}
+	SignMasterMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/World/Furniture/M_SignFace.M_SignFace"), nullptr, LOAD_NoWarn);
+}
+
+UMaterialInterface* AWorldStreamer::FindSignMaterial(const FString& GraphicName)
+{
+	if (TObjectPtr<UMaterialInterface>* Found = SignMaterials.Find(GraphicName))
+	{
+		return *Found;
+	}
+	UTexture* Texture = LoadObject<UTexture>(nullptr, *SignTexturePath(GraphicName), nullptr, LOAD_NoWarn);
+	UMaterialInterface* Material = nullptr;
+	if (Texture && SignMasterMaterial)
+	{
+		UMaterialInstanceDynamic* Instance = UMaterialInstanceDynamic::Create(SignMasterMaterial, this);
+		Instance->SetTextureParameterValue(TEXT("Graphic"), Texture);
+		Material = Instance;
+	}
+	else
+	{
+		UE_LOG(LogWorldStreamer, Warning, TEXT("Sign graphic %s missing"), *GraphicName);
+	}
+	SignMaterials.Add(GraphicName, Material);
+	return Material;
 }
 
 void AWorldStreamer::PreloadMaterials()
@@ -370,6 +424,28 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 		const TObjectPtr<UStaticMesh>* Model = LoadedPlantModels.Find(Group.Model);
 		Actor->AddPlants(Model ? Model->Get() : nullptr, Group.Transforms, Group.Model == TEXT("shrub") ? ShrubCullDistanceCm : 0);
 	}
+	else if (Step == ChunkSteps + 3 + PlantSteps)
+	{
+		if (Meshes.Furniture)
+		{
+			FFurnitureMeshes Furniture;
+			const auto Find = [this](const TCHAR* Name) { const TObjectPtr<UStaticMesh>* Mesh = FurnitureMeshes.Find(Name); return Mesh ? Mesh->Get() : nullptr; };
+			Furniture.Lamp = Find(FurnitureAssets::Lamp);
+			Furniture.SignalPole = Find(FurnitureAssets::SignalPole);
+			Furniture.SignalHead = Find(FurnitureAssets::SignalHead);
+			Furniture.SignPlate = Find(FurnitureAssets::SignPlate);
+			Furniture.SignClamp = Find(FurnitureAssets::SignClamp);
+			for (const int32 Height : GetSignPoleHeightsCm())
+			{
+				Furniture.SignPoles.Add(Height, Find(*FString::Printf(TEXT("SM_SignPole_%d"), Height)));
+			}
+			for (const TPair<FString, TArray<FTransform>>& Plates : Meshes.Furniture->SignPlates)
+			{
+				Furniture.SignMaterials.Add(Plates.Key, FindSignMaterial(Plates.Key));
+			}
+			Actor->AddFurniture(*Meshes.Furniture, Furniture);
+		}
+	}
 	else
 	{
 		if (bNear)
@@ -389,7 +465,7 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 	if (StepSeconds > 0.008)
 	{
 		UE_LOG(LogWorldStreamer, Log, TEXT("Tile %s detail %d: step %d of %d took %.1f ms"), *FPaths::GetBaseFilename(Tile.Path), Build.Detail,
-			Step, ChunkSteps + PlantSteps + 4, StepSeconds * 1000.0);
+			Step, ChunkSteps + PlantSteps + 5, StepSeconds * 1000.0);
 	}
 	Job.SpawnSeconds += StepSeconds;
 	Job.LongestStepSeconds = FMath::Max(Job.LongestStepSeconds, StepSeconds);

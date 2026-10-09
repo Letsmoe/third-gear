@@ -4,6 +4,9 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "UDynamicMesh.h"
+#include "TrafficNetwork.h"
+#include "TrafficSubsystem.h"
+#include "WorldFurniture.h"
 #include "WorldTileMesher.h"
 
 namespace
@@ -146,4 +149,116 @@ void AWorldTileActor::EnableChunkCollision(int32 Chunk, bool bCookNow)
 		EnableCollision(GroundChunks[Chunk], bCookNow);
 		GroundChunkHasCollision[Chunk] = true;
 	}
+}
+
+UInstancedStaticMeshComponent* AWorldTileActor::AddFurnitureInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow,
+	bool bCollision)
+{
+	if (!Mesh || Transforms.IsEmpty())
+	{
+		return nullptr;
+	}
+	UInstancedStaticMeshComponent* Component = AddInstances(Mesh, Transforms, 0);
+	Component->SetCastShadow(bCastShadow);
+	if (bCollision)
+	{
+		Component->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+	}
+	return Component;
+}
+
+void AWorldTileActor::AddFurniture(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes)
+{
+	AddFurnitureInstances(Meshes.Lamp, Furniture.Lamps, true, true);
+	AddFurnitureInstances(Meshes.SignalPole, Furniture.SignalPoles, true, true);
+	for (const TPair<int32, TArray<FTransform>>& Poles : Furniture.SignPoles)
+	{
+		UStaticMesh* const* Mesh = Meshes.SignPoles.Find(Poles.Key);
+		AddFurnitureInstances(Mesh ? *Mesh : nullptr, Poles.Value, true, true);
+	}
+	AddFurnitureInstances(Meshes.SignClamp, Furniture.SignClamps, false, false);
+	for (const TPair<FString, TArray<FTransform>>& Plates : Furniture.SignPlates)
+	{
+		UInstancedStaticMeshComponent* Component = AddFurnitureInstances(Meshes.SignPlate, Plates.Value, false, false);
+		UMaterialInterface* const* Material = Meshes.SignMaterials.Find(Plates.Key);
+		if (Component && Material && *Material)
+		{
+			Component->SetMaterial(0, *Material);
+		}
+	}
+	if (Meshes.SignalHead && !Furniture.SignalHeads.IsEmpty())
+	{
+		// Lens glow comes from three per-instance floats (red, amber, green) that UpdateSignalHeads keeps current.
+		UInstancedStaticMeshComponent* Component = NewObject<UInstancedStaticMeshComponent>(this);
+		Component->SetStaticMesh(Meshes.SignalHead);
+		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Component->NumCustomDataFloats = 3;
+		RegisterNew(Component);
+		Component->SetMobility(EComponentMobility::Movable);
+		Component->AddInstances(Furniture.SignalHeads, /*bShouldReturnIndices=*/false, /*bWorldSpace=*/false);
+		SignalHeadComponent = Component;
+		HeadApproachIds = Furniture.HeadApproaches;
+		HeadShownAspects.Init(255, HeadApproachIds.Num());
+	}
+	UTrafficSubsystem* Traffic = GetWorld()->GetSubsystem<UTrafficSubsystem>();
+	if (!Traffic)
+	{
+		return;
+	}
+	TArray<FStreetLightSource> Sources;
+	for (const FFurnitureLight& Light : Furniture.Lights)
+	{
+		FStreetLightSource& Source = Sources.AddDefaulted_GetRef();
+		Source.LocationCm = Light.LocationCm + GetActorLocation();
+		Source.Direction = Light.Direction;
+		Source.ApproachId = Light.ApproachId;
+		FMemory::Memcpy(Source.LensOffsetsCm, Light.LensOffsetsCm, sizeof(Source.LensOffsetsCm));
+	}
+	Traffic->AddLightSources(this, MoveTemp(Sources));
+	if (SignalHeadComponent)
+	{
+		Traffic->RegisterSignalTile(this);
+		bRegisteredWithTraffic = true;
+		UpdateSignalHeads(Traffic->GetNetwork(), Traffic->GetTrafficTime());
+	}
+}
+
+void AWorldTileActor::UpdateSignalHeads(const FTrafficNetwork& Network, double TimeSeconds)
+{
+	if (!SignalHeadComponent)
+	{
+		return;
+	}
+	bool bChanged = false;
+	for (int32 Index = 0; Index < HeadApproachIds.Num(); ++Index)
+	{
+		const ESignalAspect Aspect = Network.GetApproachState(HeadApproachIds[Index], TimeSeconds).Aspect;
+		if (HeadShownAspects[Index] == uint8(Aspect))
+		{
+			continue;
+		}
+		HeadShownAspects[Index] = uint8(Aspect);
+		const bool bRed = Aspect == ESignalAspect::Red || Aspect == ESignalAspect::RedAmber;
+		const bool bAmber = Aspect == ESignalAspect::Amber || Aspect == ESignalAspect::RedAmber;
+		const float Lenses[3] = {bRed ? 1.f : 0.f, bAmber ? 1.f : 0.f, Aspect == ESignalAspect::Green ? 1.f : 0.f};
+		SignalHeadComponent->SetCustomData(Index, MakeArrayView(Lenses, 3), /*bMarkRenderStateDirty=*/false);
+		bChanged = true;
+	}
+	if (bChanged)
+	{
+		SignalHeadComponent->MarkRenderStateDirty();
+	}
+}
+
+void AWorldTileActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UTrafficSubsystem* Traffic = World->GetSubsystem<UTrafficSubsystem>())
+		{
+			Traffic->RemoveLightSources(this);
+			Traffic->UnregisterSignalTile(this);
+		}
+	}
+	Super::EndPlay(EndPlayReason);
 }

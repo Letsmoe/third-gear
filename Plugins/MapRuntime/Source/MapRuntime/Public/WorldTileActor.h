@@ -9,6 +9,23 @@ class UInstancedStaticMeshComponent;
 class UMaterialInterface;
 class UStaticMesh;
 namespace UE::Geometry { class FDynamicMesh3; }
+struct FWorldFurnitureInstances;
+class FTrafficNetwork;
+enum class ESignalAspect : uint8;
+
+/** The street furniture meshes and sign materials, resolved by the world streamer. */
+struct FFurnitureMeshes
+{
+	UStaticMesh* Lamp = nullptr;
+	UStaticMesh* SignalPole = nullptr;
+	UStaticMesh* SignalHead = nullptr;
+	UStaticMesh* SignPlate = nullptr;
+	UStaticMesh* SignClamp = nullptr;
+	/** Sign poles by visible height in cm. */
+	TMap<int32, UStaticMesh*> SignPoles;
+	/** Material per sign graphic name. */
+	TMap<FString, UMaterialInterface*> SignMaterials;
+};
 
 /**
  * The generated content of one world tile at one detail level: ground chunks, markings and buildings as dynamic
@@ -38,6 +55,14 @@ public:
 	/** Invisible cylinders at the trunks so the car can hit trees: base points (tile-relative) and diameters, cm. */
 	void AddTrunkColliders(const TArray<FVector>& Bases, const TArray<float>& Diameters);
 
+	/** Adds the lamps, signal poles and heads, and signs of the tile (near detail only). */
+	void AddFurniture(const FWorldFurnitureInstances& Furniture, const FFurnitureMeshes& Meshes);
+
+	/** Sets the lens glow of every signal head to what its signal shows at TimeSeconds of traffic time. */
+	void UpdateSignalHeads(const FTrafficNetwork& Network, double TimeSeconds);
+
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	/**
 	 * The ground chunk without collision nearest to LocationCm and within RadiusCm, or INDEX_NONE.
 	 * OutDistanceCm receives its distance.
@@ -59,6 +84,15 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UDynamicMeshComponent>> GroundChunks;
+
+	UInstancedStaticMeshComponent* AddFurnitureInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms, bool bCastShadow, bool bCollision);
+
+	/** The signal head component and what each of its instances currently shows. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInstancedStaticMeshComponent> SignalHeadComponent;
+	TArray<int32> HeadApproachIds;
+	TArray<uint8> HeadShownAspects;
+	bool bRegisteredWithTraffic = false;
 
 	TArray<FBox2D> GroundChunkBounds;
 	TArray<bool> GroundChunkHasCollision;
