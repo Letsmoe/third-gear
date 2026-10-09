@@ -86,6 +86,24 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Buttons")
 	int32 ResetCarButtonIndex = -1;
 
+	/** Switches the low beam on and off. */
+	UPROPERTY(Config, EditAnywhere, Category = "Buttons")
+	int32 LowBeamButtonIndex = -1;
+
+	/** Switches the high beam on and off (it implies the low beam). */
+	UPROPERTY(Config, EditAnywhere, Category = "Buttons")
+	int32 HighBeamButtonIndex = -1;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Buttons")
+	int32 IndicatorLeftButtonIndex = -1;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Buttons")
+	int32 IndicatorRightButtonIndex = -1;
+
+	/** Switches the hazard warning lights on and off. */
+	UPROPERTY(Config, EditAnywhere, Category = "Buttons")
+	int32 HazardButtonIndex = -1;
+
 	/** Opens and closes the in-game settings menu (-1 = unassigned; the keyboard F1 always works). Assignable in the menu. */
 	UPROPERTY(Config, EditAnywhere, Category = "Menu")
 	int32 MenuButtonIndex = -1;

@@ -8,6 +8,7 @@
 
 class UCameraComponent;
 class UCarAudioComponent;
+class UCarLightsComponent;
 class UCarMirrorsComponent;
 class UCarMovementComponent;
 class UStaticMeshComponent;
@@ -38,6 +39,7 @@ public:
 
 	UCarMovementComponent* GetCarMovement() const;
 	UCarAudioComponent* GetCarAudio() const { return CarAudio; }
+	UCarLightsComponent* GetCarLights() const { return Lights; }
 	FCarTelemetry GetTelemetry() const;
 
 	/** Scripted driving (drive test): when enabled, the given input replaces wheel and keyboard. */
@@ -78,6 +80,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TObjectPtr<UCarMirrorsComponent> Mirrors;
+
+	UPROPERTY(VisibleAnywhere, Category = "Components")
+	TObjectPtr<UCarLightsComponent> Lights;
 
 private:
 	/** Shows a violation for a few seconds next to the dashboard. */

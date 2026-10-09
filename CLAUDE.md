@@ -309,7 +309,9 @@ rides a camera over the lanes and prints violations by AI cars, collisions betwe
   100-0 braking, ramp steer with steering torque. Measured: 0-100 9.2 s, top 217 km/h, 50 km/h = 3270/2130/1610/
   1340/1140 rpm in 2nd–6th, 100-0 38 m, 0.93 g lateral, idle clutch start ok, clutch dump at idle stalls.
 - **Keys**: W/S throttle/brake, A/D steer, Left Shift clutch (released slowly), 1–6 gears, N neutral, B reverse,
-  E start/stop (push-button), Space parking brake, Backspace put car back on its wheels, R recentre.
+  E start/stop (push-button), Space parking brake, Backspace put car back on its wheels, R recentre,
+  L low beam, H high beam (implies low beam), Z left indicator, X right indicator, V hazards. Wheel buttons for the same
+  (and the rest) are assigned in the menu's wheel page. Test switches: `-LowBeam -HighBeam -BrakeLights -ReverseLight -Indicator=left|right|hazard`.
   With the wheel connected, pedals/wheel/H-shifter take over (keyboard still adds). `-FreeCam` = old free-fly pawn
   (`-Shots=` implies it); `-SpawnCar` also parks a car at the player start; `-SeatShot [-ShotName=x]` saves the
   driver's view. `-WheelDebug` logs every wheel axis/button change.

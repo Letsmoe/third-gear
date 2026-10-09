@@ -4,6 +4,7 @@
 #include "Animation/AnimInstance.h"
 #include "Camera/CameraComponent.h"
 #include "CarAudioComponent.h"
+#include "CarLights.h"
 #include "CarMirrors.h"
 #include "CarMovementComponent.h"
 #include "CarSettings.h"
@@ -117,6 +118,7 @@ ACarPawn::ACarPawn(const FObjectInitializer& ObjectInitializer)
 
 	CarAudio = CreateDefaultSubobject<UCarAudioComponent>(TEXT("CarAudio"));
 	Mirrors = CreateDefaultSubobject<UCarMirrorsComponent>(TEXT("Mirrors"));
+	Lights = CreateDefaultSubobject<UCarLightsComponent>(TEXT("Lights"));
 
 	AutoPossessPlayer = EAutoReceiveInput::Disabled;
 	bUseControllerRotationYaw = false;
@@ -181,6 +183,11 @@ void ACarPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 	};
 	BindPressed(EKeys::SpaceBar, [this]() { bParkingBrake = !bParkingBrake; });
 	BindPressed(EKeys::B, [this]() { KeyGear = -1; });
+	BindPressed(EKeys::L, [this]() { Lights->ToggleLowBeam(); });
+	BindPressed(EKeys::H, [this]() { Lights->ToggleHighBeam(); });
+	BindPressed(EKeys::Z, [this]() { Lights->ToggleIndicator(ECarIndicator::Left); });
+	BindPressed(EKeys::X, [this]() { Lights->ToggleIndicator(ECarIndicator::Right); });
+	BindPressed(EKeys::V, [this]() { Lights->ToggleIndicator(ECarIndicator::Hazard); });
 	const FKey GearKeys[] = {EKeys::N, EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six};
 	for (int32 Gear = 0; Gear < UE_ARRAY_COUNT(GearKeys); ++Gear)
 	{
@@ -199,7 +206,8 @@ void ACarPawn::Tick(float DeltaSeconds)
 	{
 		return;
 	}
-	Movement->SetDriverInput(GatherInput(DeltaSeconds));
+	const FCarDriverInput DriverInput = GatherInput(DeltaSeconds);
+	Movement->SetDriverInput(DriverInput);
 
 	// Chaos puts resting bodies to sleep, which would freeze the engine simulation too.
 	if (!GetMesh()->IsAnyRigidBodyAwake())
@@ -210,6 +218,7 @@ void ACarPawn::Tick(float DeltaSeconds)
 	const FCarTelemetry Telemetry = Movement->GetTelemetry();
 	UpdateForceFeedback(Telemetry);
 	UpdateDashboard(Telemetry);
+	Lights->UpdateFromCar(DriverInput, Telemetry);
 	if (RuleMessageHideTime > 0.0 && GetWorld()->GetTimeSeconds() > RuleMessageHideTime)
 	{
 		RuleMessage->SetText(FText::GetEmpty());
@@ -286,6 +295,26 @@ FCarDriverInput ACarPawn::GatherInput(float DeltaSeconds)
 			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->HandbrakeButtonIndex))
 			{
 				bParkingBrake = !bParkingBrake;
+			}
+			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->LowBeamButtonIndex))
+			{
+				Lights->ToggleLowBeam();
+			}
+			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->HighBeamButtonIndex))
+			{
+				Lights->ToggleHighBeam();
+			}
+			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->IndicatorLeftButtonIndex))
+			{
+				Lights->ToggleIndicator(ECarIndicator::Left);
+			}
+			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->IndicatorRightButtonIndex))
+			{
+				Lights->ToggleIndicator(ECarIndicator::Right);
+			}
+			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->HazardButtonIndex))
+			{
+				Lights->ToggleIndicator(ECarIndicator::Hazard);
 			}
 			if (ButtonPressed(State.Buttons, PrevWheelButtons, WheelSettings->RecenterViewButtonIndex))
 			{
