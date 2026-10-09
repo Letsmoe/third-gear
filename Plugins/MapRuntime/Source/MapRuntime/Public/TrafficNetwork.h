@@ -116,10 +116,11 @@ public:
 	/**
 	 * The signal a vehicle at Location (cm, world xy) heading Forward (unit vector) is approaching: the nearest stop
 	 * line ahead within MaxDistanceCm (or just behind it, up to BehindCm) that points the same way and spans the
-	 * vehicle's lateral position.
+	 * vehicle's lateral position. PreferApproachId keeps a line the caller is already tracking while it is still within
+	 * BehindCm past it, so the answer doesn't jump to the next line ahead at the moment of crossing.
 	 */
 	bool FindApproachAhead(const FVector2D& Location, const FVector2D& Forward, float MaxDistanceCm, float BehindCm, double TimeSeconds,
-		FApproachQuery& Out) const;
+		FApproachQuery& Out, int32 PreferApproachId = INDEX_NONE) const;
 
 	/** The legal speed limit on the road at Location for a vehicle heading Forward. */
 	FSpeedLimitResult GetSpeedLimit(const FVector2D& Location, const FVector2D& Forward) const;

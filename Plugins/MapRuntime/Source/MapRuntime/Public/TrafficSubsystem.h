@@ -59,7 +59,7 @@ public:
 	 * (or BehindCm past the stop line). False when no signalised approach lies ahead.
 	 */
 	bool FindSignalAhead(const FVector& Location, const FVector& Forward, FApproachQuery& Out, float MaxDistanceCm = 15000.f,
-		float BehindCm = 1000.f) const;
+		float BehindCm = 1000.f, int32 PreferApproachId = INDEX_NONE) const;
 
 	/** The speed limit of the road at Location for a vehicle heading Forward; LimitKmh 0 means no limit. */
 	FSpeedLimitResult GetSpeedLimit(const FVector& Location, const FVector& Forward) const;

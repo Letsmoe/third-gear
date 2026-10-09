@@ -209,7 +209,7 @@ FSignalState FTrafficNetwork::GetApproachState(int32 ApproachId, double TimeSeco
 }
 
 bool FTrafficNetwork::FindApproachAhead(const FVector2D& Location, const FVector2D& Forward, float MaxDistanceCm, float BehindCm,
-	double TimeSeconds, FApproachQuery& Out) const
+	double TimeSeconds, FApproachQuery& Out, int32 PreferApproachId) const
 {
 	const int32 Reach = FMath::CeilToInt((MaxDistanceCm + 500.f) / ApproachCellCm);
 	const int32 CenterX = FMath::FloorToInt(Location.X / ApproachCellCm);
@@ -246,7 +246,11 @@ bool FTrafficNetwork::FindApproachAhead(const FVector2D& Location, const FVector
 					continue;
 				}
 				// Prefer the closest line ahead; a line just behind only wins when nothing is ahead.
-				const float Rank = Along >= 0.f ? Along : 100000.f - Along;
+				float Rank = Along >= 0.f ? Along : 100000.f - Along;
+				if (Approach.Id == PreferApproachId)
+				{
+					Rank = -1.f; // the line already being tracked wins until it is out of range
+				}
 				if (Rank < BestDistance)
 				{
 					BestDistance = Rank;

@@ -98,9 +98,10 @@ double UTrafficSubsystem::GetTrafficTime() const
 }
 
 bool UTrafficSubsystem::FindSignalAhead(const FVector& Location, const FVector& Forward, FApproachQuery& Out, float MaxDistanceCm,
-	float BehindCm) const
+	float BehindCm, int32 PreferApproachId) const
 {
-	return Network.FindApproachAhead(FVector2D(Location), FVector2D(Forward).GetSafeNormal(), MaxDistanceCm, BehindCm, GetTrafficTime(), Out);
+	return Network.FindApproachAhead(FVector2D(Location), FVector2D(Forward).GetSafeNormal(), MaxDistanceCm, BehindCm, GetTrafficTime(), Out,
+		PreferApproachId);
 }
 
 FSpeedLimitResult UTrafficSubsystem::GetSpeedLimit(const FVector& Location, const FVector& Forward) const
