@@ -7,6 +7,8 @@ import shapely
 from pyproj import Transformer
 
 from . import building_types, roads
+from .streets import tags as osm_tags
+from .streets.cross_section import StripKind
 from .geo import Area
 from .osm import OsmData
 
@@ -59,6 +61,8 @@ def side_offset(line: shapely.LineString, distance: float, side: str) -> shapely
 
     World y points south, so the frame is mirrored and shapely's positive (left) offset lands on the physical right.
     """
+    if abs(distance) < 0.01:
+        return line  # GEOS fails on offsets of about 1e-16, which the strip sums give for the centre line
     if side == "left":
         return shapely.offset_curve(line, -distance)
     return shapely.offset_curve(line, distance)
@@ -71,26 +75,16 @@ def is_bridge(tags: dict) -> bool:
 
 def cycleway_sides(tags: dict) -> dict:
     """The cycleway tagged on a road, as {"left": value, "right": value} relative to the way's direction."""
-    sides = {}
-    both = tags.get("cycleway:both") or tags.get("cycleway")
-    if both:
-        sides = {"left": both, "right": both}
-        if tags.get("cycleway") and roads.is_oneway(tags) and "cycleway:both" not in tags:
-            sides = {"right": both}  # a plain cycleway= on a one-way street is on the right
-    for side in ("left", "right"):
-        value = tags.get(f"cycleway:{side}")
-        if value:
-            sides[side] = value
-    return sides
+    return osm_tags.cycleway_sides(tags)
 
 
-def lane_divider_offsets(tags: dict, width: float) -> list:
-    """Sideways offsets (positive = physical right) of the lines between lanes, from the lane tags."""
-    lane_count = roads.road_lanes(tags)
-    if lane_count < 2:
-        return []
-    lane_width = width / lane_count
-    return [-width / 2 + lane_width * index for index in range(1, lane_count)]
+def cycle_lane_offset(section, side: str) -> float:
+    """Distance from the centre line to the middle of the painted cycle lane on one side, or to where one would run
+    along the kerb when the cross-section has none (shared lanes)."""
+    offset = section.side_strip_centre(StripKind.CYCLE_LANE, side)
+    if offset is None:
+        return section.width() / 2 - CYCLE_LANE_INSET
+    return offset
 
 
 def _properties(kind: str, osm_id: int, tags: dict, **extra) -> dict:
@@ -106,30 +100,32 @@ def _bridge_band(layers: Layers, line, width: float, properties: dict):
 def add_road(layers: Layers, way):
     """Carriageway edges, centre line, lane dividers and the cycleways tagged on one road."""
     centre = shapely.LineString(way.xy)
-    width = roads.road_width(way.tags)
-    lane_count = roads.road_lanes(way.tags)
-    properties = _properties("road", way.id, way.tags, width_m=round(width, 2), lanes=lane_count,
-                             oneway=roads.is_oneway(way.tags))
+    section = roads.road_section(way.tags)
+    width = section.width()
+    properties = _properties("road", way.id, way.tags, width_m=round(width, 2), lanes=section.lane_count(),
+                             oneway=osm_tags.is_oneway(way.tags), width_from=section.width_source.value,
+                             cross_section=section.describe())
     layers.add("Roads", centre, "centre", properties)
     for side in ("left", "right"):
         layers.add("Roads", side_offset(centre, width / 2, side), "carriageway_edge", properties)
-    for offset in lane_divider_offsets(way.tags, width):
+    for offset in section.lane_dividers():
         side = "right" if offset > 0 else "left"
         layers.add("Lanes", side_offset(centre, abs(offset), side), "lane_divider", properties)
     if is_bridge(way.tags):
         _bridge_band(layers, centre, width, properties)
     for side, value in cycleway_sides(way.tags).items():
-        _add_road_cycleway(layers, centre, width, side, value, properties)
+        _add_road_cycleway(layers, centre, section, side, value, properties)
 
 
-def _add_road_cycleway(layers: Layers, centre, width: float, side: str, value: str, properties: dict):
+def _add_road_cycleway(layers: Layers, centre, section, side: str, value: str, properties: dict):
     """A cycle lane inside the carriageway edge, or a track outside it, on one side of a road."""
     if value in {"lane", "opposite_lane"}:
-        layers.add("Cycling", side_offset(centre, width / 2 - CYCLE_LANE_INSET, side), "cycle_lane", properties)
+        layers.add("Cycling", side_offset(centre, cycle_lane_offset(section, side), side), "cycle_lane", properties)
     elif value in {"track", "opposite_track"}:
-        layers.add("Cycling", side_offset(centre, width / 2 + CYCLE_TRACK_OFFSET, side), "cycle_track", properties)
+        layers.add("Cycling", side_offset(centre, section.width() / 2 + CYCLE_TRACK_OFFSET, side), "cycle_track",
+                   properties)
     elif value in {"shared_lane", "share_busway"}:
-        layers.add("Cycling", side_offset(centre, width / 2 - CYCLE_LANE_INSET, side), "shared_lane", properties)
+        layers.add("Cycling", side_offset(centre, cycle_lane_offset(section, side), side), "shared_lane", properties)
 
 
 def add_path(layers: Layers, way):
@@ -186,7 +182,7 @@ def is_water_area(tags: dict) -> bool:
 
 def waterway_width(tags: dict) -> float:
     """Width of a waterway line in metres: the width tag, else a typical width for its kind."""
-    width = roads._float(tags.get("width"))
+    width = osm_tags.number(tags.get("width"))
     if width and 0.3 <= width <= 200.0:
         return width
     return WATERWAY_WIDTHS.get(tags.get("waterway"), 1.0)

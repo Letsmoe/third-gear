@@ -25,6 +25,7 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
 
 from . import furniture, parking, roads
+from .streets.cross_section import Travel
 
 LANE_SPACING = 1.5
 CONNECTION_SPACING = 0.75
@@ -320,7 +321,7 @@ class LaneBuilder:
     def _lane_offset(self, way, travel=+1):
         """Distance of the right-hand lane's centre line from the way's centre line, making room for parked cars."""
         width = self.net.widths[way.id]
-        base = self._base_lane_offset(way, width)
+        base = self._base_lane_offset(way, travel)
         return parking.lane_offset_with_parking(base, width, travel, parking.parking_sides(way.tags, way.id, width))
 
     def _tapered_offsets(self, xy, base, shifted):
@@ -332,21 +333,21 @@ class LaneBuilder:
         blend = np.clip((from_end - PARKING_TAPER_START) / PARKING_TAPER_LENGTH, 0.0, 1.0)
         return base + (shifted - base) * blend
 
-    def _base_lane_offset(self, way, width):
-        """The lane offset on a street without parked cars."""
-        total_lanes = max(roads.road_lanes(way.tags), 1)
-        lane_width = width / total_lanes
+    def _base_lane_offset(self, way, travel):
+        """The lane offset on a street without parked cars: the middle of the kerb-side travel lane of the cross-section
+        (cycle and bus lanes beside it stay free), kept clear of the oncoming traffic on two-way roads."""
+        section = self.net.sections[way.id]
+        direction = Travel.FORWARD if travel > 0 else Travel.BACKWARD
+        offset = section.kerb_lane_centre(direction)
         if roads.is_oneway(way.tags):
-            return max(width / 2.0 - lane_width / 2.0, 0.0)
-        per_direction = max(total_lanes // 2, 1)
-        offset = (per_direction - 0.5) * lane_width
+            return max(offset, 0.0)
+        width = section.width()
         return float(np.clip(offset, MIN_LANE_OFFSET, max(width / 2.0 - 1.0, MIN_LANE_OFFSET)))
 
     def _raw_lane_path(self, segment, travel):
         """The lane centre line of a segment in one direction, before junction trimming."""
         xy = segment.xy if travel > 0 else segment.xy[::-1]
-        width = self.net.widths[segment.way.id]
-        base = self._base_lane_offset(segment.way, width)
+        base = self._base_lane_offset(segment.way, travel)
         shifted = self._lane_offset(segment.way, travel)
         if abs(shifted - base) < 1e-6:
             return offset_polyline(xy, base)
@@ -396,7 +397,7 @@ class LaneBuilder:
                         continue
                     s, distance = project_on_polyline(raw, stop)
                     # The stop point is on the way's centre line and the lane is offset from it: compare against that offset.
-                    mismatch = abs(distance - self._base_lane_offset(segment.way, self.net.widths[segment.way.id]))
+                    mismatch = abs(distance - self._base_lane_offset(segment.way, approach.travel))
                     if mismatch > 4.0:
                         continue
                     if best is None or mismatch < best[0]:

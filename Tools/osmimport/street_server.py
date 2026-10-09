@@ -27,6 +27,7 @@ import build_world  # noqa: E402
 import data_root  # noqa: E402
 import game_streets  # noqa: E402
 from osmimport import dem, furniture, geo, hh_survey, roads, street_layers, street_scene  # noqa: E402
+from osmimport.streets import assumptions, cross_section, tags as street_tags  # noqa: E402
 from street_index import WHOLE_EXTRACT, ViewportIndex, load_whole_extract  # noqa: E402
 
 PAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "street_viewer.html")
@@ -43,7 +44,7 @@ _wgs_to_utm = Transformer.from_crs(4326, 25832, always_xy=True)
 
 
 # The modules that make the game's streets, in the order they are reloaded when one of them changed.
-GAME_MODULES = [roads, furniture, build_area, build_world, game_streets]
+GAME_MODULES = [street_tags, assumptions, cross_section, roads, furniture, build_area, build_world, game_streets]
 
 
 class GameStreetCache:

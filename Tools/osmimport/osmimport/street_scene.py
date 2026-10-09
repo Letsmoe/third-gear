@@ -189,12 +189,12 @@ def _add_water_shapes(shapes: StreetShapes, data):
 def _add_road_shapes(shapes: StreetShapes, way):
     """The cycle lanes tagged on one road (the carriageway and its markings come from the game's own generator)."""
     centre = shapely.LineString(way.xy)
-    width = roads.road_width(way.tags)
+    section = roads.road_section(way.tags)
     on_bridge = street_layers.is_bridge(way.tags)
     for side, value in street_layers.cycleway_sides(way.tags).items():
         if value not in {"lane", "opposite_lane"}:
             continue
-        lane = street_layers.side_offset(centre, width / 2 - street_layers.CYCLE_LANE_INSET, side)
+        lane = street_layers.side_offset(centre, street_layers.cycle_lane_offset(section, side), side)
         shapes.add("cycleway", lane, _strip(lane, CYCLE_LANE_WIDTH), on_bridge)
 
 

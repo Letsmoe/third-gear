@@ -27,6 +27,7 @@ import shapely
 from shapely.strtree import STRtree
 
 from . import roads
+from .streets import tags as osm_tags
 
 JUNCTION_MERGE_DISTANCE = 30.0
 APPROACH_SEARCH_DISTANCE = 90.0
@@ -100,7 +101,7 @@ class Junction:
 
 
 def _float(value, default=None):
-    return roads._float(value, default)
+    return osm_tags.number(value, default)
 
 
 def parse_speed(tags, urban):

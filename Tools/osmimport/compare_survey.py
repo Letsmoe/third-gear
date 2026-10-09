@@ -110,8 +110,9 @@ def _junction_points(data):
     return [positions[node] for node, count in degree.items() if count >= 3 and node in positions]
 
 
-def width_metrics(data, survey, box, compared):
-    """Real and our width sampled along the OSM centre lines away from junctions, per road class and lane count."""
+def width_metrics(data, buildings, survey, box, compared):
+    """Real and our width sampled along the OSM centre lines away from junctions, per road class and lane count.
+    Ours is the width the game builds, in the same urban or rural context (buildings: their union)."""
     carriageway = shapely.intersection(survey.group_union(box.buffer(30), "carriageway"), box.buffer(30))
     shapely.prepare(carriageway)
     junctions = shapely.union_all(shapely.buffer(shapely.points(np.array(_junction_points(data))), JUNCTION_SKIP))
@@ -124,9 +125,10 @@ def width_metrics(data, survey, box, compared):
         if roads._is_tunnel(way) or way.tags.get("bridge", "no") != "no":
             continue
         line = lines[way.id]
-        ours = roads.road_width(way.tags)
+        section = roads.road_section(way.tags, roads.road_context(way, buildings))
+        ours = section.width()
         key = f"{way.tags.get('highway')} {'oneway' if roads.is_oneway(way.tags) else 'twoway'} " \
-              f"lanes={roads.road_lanes(way.tags)}"
+              f"lanes={section.lane_count()}"
         for distance in np.arange(WIDTH_SAMPLE_SPACING / 2, line.length, WIDTH_SAMPLE_SPACING):
             here = line.interpolate(distance)
             if not compared.contains(here) or junctions.contains(here):
@@ -141,6 +143,7 @@ def width_metrics(data, survey, box, compared):
             real = real_width_at((here.x, here.y), direction / np.hypot(*direction), carriageway, nearby)
             if real is not None and real < 2 * WIDTH_PROBE_HALF_LENGTH - 0.5:
                 samples[key].append((real, ours))
+    samples["all roads"] = [pair for pairs in list(samples.values()) for pair in pairs]
     result = {}
     for key, pairs in sorted(samples.items(), key=lambda item: -len(item[1])):
         real, ours = np.array(pairs).T
@@ -248,11 +251,12 @@ def main():
     streets = generate_region(index, box)
     log("game streets generated")
     data = index.subset(box)
+    buildings = shapely.union_all([footprint for _, _, footprint, _ in index.buildings_in(box.buffer(50))])
     compared = shapely.difference(survey.coverage(box), survey.group_union(box, "shared"))
     shapely.prepare(compared)
     report = {"region": args.region,
               "carriageway": carriageway_metrics(streets, survey, box, compared),
-              "width": width_metrics(data, survey, box, compared),
+              "width": width_metrics(data, buildings, survey, box, compared),
               "cycle": cycle_metrics(data, survey, box, compared),
               "points": point_metrics(streets, survey, box, compared)}
     log("compared")
