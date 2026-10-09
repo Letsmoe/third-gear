@@ -450,6 +450,51 @@ FWindowRoads FRoadSurfaces::InWindow(const FBox& Window) const
 	return Roads;
 }
 
+void FRoadSurfaces::CutMarkings(const FPolygonSet& Cutout)
+{
+	if (Cutout.Size() == 0)
+	{
+		return;
+	}
+	std::vector<FMarkingLine> Kept;
+	for (FMarkingLine& Marking : MarkingLines)
+	{
+		const FBox Box = BoxOf(Marking.Points);
+		const FPolygons Near = Cutout.InWindow({Box.X0 - 1.0, Box.Y0 - 1.0, Box.X1 + 1.0, Box.Y1 + 1.0});
+		if (Near.empty())
+		{
+			Kept.push_back(std::move(Marking));
+			continue;
+		}
+		Clipper2Lib::PathsD Open(1);
+		for (const FWorldPoint& Point : Marking.Points)
+		{
+			Open[0].emplace_back(Point.X, Point.Y);
+		}
+		Clipper2Lib::ClipperD Clipper(4);
+		Clipper.AddOpenSubject(Open);
+		Clipper.AddClip(Near);
+		Clipper2Lib::PathsD Closed;
+		Clipper2Lib::PathsD Outside;
+		Clipper.Execute(Clipper2Lib::ClipType::Difference, Clipper2Lib::FillRule::NonZero, Closed, Outside);
+		for (const Clipper2Lib::PathD& Path : Outside)
+		{
+			FPolyline Piece;
+			for (const Clipper2Lib::PointD& Point : Path)
+			{
+				Piece.push_back({Point.x, Point.y});
+			}
+			Kept.push_back({Marking.Kind, Oriented(std::move(Piece), Marking.Points)});
+		}
+	}
+	MarkingLines = std::move(Kept);
+	MarkingIndex = FSpatialIndex();
+	for (size_t Index = 0; Index < MarkingLines.size(); ++Index)
+	{
+		MarkingIndex.Insert(BoxOf(MarkingLines[Index].Points), static_cast<int>(Index));
+	}
+}
+
 std::vector<const FBridgeDeck*> FRoadSurfaces::BridgesNear(const FBox& Box) const
 {
 	std::vector<const FBridgeDeck*> Result;

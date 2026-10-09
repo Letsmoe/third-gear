@@ -16,7 +16,13 @@
 #include "OsmReader.h"
 #include "Assumptions.h"
 #include "Paths.h"
+#include "Furniture.h"
+#include "Parking.h"
+#include "PolygonQuery.h"
 #include "PolygonSet.h"
+#include "RoadGraph.h"
+#include "TrafficJson.h"
+#include "Zebras.h"
 #include "RoadSurfaces.h"
 #include "Roads.h"
 #include "Terrain.h"
@@ -93,7 +99,7 @@ enum ETileStage
 	StageCount,
 };
 const char* const StageNames[StageCount] = {"terrain window", "roads, water and buildings", "paths", "conform", "grid",
-											"surfaces", "vegetation", "write"};
+											"surfaces and furniture", "vegetation", "write"};
 std::atomic<int64_t> StageNanoseconds[StageCount];
 
 /** Measures from its creation to Next, adding the time to a stage. */
@@ -135,6 +141,21 @@ FPolygonSet BuildingFootprints(const std::vector<FOsmArea>& Buildings)
 	return Footprints;
 }
 
+/** The furniture, parked cars and painted bars standing in one tile. */
+struct FTileContents
+{
+	std::vector<const FLamp*> Lamps;
+	std::vector<const FSignalHead*> Heads;
+	std::vector<const FSign*> Signs;
+	std::vector<const FParkedCar*> Cars;
+};
+
+/** White bars painted across the road: zebra stripes and stop lines, both 0.5 m wide. */
+struct FBar
+{
+	FPolyline Points;
+};
+
 /** Everything read once for the region, shared read-only by the tile workers. */
 struct FRegionInputs
 {
@@ -147,6 +168,10 @@ struct FRegionInputs
 	const FPolygonSet* Buildings = nullptr;
 	const FVegetationSources* Vegetation = nullptr;
 	const FRoadSurfaces* Roads = nullptr;
+	std::vector<FBar> Bars;
+	FSpatialIndex BarIndex;
+	/** What stands in each tile, by tile index (Region.Tiles() order). */
+	std::vector<FTileContents> Contents;
 };
 
 /** The road, pavement, path, water and bridge surfaces of a tile, with the height rule of each. */
@@ -258,8 +283,86 @@ void WriteGrid(FTileWriter& Writer, const FHeightGrid& Ground, const FHeightGrid
 	Writer.SetGrid(Terrain, Road, Weights, Columns, Rows, static_cast<float>(GridCell));
 }
 
+/** The zebra stripes and stop lines crossing a tile (build_world.py's write_zebras and write_stop_lines). */
+void WriteBars(FTileWriter& Writer, const FRegionInputs& Inputs)
+{
+	const uint8_t SolidStyle = FindMarkingStyle("solid")->Style;
+	for (const int Item : Inputs.BarIndex.Query(Writer.Bounds()))
+	{
+		Writer.AddMarking("Marking_White", SolidStyle, Inputs.Bars[Item].Points, 0.5f, 0.0f, 0.0f);
+	}
+}
+
+/** The street furniture and parked cars of a tile, standing on the pavement or the conformed ground. */
+void WritePois(FTileWriter& Writer, const FTileContents& Contents, const FPolygons& Pavement, const FHeightGrid& Ground,
+			   const FHeightGrid& RoadHeight)
+{
+	const FPolygonQuery OnPavement(Pavement);
+	auto FootHeight = [&](double X, double Y) {
+		if (OnPavement.Contains(X, Y))
+		{
+			return static_cast<float>(RoadHeight.Sample(X, Y) + KerbHeight);
+		}
+		return static_cast<float>(Ground.Sample(X, Y));
+	};
+	for (const FLamp* Lamp : Contents.Lamps)
+	{
+		FPoi Poi;
+		Poi.Kind = EPoiKind::Lamp;
+		Poi.X = Lamp->X;
+		Poi.Y = Lamp->Y;
+		Poi.Z = FootHeight(Lamp->X, Lamp->Y);
+		Poi.Yaw = static_cast<float>(Lamp->YawDegrees);
+		Poi.Param0 = Lamp->bFromOsm ? 7.0f : 6.5f;
+		Poi.Param1 = 1.6f;
+		Poi.Flags = Lamp->bFromOsm ? 1 : 0;
+		Writer.AddPoi(Poi);
+	}
+	for (const FSignalHead* Head : Contents.Heads)
+	{
+		FPoi Poi;
+		Poi.Kind = EPoiKind::SignalHead;
+		Poi.X = Head->X;
+		Poi.Y = Head->Y;
+		Poi.Z = FootHeight(Head->X, Head->Y);
+		Poi.Yaw = static_cast<float>(Head->YawDegrees);
+		Poi.Param0 = 3.4f;
+		Poi.Link = static_cast<uint32_t>(Head->Approach);
+		Poi.Flags = Head->bLeftSide ? 1 : 0;
+		Writer.AddPoi(Poi);
+	}
+	for (const FSign* Sign : Contents.Signs)
+	{
+		FPoi Poi;
+		Poi.Kind = EPoiKind::Sign;
+		Poi.X = Sign->X;
+		Poi.Y = Sign->Y;
+		Poi.Z = FootHeight(Sign->X, Sign->Y);
+		Poi.Yaw = static_cast<float>(Sign->YawDegrees);
+		Poi.Variant = Writer.Name(Sign->Names[0]);
+		Poi.Variant2 = Sign->Names.size() > 1 ? Writer.Name(Sign->Names[1]) : NoVariant;
+		Writer.AddPoi(Poi);
+	}
+	const auto SampleRoad = [&](double X, double Y) { return RoadHeight.Sample(X, Y); };
+	for (const FParkedCar* Car : Contents.Cars)
+	{
+		const FParkedCarPose Pose = FinishParkedCar(*Car, SampleRoad);
+		FPoi Poi;
+		Poi.Kind = EPoiKind::ParkedCar;
+		Poi.X = Car->X;
+		Poi.Y = Car->Y;
+		Poi.Z = static_cast<float>(Pose.Z);
+		Poi.Yaw = static_cast<float>(Car->YawDegrees);
+		Poi.Variant = static_cast<uint16_t>(Car->Model);
+		Poi.Param0 = static_cast<float>(Pose.RollDegrees);
+		Poi.Param1 = static_cast<float>(Pose.PitchDegrees);
+		Writer.AddPoi(Poi);
+	}
+}
+
 /** One tile, written to its file. */
-void BuildTile(const FTileBounds& Tile, const FRegionInputs& Inputs, const std::filesystem::path& OutputDirectory)
+void BuildTile(const FTileBounds& Tile, size_t TileIndex, const FRegionInputs& Inputs,
+			   const std::filesystem::path& OutputDirectory)
 {
 	const FBox Box{Tile.X0, Tile.Y0, Tile.X1, Tile.Y1};
 	const FBox Window{Box.X0 - TileMargin, Box.Y0 - TileMargin, Box.X1 + TileMargin, Box.Y1 + TileMargin};
@@ -286,6 +389,8 @@ void BuildTile(const FTileBounds& Tile, const FRegionInputs& Inputs, const std::
 	Clock.Next(StageGrid);
 	WriteSurfaces(Writer, Roads, Paved, Unpaved, Water, *Inputs.Roads);
 	WriteMarkings(Writer, *Inputs.Roads);
+	WriteBars(Writer, Inputs);
+	WritePois(Writer, Inputs.Contents[TileIndex], Pavement, Ground, RoadHeight);
 	Clock.Next(StageSurfaces);
 
 	const double Reach = FVegetationSources::WindowMargin();
@@ -328,7 +433,7 @@ void BuildTiles(const std::vector<FTileBounds>& Tiles, const FRegionInputs& Inpu
 		Workers.emplace_back([&]() {
 			for (size_t Index = Next++; Index < Tiles.size(); Index = Next++)
 			{
-				BuildTile(Tiles[Index], Inputs, OutputDirectory);
+				BuildTile(Tiles[Index], Index, Inputs, OutputDirectory);
 			}
 		});
 	}
@@ -381,6 +486,100 @@ void WriteWorldJson(const FRegion& Region, const std::vector<FTileBounds>& Tiles
 }
 }
 
+namespace
+{
+/** The index of the region tile holding a point, or -1 outside the region. */
+int TileIndexOf(const FRegion& Region, double X, double Y)
+{
+	const int Columns = static_cast<int>(std::ceil((Region.XMax - Region.XMin) / Region.TileSize));
+	const int Rows = static_cast<int>(std::ceil((Region.YMax - Region.YMin) / Region.TileSize));
+	const int Column = static_cast<int>(std::floor((X - Region.XMin) / Region.TileSize));
+	const int Row = static_cast<int>(std::floor((Y - Region.YMin) / Region.TileSize));
+	if (Column < 0 || Row < 0 || Column >= Columns || Row >= Rows)
+	{
+		return -1;
+	}
+	return Row * Columns + Column;
+}
+
+/** The furniture and parked cars by the tile they stand in. */
+std::vector<FTileContents> SortIntoTiles(const FRegion& Region, const FFurniture& Furniture,
+										 const std::vector<FParkedCar>& Cars)
+{
+	std::vector<FTileContents> Contents(Region.Tiles().size());
+	auto Place = [&](double X, double Y, auto Member, const auto* Item) {
+		const int Index = TileIndexOf(Region, X, Y);
+		if (Index >= 0)
+		{
+			(Contents[Index].*Member).push_back(Item);
+		}
+	};
+	for (const FLamp& Lamp : Furniture.Lamps)
+	{
+		Place(Lamp.X, Lamp.Y, &FTileContents::Lamps, &Lamp);
+	}
+	for (const FSignalHead& Head : Furniture.Heads)
+	{
+		Place(Head.X, Head.Y, &FTileContents::Heads, &Head);
+	}
+	for (const FSign& Sign : Furniture.Signs)
+	{
+		Place(Sign.X, Sign.Y, &FTileContents::Signs, &Sign);
+	}
+	for (const FParkedCar& Car : Cars)
+	{
+		Place(Car.X, Car.Y, &FTileContents::Cars, &Car);
+	}
+	return Contents;
+}
+
+FPolyline ToPolyline(const FStreetPolyline& Line)
+{
+	FPolyline Points;
+	for (const FStreetPoint& Point : Line)
+	{
+		Points.push_back({Point.X, Point.Y});
+	}
+	return Points;
+}
+
+/** Zebra stripes and stop lines as bars, and the zebras cut out of the painted lines. */
+void AddBars(FRegionInputs& Inputs, const FFurniture& Furniture, FRoadSurfaces& Roads)
+{
+	FPolygonSet Cutout;
+	for (const FZebra& Zebra : Furniture.Zebras)
+	{
+		FZebraBars Bars = MakeZebraBars(Zebra, Roads.Ground());
+		for (const FStreetPolyline& Bar : Bars.Bars)
+		{
+			Inputs.Bars.push_back({ToPolyline(Bar)});
+		}
+		Cutout.Add(std::move(Bars.Outline));
+	}
+	Roads.CutMarkings(Cutout);
+	for (const FJunctionRecord& Junction : Furniture.Network.Junctions)
+	{
+		for (const FApproachRecord& Approach : Junction.Approaches)
+		{
+			if (const std::optional<FStreetPolyline> Line = StopLineGeometry(Approach))
+			{
+				Inputs.Bars.push_back({ToPolyline(*Line)});
+			}
+		}
+	}
+	for (size_t Index = 0; Index < Inputs.Bars.size(); ++Index)
+	{
+		const FPolyline& Points = Inputs.Bars[Index].Points;
+		FBox Box{1e300, 1e300, -1e300, -1e300};
+		for (const FWorldPoint& Point : Points)
+		{
+			Box = {std::min(Box.X0, Point.X), std::min(Box.Y0, Point.Y), std::max(Box.X1, Point.X), std::max(Box.Y1, Point.Y)};
+		}
+		Inputs.BarIndex.Insert(Box, static_cast<int>(Index));
+	}
+}
+}
+
 std::string DefaultDataRoot()
 {
 	if (const char* Override = std::getenv("THIRD_GEAR_DATA"))
@@ -423,8 +622,19 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	const FStreetModel Streets = StreetsTask.get();
 	Log("street model: " + std::to_string(Streets.Lines.Layouts.size()) + " segments, "
 		+ std::to_string(Streets.Markings.size()) + " painted lines");
-	const FRoadSurfaces Roads(Streets, Terrain, Buildings, Threads);
+	FRoadSurfaces Roads(Streets, Terrain, Buildings, Threads);
 	Inputs.Roads = &Roads;
+	const FBuildingIndex BuildingIndex(Osm.Buildings);
+	const FRoadGraph Graph(*Streets.GroundWays, Streets.Widths, BuildingIndex);
+	const FFurniture Furniture = BuildFurniture(Osm, Graph, Roads.Ground(), Buildings);
+	const std::vector<FParkedCar> Cars = BuildParkedCars(Osm, Graph, Furniture.Zebras, Roads.Ground(), Buildings, Inputs.Extent);
+	AddBars(Inputs, Furniture, Roads);
+	Inputs.Contents = SortIntoTiles(Region, Furniture, Cars);
+	WriteTrafficJson((OutputDirectory / "traffic.json").string(), Furniture.Network);
+	Log("furniture: " + std::to_string(Furniture.Network.Junctions.size()) + " signal junctions, "
+		+ std::to_string(Furniture.Heads.size()) + " signal poles, " + std::to_string(Furniture.Signs.size()) + " signs, "
+		+ std::to_string(Furniture.Lamps.size()) + " lamps, " + std::to_string(Furniture.Zebras.size()) + " zebras, "
+		+ std::to_string(Cars.size()) + " parked cars");
 	Log("road surfaces: " + std::to_string(Roads.Ground().Size()) + " pieces, " + std::to_string(Roads.Markings().size())
 		+ " marking lines");
 	const FWaterBodies Water = WaterTask.get();

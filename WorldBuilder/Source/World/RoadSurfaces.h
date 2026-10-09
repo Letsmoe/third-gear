@@ -69,6 +69,9 @@ public:
 	/** Every painted line kept on the road. */
 	const std::vector<FMarkingLine>& Markings() const { return MarkingLines; }
 
+	/** Leaves the cutout unpainted (where zebra stripes go): the lines crossing it are cut into the parts outside. */
+	void CutMarkings(const FPolygonSet& Cutout);
+
 private:
 	FPolygonSet GroundPieces;
 	FPolygonSet AsphaltPieces;
