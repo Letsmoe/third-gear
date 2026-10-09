@@ -99,6 +99,35 @@ const LEGEND = [
   ["point", "survey_sign", "survey: sign"],
 ];
 
+// Every pane has its own canvas covering the whole map, and a canvas swallows every click on it. A click that hits
+// none of a canvas's own shapes is passed on to whatever lies below it, so the layers underneath stay clickable.
+const canvasOnClick = L.Canvas.prototype._onClick;
+L.Canvas.include({
+  _onClick(event) {
+    if (event.type !== "click" || this._hitsOwnLayer(event)) {
+      canvasOnClick.call(this, event);
+      return;
+    }
+    this._container.style.pointerEvents = "none";
+    const below = document.elementFromPoint(event.clientX, event.clientY);
+    this._container.style.pointerEvents = "";
+    if (below && below.tagName === "CANVAS") {
+      // Only the passed-on click may reach the map: two clicks in quick succession count as a double click (zoom).
+      event.stopPropagation();
+      below.dispatchEvent(new MouseEvent("click", event));
+      return;
+    }
+    canvasOnClick.call(this, event);
+  },
+  _hitsOwnLayer(event) {
+    const point = this._map.mouseEventToLayerPoint(event);
+    for (let order = this._drawFirst; order; order = order.next) {
+      if (order.layer.options.interactive && order.layer._containsPoint(point)) return true;
+    }
+    return false;
+  },
+});
+
 const map = L.map("map", { preferCanvas: true, maxZoom: 23, zoomSnap: 0.5 });
 const aerial = L.tileLayer.wms("https://geodienste.hamburg.de/wms_dop_zeitreihe_unbelaubt", {
   layers: "dop_zeitreihe_unbelaubt", format: "image/jpeg", maxZoom: 23, tileSize: 512,
