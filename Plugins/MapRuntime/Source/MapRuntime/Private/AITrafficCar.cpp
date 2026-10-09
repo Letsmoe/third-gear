@@ -12,6 +12,9 @@ DEFINE_LOG_CATEGORY_STATIC(LogAITrafficCar, Log, All);
 
 namespace
 {
+static TAutoConsoleVariable<int32> CVarStockPaint(TEXT("tg.TrafficStockPaint"), 0,
+	TEXT("1 keeps the City Sample paint material on new AI cars instead of the clean traffic paint (for before and after comparisons)."));
+
 const FName PaintParameter(TEXT("BaseColor"));
 const FName BrakeParameter(TEXT("Brake Amt LE"));
 const FName HeadlightParameter(TEXT("Headlight Amt LE"));
@@ -74,6 +77,9 @@ bool FTrafficVehicleModel::Load()
 	BodyBoundsCm = Body->GetBoundingBox();
 	PaintSlot = FindMaterialSlot(Body, TEXT("veh_carPaint"));
 	LightSlot = FindMaterialSlot(Body, TEXT("veh_light"));
+	// The stock paint of the City Sample layers dust, grime and colour variation over BaseColor and renders light grey.
+	const FString PaintPath = FString::Printf(TEXT("/Game/Vehicles/TrafficPaint/MI_TrafficPaint_%s.MI_TrafficPaint_%s"), *Folder, *Folder);
+	TrafficPaint = LoadObject<UMaterialInterface>(nullptr, *PaintPath);
 
 	const float FrontAxleX = WheelCentersCm[0].X;
 	const float RearAxleX = WheelCentersCm[2].X;
@@ -99,6 +105,7 @@ void FTrafficVehicleModel::CollectAssets(TArray<TObjectPtr<UObject>>& Out) const
 	{
 		Out.Add(Pad);
 	}
+	Out.Add(TrafficPaint);
 }
 
 AAITrafficCar::AAITrafficCar()
@@ -201,6 +208,10 @@ void AAITrafficCar::Initialize(const FTrafficVehicleModel& Model, const FLinearC
 	// Paint and lights get their own material instances so every car can look different.
 	if (Model.PaintSlot != INDEX_NONE)
 	{
+		if (Model.TrafficPaint && CVarStockPaint.GetValueOnGameThread() == 0)
+		{
+			BodyComponent->SetMaterial(Model.PaintSlot, Model.TrafficPaint);
+		}
 		UMaterialInstanceDynamic* Paint = BodyComponent->CreateDynamicMaterialInstance(Model.PaintSlot);
 		if (Paint)
 		{

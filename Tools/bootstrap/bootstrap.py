@@ -122,11 +122,19 @@ def build_run():
 
 
 def car_done():
-    """The City Sample Vehicles pack is installed."""
-    return has_files(os.path.join(REPO, "Content", "CitySampleVehicles"), "**/*.uasset")
+    """The City Sample Vehicles pack is installed and the traffic paint made from it."""
+    return (has_files(os.path.join(REPO, "Content", "CitySampleVehicles"), "**/*.uasset")
+            and has_files(os.path.join(REPO, "Content", "Vehicles", "TrafficPaint"), "*.uasset"))
 
 
 def car_run():
+    """Downloads City Sample Vehicles from the Fab library unless installed, then makes the traffic paint from it."""
+    if not has_files(os.path.join(REPO, "Content", "CitySampleVehicles"), "**/*.uasset"):
+        download_city_sample_vehicles()
+    run_editor_script("create_traffic_paint.py")
+
+
+def download_city_sample_vehicles():
     """Downloads City Sample Vehicles from the Fab library and moves it into the data root's content."""
     download = data_root.downloads_dir("fab_city_sample_vehicles")
     run([data_root.venv_python("fab"), "-I", "Tools/asset_fetch/fab_download.py", "City Sample Vehicles", download])

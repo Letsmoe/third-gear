@@ -15,5 +15,5 @@ export XR_RUNTIME_JSON=/nonexistent/openxr_runtime.json
 
 timeout 900 "$UE/Engine/Binaries/Linux/UnrealEditor" "$ROOT/DrivingGame.uproject" /Game/Maps/Streamed -game -RenderOffscreen \
 	-nosound -unattended -NoWheel -log=seatshot.log -Region="$REGION" -StartPose="$X,$Y,$YAW" -SeatShot -ShotName="$NAME" \
-	-ShotDelay=${SHOT_DELAY:-14} ${EXTRA:-} -ExecCmds="r.SetRes ${RES}w${CMDS:+,$CMDS}" >/dev/null 2>&1 || true
+	${SHOT_DELAY:+-ShotDelay=$SHOT_DELAY} ${EXTRA:-} -ExecCmds="r.SetRes ${RES}w${CMDS:+,$CMDS}" >/dev/null 2>&1 || true
 echo "$ROOT/Saved/Screenshots/${NAME}_seat.png"

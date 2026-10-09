@@ -31,7 +31,20 @@ private:
 	/** Ground point below a player-start transform (player starts sit at eye height above the road). */
 	FVector FindGroundBelow(const FVector& Location) const;
 
+	/** Moves the camera to the next -Shots entry, runs its console commands and loads the world around it. */
 	void TakeNextShot();
+
+	/** Waits until everything the view needs is compiled and streamed, then captures it (see TakeNextShot). */
+	void SettleAndCapture();
+
+	/** Saves the current view as the next numbered screenshot and moves on to the next shot. */
+	void CaptureShot();
+
+	/** Blocks until the shaders the current view asked for are compiled and its textures are streamed in. */
+	void WaitForShadersAndTextures() const;
+
+	/** Saves the driver's view (-SeatShot) and quits. */
+	void CaptureSeatShot();
 
 	/** The level's world streamer, if the world is generated at runtime. */
 	class AWorldStreamer* FindWorldStreamer() const;
@@ -42,5 +55,7 @@ private:
 
 	TArray<FString> PendingShots;
 	int32 ShotIndex = 0;
+	/** Seconds the renderer gets after shaders and textures are ready (Lumen and TSR history), -ShotSettle=. */
+	float ShotSettleSeconds = 2.5f;
 	FString ShotName = TEXT("shot");
 };
