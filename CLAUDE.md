@@ -86,6 +86,8 @@ C++ changes need a rebuild in the root after the merge, with the editor closed; 
 
 ## Validation
 
+Test on something tiny: the 500 m area `bergedorf_test`, built and imported without the horizon (`-nohorizon`), so a test round takes minutes, not an hour. The full `bergedorf_core` map with the 60 km horizon is only for final checks and performance measurements.
+
 Never launch or restart my running editor, game or VR session. Check things yourself headless or offscreen instead: `Scripts/screenshot.sh`, `-SeatShot`, `Scripts/drive_test.sh`, `Scripts/profile_gpu.sh`, and the logs under `Saved/Logs/`. Only I can test with the headset and the real wheel; when that's needed, say exactly what to try.
 
 When I tell you what's happening, that's the reproduction: take it as given and go find the cause, don't re-check what I already saw. Reach for screenshots and logs when the code doesn't make the cause clear, or a fix based on reading it didn't work — guessing from source has been wrong often enough that a second guess isn't worth it.
