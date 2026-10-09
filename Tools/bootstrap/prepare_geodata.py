@@ -31,6 +31,7 @@ BBOX_KM_NORTH = (5917, 5932)
 BBOX_WGS84 = (10.05, 53.40, 10.33, 53.53)
 OSM_SOURCES = ["osm_hamburg", "osm_schleswig_holstein", "osm_niedersachsen"]
 TILE_KM_RE = re.compile(r"_32_(\d+)_(\d+)_")
+ZIP_DEFLATE64 = 9  # zipfile has no constant for it
 
 
 def marker(name):
@@ -73,20 +74,31 @@ def link(source, destination):
 
 
 def extract_tiles(archive, destination, suffix):
-    """Extracts the bbox tiles with the given suffix from a zip into one flat folder; returns their count."""
+    """Extracts the bbox tiles with the given suffix from a zip into one flat folder; returns their count.
+
+    Python's zipfile can't read Deflate64, which the Hamburg bDOM archive uses; those entries go through 7z."""
     os.makedirs(destination, exist_ok=True)
     count = 0
+    deflate64_entries = []
     with zipfile.ZipFile(archive) as zip_file:
         for entry in zip_file.infolist():
             name = os.path.basename(entry.filename)
             if not name.endswith(suffix) or not in_bbox(name):
                 continue
-            target = os.path.join(destination, name)
-            if not os.path.exists(target):
-                with zip_file.open(entry) as source, open(target + ".part", "wb") as output:
-                    shutil.copyfileobj(source, output, 1 << 22)
-                os.replace(target + ".part", target)
             count += 1
+            target = os.path.join(destination, name)
+            if os.path.exists(target):
+                continue
+            if entry.compress_type == ZIP_DEFLATE64:
+                deflate64_entries.append(entry.filename)
+                continue
+            with zip_file.open(entry) as source, open(target + ".part", "wb") as output:
+                shutil.copyfileobj(source, output, 1 << 22)
+            os.replace(target + ".part", target)
+    if deflate64_entries:
+        # `e` extracts without the archive's folders, so names can't escape the destination.
+        subprocess.run(["7z", "e", "-y", "-bd", f"-o{destination}", archive, *deflate64_entries], check=True,
+                       stdout=subprocess.DEVNULL)
     return count
 
 
