@@ -22,6 +22,7 @@ from audio_io import SAMPLE_RATE, decode, rms_db, write_wav  # noqa: E402
 from prompts import SOUNDS  # noqa: E402
 
 LOOP_TARGET_RMS_DB = -26.0
+ONESHOT_LOUDEST_SECOND_DB = -14.0
 CROSSFADE_SECONDS = 4.0
 TRIM_HEAD_SECONDS = 1.5
 TRIM_TAIL_SECONDS = 0.5
@@ -66,18 +67,27 @@ def make_loop(raw_path, out_path, highpass_hz=40.0):
 
 
 def make_oneshot(raw_path, out_path):
-    """Writes a trimmed, faded, peak normalised one-shot and returns its length in seconds."""
+    """Writes a trimmed, levelled one-shot and returns its length in seconds.
+
+    The lead-in silence is cut so the sound starts at its onset (the game times thunder by the distance of the strike,
+    not by what the model generated first). Takes differ a lot in loudness, so the loudest second of each is set to
+    the same level; a soft limiter keeps the sharp crack of a close strike below full scale.
+    """
     samples = highpass_lowpass(decode(raw_path), 25.0, 16000.0)
     envelope = np.sqrt(signal.sosfilt(signal.butter(2, 4.0, "lowpass", fs=SAMPLE_RATE, output="sos"),
                                       np.mean(samples ** 2, axis=1)).clip(0.0))
     audible = np.nonzero(envelope > envelope.max() * 0.01)[0]
+    start = max(0, int(audible[0]) - SAMPLE_RATE // 10) if len(audible) else 0
     end = min(len(samples), int(audible[-1]) + SAMPLE_RATE // 2) if len(audible) else len(samples)
-    clip = samples[:end]
+    clip = samples[start:end].copy()
     fade_out = min(len(clip) // 3, 2 * SAMPLE_RATE)
     clip[-fade_out:] *= np.linspace(1.0, 0.0, fade_out)[:, None] ** 2
     fade_in = int(0.005 * SAMPLE_RATE)
     clip[:fade_in] *= np.linspace(0.0, 1.0, fade_in)[:, None]
-    clip *= 10.0 ** (-1.0 / 20.0) / (np.abs(clip).max() + 1e-9)
+    window = SAMPLE_RATE
+    loudest = max(rms_db(clip[i:i + window]) for i in range(0, max(1, len(clip) - window), window // 4))
+    clip *= 10.0 ** ((ONESHOT_LOUDEST_SECOND_DB - loudest) / 20.0)
+    clip = np.tanh(clip * 1.0 / 0.9) * 0.9  # soft limiter: unity gain for small values, 0.9 ceiling
     write_wav(out_path, clip)
     return len(clip) / SAMPLE_RATE
 

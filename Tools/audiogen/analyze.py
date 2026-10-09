@@ -7,6 +7,8 @@ Usage:
   analyze.py clip <in.wav>                                     peak, clipped samples, RMS
   analyze.py orders <in.wav> <telemetry.csv> <out.png>         engine order tracks over the recorded rpm
   analyze.py scenes <capture_dir>                              level per scene and stem, from an Unreal -AudioCapture run
+  analyze.py scenegram <capture_dir> <out.png> <stem> <label> [label ...]   spectrogram of scenes of one stem
+  analyze.py clicks <in.wav> [more.wav ...]                    count sudden sample-to-sample jumps far above the local level
   analyze.py ordercheck <capture_dir> <label>                  do the firing order and its harmonics follow the rpm
 """
 import os
@@ -131,6 +133,37 @@ def order_check(capture_dir, label):
         print(f"  {telemetry['time'][row]:6.1f}s {rpm:6.0f} rpm  {rpm / 30:6.1f} Hz   {above[0]:6.1f} {above[1]:6.1f} {above[2]:6.1f}   peak {peak:6.1f} Hz")
 
 
+def scene_spectrograms(capture_dir, out_path, stem, labels, max_hz=6000.0):
+    """One spectrogram panel per scene of a stem (car, car_engine, car_road, car_wind, car_events)."""
+    telemetry = load_capture(capture_dir)
+    data, rate = read_wav(os.path.join(capture_dir, stem + ".wav"))
+    mono = data.mean(axis=1)
+    figure, axes = plt.subplots(len(labels), 1, figsize=(12, 2.6 * len(labels)), squeeze=False)
+    for axis, label in zip(axes[:, 0], labels):
+        rows = np.nonzero(telemetry["label"] == label)[0]
+        start, stop = int(telemetry["time"][rows[0]] * rate), int(telemetry["time"][rows[-1]] * rate)
+        frequencies, times, power = signal.spectrogram(mono[start:stop], rate, nperseg=4096, noverlap=3584)
+        keep = frequencies <= max_hz
+        axis.pcolormesh(times, frequencies[keep], 10 * np.log10(power[keep] + 1e-14), vmin=-130, vmax=-50, shading="auto")
+        axis.set_title(f"{stem}  {label}   RMS {rms_db(mono[start:stop]):.1f} dBFS", fontsize=9)
+        axis.set_ylabel("Hz")
+    figure.tight_layout()
+    figure.savefig(out_path, dpi=80)
+
+
+def click_check(path, ratio=14.0):
+    """A click is a sample-to-sample step many times larger than the typical step around it. Reports how many there are."""
+    data, rate = read_wav(path)
+    mono = data.mean(axis=1)
+    steps = np.abs(np.diff(mono))
+    window = int(0.02 * rate)
+    local = np.sqrt(np.convolve(steps ** 2, np.ones(window) / window, mode="same")) + 1e-6
+    # Ignore digital silence, where the local level is meaningless.
+    flagged = np.nonzero((steps > ratio * local) & (steps > 0.004))[0]
+    times = ", ".join(f"{index / rate:.2f}s" for index in flagged[:8])
+    print(f"{os.path.basename(path)}: {len(flagged)} jumps above {ratio:.0f}x the local step" + (f" at {times}" if len(flagged) else ""))
+
+
 def main():
     command = sys.argv[1]
     if command == "spectrogram":
@@ -141,6 +174,11 @@ def main():
     elif command == "clip":
         for path in sys.argv[2:]:
             clip_check(path)
+    elif command == "clicks":
+        for path in sys.argv[2:]:
+            click_check(path)
+    elif command == "scenegram":
+        scene_spectrograms(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:])
     elif command == "scenes":
         scene_levels(sys.argv[2])
     elif command == "ordercheck":

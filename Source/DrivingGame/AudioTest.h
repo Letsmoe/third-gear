@@ -28,5 +28,10 @@ private:
 	void SetLabel(const FString& Label);
 	class UCarAudioComponent* GetAudio() const;
 	void AddCruiseScenes(float StartX);
+	void AddAmbienceScenes(float StartX);
+	void AddWeatherScene(const FString& Label, float Seconds, float RainMmPerHour, float WindMps, float ThunderActivity, float SunAltitude,
+		TFunction<void(float)> Extra);
+	void AddSurfaceProbes(const FString& Points);
+	void ProbeSurfaceAt(const FVector2D& PointMeters);
 	void AddMechanicalScenes(float StartX);
 };

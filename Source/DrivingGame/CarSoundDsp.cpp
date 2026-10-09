@@ -290,7 +290,7 @@ struct FCarSoundDsp::FImpl
 	float SourceWeight(int32 Partial, float LoadFraction, float Roughness) const
 	{
 		const float Order = Partial * 0.5f;
-		const float Slope = FMath::Lerp(2.5f, 1.1f, LoadFraction);
+		const float Slope = FMath::Lerp(1.9f, 1.0f, LoadFraction);
 		if (Partial % 4 == 0)
 		{
 			return FMath::Pow(Order * 0.5f, -Slope);
@@ -645,11 +645,11 @@ struct FCarSoundDsp::FImpl
 
 		Block.CombustionNoiseGain = Combustion * Level * (0.15f + 0.85f * LoadFraction) * 0.9f * Cabin;
 		Block.IntakeGain = Combustion * DbToLinear(-39.f) * Throttle * FMath::Pow(RpmFraction, 1.2f) * (0.4f + 0.6f * LoadFraction) * 1.5f * Cabin;
-		Block.InjectorGain = Combustion * DbToLinear(-50.f) * (1.2f - 0.7f * RpmFraction);
+		Block.InjectorGain = Combustion * DbToLinear(-46.f) * (1.2f - 0.7f * RpmFraction);
 
 		TurboSpeed = Approach(TurboSpeed, Boost * (0.35f + 0.65f * RpmFraction) * Throttle, CoefficientFor(0.25f, BlockSeconds));
 		Block.TurboHz = 2600.f + 3800.f * TurboSpeed;
-		Block.TurboGain = DbToLinear(-62.f + 24.f * TurboSpeed) * TurboSpeed * Cabin;
+		Block.TurboGain = DbToLinear(-68.f + 24.f * TurboSpeed) * TurboSpeed * Cabin;
 
 		const bool bOverrun = Load < -0.04f && Throttle < 0.05f && Rpm > 1700.f && Combustion > 0.5f;
 		Block.BurbleRate = bOverrun ? 3.f + 7.f * FMath::Clamp((Rpm - 1700.f) / 3500.f, 0.f, 1.f) : 0.f;

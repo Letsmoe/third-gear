@@ -54,6 +54,9 @@ public:
 	/** Tells the component that real lightning strikes arrive through HandleLightning. */
 	void SetLightningFromWeather(bool bEnabled) { bLightningFromWeather = bEnabled; }
 
+	/** Test hook: with -AudioMixerRecord=<dir>, writes everything the mixer played since the start to <dir>/game_mix.wav. */
+	void FinishMixerRecording();
+
 	/** Label stored with every captured sample, so a recording can be cut into scenes. */
 	void SetCaptureLabel(const FString& Label) { CaptureLabel = Label; }
 
@@ -126,6 +129,7 @@ private:
 	float SurfaceTraceCountdown = 0.f;
 	ECarRoadSurface TracedSurface = ECarRoadSurface::Asphalt;
 	bool bSurfaceForced = false;
+	bool bLogSurfaceTraces = false; // -LogSurfaceTraces: every ground trace goes to the log
 	float RoadWetness = 0.f;
 	bool bLightningFromWeather = false;
 	float WeatherSampleCountdown = 0.f;
@@ -137,6 +141,8 @@ private:
 
 	// Offline capture (-AudioCapture=<dir>).
 	FString CaptureDirectory;
+	FString MixerRecordDirectory;
+	bool bMixerRecording = false;
 	/** One offline renderer per stem, so the recording can also be analysed engine, road, wind and one-shots apart. */
 	struct FCaptureStem
 	{
@@ -149,4 +155,11 @@ private:
 	FString CaptureLabel = TEXT("run");
 	double CaptureTime = 0.0;
 	double CaptureFrameCarry = 0.0;
+
+	// Cost measurement, reported at the end of a capture.
+	double TickCostTotalSeconds = 0.0;
+	double TickCostMaxSeconds = 0.0;
+	double DspRenderSeconds = 0.0;
+	double CaptureRenderSecondsThisTick = 0.0;
+	int32 TickCostCount = 0;
 };

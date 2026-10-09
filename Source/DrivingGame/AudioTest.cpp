@@ -2,6 +2,10 @@
 
 #include "CarAudioComponent.h"
 #include "CarPawn.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "WorldSurfaceQuery.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 
 void AAudioTestRunner::SetLabel(const FString& Label)
 {
@@ -113,9 +117,112 @@ void AAudioTestRunner::AddMechanicalScenes(float StartX)
 	});
 }
 
+void AAudioTestRunner::ProbeSurfaceAt(const FVector2D& PointMeters)
+{
+	ACarPawn* Pawn = Car.Get();
+	if (!Pawn)
+	{
+		return;
+	}
+	// Hold the car high above the point so the streamer builds the ground there without the car falling through it.
+	Pawn->SetActorLocationAndRotation(FVector(PointMeters.X * 100.0, PointMeters.Y * 100.0, 4000.0), FRotator::ZeroRotator, false, nullptr, ETeleportType::TeleportPhysics);
+	Pawn->GetMesh()->SetAllPhysicsLinearVelocity(FVector::ZeroVector);
+	Pawn->GetMesh()->SetAllPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+}
+
+void AAudioTestRunner::AddSurfaceProbes(const FString& Points)
+{
+	TArray<FString> Entries;
+	Points.ParseIntoArray(Entries, TEXT(";"));
+	for (const FString& Entry : Entries)
+	{
+		TArray<FString> Parts;
+		Entry.ParseIntoArray(Parts, TEXT(","));
+		if (Parts.Num() < 2)
+		{
+			continue;
+		}
+		const FVector2D Point(FCString::Atof(*Parts[0]), FCString::Atof(*Parts[1]));
+		AddScene(TEXT("probe"), 8.f, nullptr, [this, Point](const FCarTelemetry& T)
+		{
+			ProbeSurfaceAt(Point);
+			if (StepTime(T) < 7.f || Counter == 1)
+			{
+				return;
+			}
+			Counter = 1;
+			FHitResult Hit;
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(AudioProbe), /*bTraceComplex=*/true, Car.Get());
+			Params.bReturnFaceIndex = true;
+			const FVector Start(Point.X * 100.0, Point.Y * 100.0, 3000.0);
+			const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, Start - FVector(0, 0, 6000), ECC_Visibility, Params);
+			Report(FString::Printf(TEXT("SURFACEPROBE at %.0f, %.0f m: %s, ground z %.2f m, material %s"), Point.X, Point.Y,
+				bHit ? *GetNameSafe(Hit.Component.Get()) : TEXT("no ground"), Hit.ImpactPoint.Z / 100.0, *FindWorldSurfaceName(Hit).ToString()));
+		});
+		AddStep(TEXT("probe_reset"), [this]() { Counter = 0; }, [](const FCarTelemetry&) { return true; });
+	}
+}
+
+void AAudioTestRunner::AddWeatherScene(const FString& Label, float Seconds, float RainMmPerHour, float WindMps, float ThunderActivity, float SunAltitude,
+	TFunction<void(float)> Extra)
+{
+	AddScene(Label, Seconds, [this, RainMmPerHour, WindMps, ThunderActivity, SunAltitude]()
+	{
+		Counter = 0;
+		if (UCarAudioComponent* Audio = GetAudio())
+		{
+			Audio->SetForcedWeather(RainMmPerHour, WindMps, WindMps * 1.6f, ThunderActivity, SunAltitude);
+		}
+	}, [this, Extra](const FCarTelemetry& T)
+	{
+		if (Extra)
+		{
+			Extra(StepTime(T));
+		}
+	});
+}
+
+void AAudioTestRunner::AddAmbienceScenes(float StartX)
+{
+	AddPlace(StartX, -30.f, 0.f, true, 2.f);
+	AddWeatherScene(TEXT("day_dry_calm"), 14.f, 0.f, 2.f, 0.f, 40.f, nullptr);
+	AddWeatherScene(TEXT("day_windy"), 9.f, 0.f, 11.f, 0.f, 40.f, nullptr);
+	AddWeatherScene(TEXT("night_calm"), 9.f, 0.f, 2.f, 0.f, -25.f, nullptr);
+	AddWeatherScene(TEXT("drizzle"), 12.f, 0.8f, 3.f, 0.f, 10.f, nullptr);
+	AddWeatherScene(TEXT("heavy_rain"), 12.f, 10.f, 7.f, 0.f, 10.f, nullptr);
+	// Strikes at 600 m, 2.5 km and 6 km: the thunder arrives after 1.7 s, 7.3 s and 17.5 s.
+	AddWeatherScene(TEXT("thunderstorm"), 28.f, 8.f, 8.f, 0.8f, 5.f, [this](float S)
+	{
+		UCarAudioComponent* Audio = GetAudio();
+		if (!Audio)
+		{
+			return;
+		}
+		if (Counter == 0 && S > 1.f) { Counter = 1; Audio->TriggerThunder(600.f); }
+		if (Counter == 1 && S > 4.f) { Counter = 2; Audio->TriggerThunder(2500.f); }
+		if (Counter == 2 && S > 8.f) { Counter = 3; Audio->TriggerThunder(6000.f); }
+	});
+	AddStep(TEXT("finish_recording"), [this]()
+	{
+		if (UCarAudioComponent* Audio = GetAudio()) { Audio->FinishMixerRecording(); }
+	}, [](const FCarTelemetry&) { return true; });
+}
+
 void AAudioTestRunner::BuildSteps()
 {
+	// -AudioProbe="x,y;x,y": only park the car at these points (metres) and let the audio component log the surface it finds.
+	FString Probes;
+	if (FParse::Value(FCommandLine::Get(), TEXT("AudioProbe="), Probes, false))
+	{
+		AddSurfaceProbes(Probes);
+		return;
+	}
 	const float StartX = -1900.f;
+	if (FParse::Param(FCommandLine::Get(), TEXT("AmbienceTest")))
+	{
+		AddAmbienceScenes(StartX);
+		return;
+	}
 
 	// Engine off, then the starter.
 	AddPlace(StartX, -30.f, 0.f, false, 1.f);
@@ -160,4 +267,8 @@ void AAudioTestRunner::BuildSteps()
 
 	AddCruiseScenes(StartX);
 	AddMechanicalScenes(StartX);
+	AddStep(TEXT("finish_recording"), [this]()
+	{
+		if (UCarAudioComponent* Audio = GetAudio()) { Audio->FinishMixerRecording(); }
+	}, [](const FCarTelemetry&) { return true; });
 }

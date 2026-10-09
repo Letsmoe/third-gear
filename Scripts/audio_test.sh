@@ -14,7 +14,7 @@ OUT="${1:-/mnt/storage/third-gear/audio/test}"
 LOG="$ROOT/Saved/Logs/audiotest.log"
 mkdir -p "$OUT"
 
-timeout 900 "$UE/Engine/Binaries/Linux/UnrealEditor" "$ROOT/DrivingGame.uproject" /Game/Maps/ProvingGround -game \
+timeout 900 "$UE/Engine/Binaries/Linux/UnrealEditor" "$ROOT/DrivingGame.uproject" /Game/Maps/${AUDIO_MAP:-ProvingGround} -game \
 	-nullrhi -nosound -unattended -NoWheel -AudioTest -AudioCapture="$OUT" -benchmark -fps=100 -log=audiotest.log "$@" >/dev/null 2>&1 || true
 
 grep -E 'DRIVETEST|LogCarAudio' "$LOG" | sed -E 's/^\[[^]]*\]\[[^]]*\]//' | tail -40

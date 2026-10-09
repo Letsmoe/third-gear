@@ -12,12 +12,14 @@
 #include "HAL/FileManager.h"
 #include "IsobarPointWeather.h"
 #include "Kismet/GameplayStatics.h"
+#include "HAL/PlatformTime.h"
 #include "Misc/App.h"
 #include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
 #include "AudioDevice.h"
+#include "AudioMixerBlueprintLibrary.h"
 #include "Sound/SoundBase.h"
 #include "WeatherSubsystem.h"
 #include "WeatherVisuals.h"
@@ -64,6 +66,17 @@ ECarRoadSurface ClassifySurfaceName(const FName& Name)
 	return ECarRoadSurface::Rough;
 }
 
+const TCHAR* CarAudioSurfaceName(ECarRoadSurface Surface)
+{
+	switch (Surface)
+	{
+	case ECarRoadSurface::Asphalt: return TEXT("asphalt");
+	case ECarRoadSurface::Cobble: return TEXT("cobble");
+	case ECarRoadSurface::Pavers: return TEXT("pavers");
+	default: return TEXT("rough");
+	}
+}
+
 FString PathFor(const TCHAR* Folder, const FString& AssetName)
 {
 	return FString::Printf(TEXT("%s/%s.%s"), Folder, *AssetName, *AssetName);
@@ -85,6 +98,7 @@ void UCarAudioComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	FParse::Value(FCommandLine::Get(), TEXT("AudioCapture="), CaptureDirectory);
+	bLogSurfaceTraces = FParse::Param(FCommandLine::Get(), TEXT("LogSurfaceTraces"));
 	FAudioDevice* Device = GEngine ? GEngine->GetMainAudioDevice().GetAudioDevice() : nullptr;
 	bAudioAvailable = FApp::CanEverRenderAudio() && Device != nullptr;
 	if (!CaptureDirectory.IsEmpty())
@@ -98,6 +112,11 @@ void UCarAudioComponent::BeginPlay()
 			Capture.Dsp = MakeUnique<FCarSoundDsp>(CaptureSampleRate);
 			Capture.Dsp->SetStemMask(Stem.Value);
 		}
+	}
+	if (FParse::Value(FCommandLine::Get(), TEXT("AudioMixerRecord="), MixerRecordDirectory) && bAudioAvailable)
+	{
+		UAudioMixerBlueprintLibrary::StartRecordingOutput(this, 900.f);
+		bMixerRecording = true;
 	}
 	PreferencesHandle = UDrivingPreferences::OnChanged().AddUObject(this, &UCarAudioComponent::ApplyPreferences);
 }
@@ -117,6 +136,17 @@ void UCarAudioComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		}
 	}
 	Super::EndPlay(EndPlayReason);
+}
+
+void UCarAudioComponent::FinishMixerRecording()
+{
+	if (!bMixerRecording)
+	{
+		return;
+	}
+	bMixerRecording = false;
+	UAudioMixerBlueprintLibrary::StopRecordingOutput(this, EAudioRecordingExportType::WavFile, TEXT("game_mix"), MixerRecordDirectory);
+	UE_LOG(LogCarAudio, Display, TEXT("Mixer recording written to %s/game_mix.wav"), *MixerRecordDirectory);
 }
 
 void UCarAudioComponent::SetForcedSurface(ECarRoadSurface Surface, float InWetness)
@@ -242,9 +272,26 @@ void UCarAudioComponent::UpdateSurface(float DeltaTime)
 		FCollisionQueryParams Params(SCENE_QUERY_STAT(CarAudioSurface), /*bTraceComplex=*/true, GetOwner());
 		Params.bReturnFaceIndex = true;
 		FHitResult Hit;
-		if (GetWorld()->LineTraceSingleByChannel(Hit, Start, Start - FVector(0.f, 0.f, 300.f), ECC_Visibility, Params))
+		const bool bHitGround = GetWorld()->LineTraceSingleByChannel(Hit, Start, Start - FVector(0.f, 0.f, 300.f), ECC_Visibility, Params);
+		if (!bHitGround && bLogSurfaceTraces)
 		{
-			TracedSurface = ClassifySurfaceName(FindWorldSurfaceName(Hit));
+			UE_LOG(LogCarAudio, Display, TEXT("Surface trace at %.0f, %.0f, z %.2f m: no ground"), Start.X / 100.f, Start.Y / 100.f, Start.Z / 100.f);
+		}
+		if (bHitGround)
+		{
+			const FName GroundName = FindWorldSurfaceName(Hit);
+			if (bLogSurfaceTraces)
+			{
+				UE_LOG(LogCarAudio, Display, TEXT("Surface trace at %.0f, %.0f, z %.2f m: %s face %d ground material %s"), Start.X / 100.f, Start.Y / 100.f,
+					Start.Z / 100.f, *GetNameSafe(Hit.Component.Get()), Hit.FaceIndex, *FindWorldSurfaceName(Hit).ToString());
+			}
+			const ECarRoadSurface Surface = ClassifySurfaceName(GroundName);
+			if (Surface != TracedSurface)
+			{
+				UE_LOG(LogCarAudio, Display, TEXT("Road surface under the car: %s (ground material %s) at %.0f, %.0f m"),
+					CarAudioSurfaceName(Surface), *GroundName.ToString(), Start.X / 100.f, Start.Y / 100.f);
+			}
+			TracedSurface = Surface;
 		}
 	}
 	const float Follow = 1.f - FMath::Exp(-DeltaTime / 0.08f);
@@ -302,7 +349,9 @@ void UCarAudioComponent::FeedCarSound(const FCarTelemetry& Telemetry, const FCar
 				Stem.Dsp->PostEvent(Request.Event, Request.Strength);
 			}
 		}
+		const double CaptureStart = FPlatformTime::Seconds();
 		CaptureFrame(Telemetry, Inputs, DeltaTime);
+		CaptureRenderSecondsThisTick = FPlatformTime::Seconds() - CaptureStart; // test overhead, not part of the game's cost
 	}
 }
 
@@ -315,7 +364,13 @@ void UCarAudioComponent::CaptureFrame(const FCarTelemetry& Telemetry, const FCar
 	{
 		TArray<float> Block;
 		Block.SetNumZeroed(Frames * 2);
+		const double RenderStart = FPlatformTime::Seconds();
 		Stem.Dsp->Render(Block.GetData(), Frames);
+		const double RenderSeconds = FPlatformTime::Seconds() - RenderStart;
+		if (Stem.Name == TEXT("car"))
+		{
+			DspRenderSeconds += RenderSeconds;
+		}
 		for (const float Sample : Block)
 		{
 			Stem.Samples.Add(static_cast<int16>(FMath::Clamp(Sample, -1.f, 1.f) * 32767.f));
@@ -353,6 +408,9 @@ void UCarAudioComponent::WriteCapture()
 	Csv += FString::Join(CaptureRows, TEXT("\n"));
 	FFileHelper::SaveStringToFile(Csv, *FPaths::Combine(CaptureDirectory, TEXT("telemetry.csv")));
 	UE_LOG(LogCarAudio, Display, TEXT("Audio capture written to %s (%.1f s)"), *CaptureDirectory, CaptureTime);
+	UE_LOG(LogCarAudio, Display, TEXT("AUDIOCOST game thread: %.1f us per frame on average, %.1f us worst (%d frames); synth on the audio thread: %.2f ms per second of sound (%.2f %% of one core)"),
+		1e6 * TickCostTotalSeconds / FMath::Max(1, TickCostCount), 1e6 * TickCostMaxSeconds, TickCostCount,
+		1000.0 * DspRenderSeconds / FMath::Max(CaptureTime, 1e-3), 100.0 * DspRenderSeconds / FMath::Max(CaptureTime, 1e-3));
 }
 
 // --- ambience ------------------------------------------------------------------------------------------------------
@@ -480,6 +538,7 @@ void UCarAudioComponent::PlayThunder(const FPendingThunder& Thunder)
 void UCarAudioComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	const double TickStart = FPlatformTime::Seconds();
 	ACarPawn* Car = GetCar();
 	if (!Car || DeltaTime <= 0.f || (!bAudioAvailable && CaptureStems.IsEmpty()))
 	{
@@ -513,4 +572,10 @@ void UCarAudioComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		UpdateAmbience(CachedWeather, FMath::Abs(Telemetry.LocalVelocityMps.X), DeltaTime);
 	}
 	UpdateThunder(CachedWeather, DeltaTime);
+
+	const double TickSeconds = FPlatformTime::Seconds() - TickStart - CaptureRenderSecondsThisTick;
+	TickCostTotalSeconds += TickSeconds;
+	TickCostMaxSeconds = FMath::Max(TickCostMaxSeconds, TickSeconds);
+	++TickCostCount;
+	CaptureRenderSecondsThisTick = 0.0;
 }
