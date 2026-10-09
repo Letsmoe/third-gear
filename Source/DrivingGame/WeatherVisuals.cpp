@@ -411,6 +411,12 @@ void UWeatherVisualsSubsystem::ApplySun()
 	const float Transmission = SunTransmission();
 	UDirectionalLightComponent* Component = Cast<UDirectionalLightComponent>(Light->GetLightComponent());
 	Component->SetIntensity(BaseSunLux * Transmission);
+	// Below the horizon the sun only lights the atmosphere; its virtual shadow maps would cost milliseconds for nothing.
+	const bool bSunCastsShadows = SunAltitudeDegrees > -1.f;
+	if (Component->CastShadows != bSunCastsShadows)
+	{
+		Component->SetCastShadows(bSunCastsShadows);
+	}
 	Component->SetAtmosphereSunDiskColorScale(FLinearColor::White * WeatherVisualsDetail::SmoothStep01(0.3f, 0.9f, Transmission));
 }
 
