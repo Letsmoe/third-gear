@@ -209,7 +209,19 @@ float FWorldTileGrid::TerrainAtVertex(int32 X, int32 Y) const
 {
 	X = FMath::Clamp(X, 0, NumX - 1);
 	Y = FMath::Clamp(Y, 0, NumY - 1);
-	return BaseZ + TerrainCm[Y * NumX + X] * 0.01f;
+	const uint16 Value = TerrainCm[Y * NumX + X];
+	if (Value == HoleValue)
+	{
+		return BaseZ;
+	}
+	return BaseZ + Value * 0.01f;
+}
+
+bool FWorldTileGrid::IsHole(int32 X, int32 Y) const
+{
+	X = FMath::Clamp(X, 0, NumX - 1);
+	Y = FMath::Clamp(Y, 0, NumY - 1);
+	return TerrainCm[Y * NumX + X] == HoleValue;
 }
 
 FColor FWorldTileGrid::CoverAtVertex(int32 X, int32 Y) const

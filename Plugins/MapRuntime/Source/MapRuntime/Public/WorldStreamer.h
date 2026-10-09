@@ -86,11 +86,16 @@ private:
 		int32 PendingDetail = INDEX_NONE;
 		/** Detail level of the last failed attempt, so a broken tile isn't retried every frame. */
 		int32 FailedDetail = INDEX_NONE;
+		/** Low-detail surroundings (horizon/horizon.json): always shown at far detail, never unloaded. */
+		bool bHorizon = false;
 		TWeakObjectPtr<AWorldTileActor> Actor;
 	};
 
 	/** Reads world.json the first time it is needed; false when it is missing. */
 	bool EnsureIndex();
+
+	/** Adds the region's horizon tiles from horizon/horizon.json, if it was built (Tools/osmimport/build_horizon_world.py). */
+	void AddHorizonTiles();
 
 	/** Resolves materials and plant models and measures the models; called once before the first build. */
 	void PrepareAssets();

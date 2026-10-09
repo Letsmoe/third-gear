@@ -306,6 +306,8 @@ PLAIN = {
     "Marking_White": ((0.85, 0.85, 0.85), 0.6, 0.0),
     "Facade_Glass": ((0.6, 0.7, 0.7), 0.1, 0.0),
     "Roof_Glass": ((0.6, 0.7, 0.7), 0.1, 0.0),
+    # Woods on the horizon as extruded blocks (build_horizon_world.py): kilometres away a canopy is a dark green mass.
+    "Canopy_Far": ((0.20, 0.26, 0.12), 0.95, 0.0),
 }
 
 

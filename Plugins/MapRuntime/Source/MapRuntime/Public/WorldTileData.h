@@ -91,8 +91,14 @@ struct FWorldTileGrid
 	/** Blend weights meadow, field, forest per vertex, 0..255. */
 	TArray<uint8> Cover;
 
+	/** Terrain value of a grid point without ground: horizon tiles leave the region's area to its own tiles. */
+	static constexpr uint16 HoleValue = 0xFFFF;
+
 	/** Terrain height at grid vertex (clamped to the grid). */
 	float TerrainAtVertex(int32 X, int32 Y) const;
+
+	/** True when the grid vertex is a hole; every cell touching it is left out. */
+	bool IsHole(int32 X, int32 Y) const;
 
 	/** Bilinear terrain height at a tile-local position, clamped to the tile. */
 	float TerrainAt(float LocalX, float LocalY) const;

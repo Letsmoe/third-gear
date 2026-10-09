@@ -135,11 +135,42 @@ bool AWorldStreamer::EnsureIndex()
 		Tile.Bounds = FBox2D(FVector2D(Bounds[0]->AsNumber(), Bounds[1]->AsNumber()) * 100.0,
 			FVector2D(Bounds[2]->AsNumber(), Bounds[3]->AsNumber()) * 100.0);
 	}
+	AddHorizonTiles();
 	Start = Root->GetObjectField(TEXT("start"));
 	Shared = MakeShared<FWorldStreamerShared>();
 	bIndexLoaded = true;
 	UE_LOG(LogWorldStreamer, Log, TEXT("World %s: %d tiles from %s"), *Region, Tiles.Num(), *WorldDir);
 	return true;
+}
+
+void AWorldStreamer::AddHorizonTiles()
+{
+	if (FParse::Param(FCommandLine::Get(), TEXT("NoHorizon")))
+	{
+		return;
+	}
+	const FString HorizonDir = FPaths::Combine(WorldDir, TEXT("horizon"));
+	FString Json;
+	TSharedPtr<FJsonObject> Root;
+	if (!FFileHelper::LoadFileToString(Json, *FPaths::Combine(HorizonDir, TEXT("horizon.json")))
+		|| !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Root) || !Root.IsValid())
+	{
+		UE_LOG(LogWorldStreamer, Log, TEXT("No horizon for %s (build it with Tools/osmimport/build_horizon_world.py %s)"), *Region, *Region);
+		return;
+	}
+	int32 Count = 0;
+	for (const TSharedPtr<FJsonValue>& Value : Root->GetArrayField(TEXT("tiles")))
+	{
+		const TSharedPtr<FJsonObject>& Entry = Value->AsObject();
+		const TArray<TSharedPtr<FJsonValue>>& Bounds = Entry->GetArrayField(TEXT("bounds_m"));
+		FTileState& Tile = Tiles.AddDefaulted_GetRef();
+		Tile.Path = FPaths::Combine(HorizonDir, Entry->GetStringField(TEXT("file")));
+		Tile.Bounds = FBox2D(FVector2D(Bounds[0]->AsNumber(), Bounds[1]->AsNumber()) * 100.0,
+			FVector2D(Bounds[2]->AsNumber(), Bounds[3]->AsNumber()) * 100.0);
+		Tile.bHorizon = true;
+		++Count;
+	}
+	UE_LOG(LogWorldStreamer, Log, TEXT("Horizon: %d tiles"), Count);
 }
 
 void AWorldStreamer::PrepareAssets()
@@ -211,6 +242,10 @@ bool AWorldStreamer::GetStartTransform(FTransform& OutTransform)
 
 int32 AWorldStreamer::WantedDetail(const FTileState& Tile, const FVector2D& Location) const
 {
+	if (Tile.bHorizon)
+	{
+		return int32(EWorldTileDetail::Far);
+	}
 	const double Distance = DistanceToBox2D(Tile.Bounds, Location);
 	if (Distance < NearDistance)
 	{

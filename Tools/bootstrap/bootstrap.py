@@ -167,14 +167,17 @@ def trees_run():
 
 
 def world_done():
-    """The world data of every default region has been compiled."""
-    return all(os.path.exists(os.path.join(data_root.world_dir(region), "world.json")) for region in WORLD_REGIONS)
+    """The world data and horizon of every default region have been compiled."""
+    return all(os.path.exists(os.path.join(data_root.world_dir(region), "world.json"))
+               and os.path.exists(os.path.join(data_root.world_dir(region), "horizon", "horizon.json"))
+               for region in WORLD_REGIONS)
 
 
 def world_run():
-    """Compiles the world data tiles the game streams."""
+    """Compiles the world data tiles the game streams and the low-detail horizon around them."""
     for region in WORLD_REGIONS:
         run([data_root.venv_python("osmimport"), "-I", "Tools/osmimport/build_world.py", region])
+        run([data_root.venv_python("osmimport"), "-I", "Tools/osmimport/build_horizon_world.py", region])
 
 
 STEPS = {
