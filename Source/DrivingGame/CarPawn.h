@@ -46,6 +46,9 @@ public:
 	/** Re-centres the seated tracking origin on the current head pose. */
 	void Recenter();
 
+	/** Puts the car back upright on the road where it stands. */
+	void ResetCarUpright();
+
 protected:
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TObjectPtr<USceneComponent> EyeOrigin;
@@ -64,7 +67,6 @@ private:
 	void UpdateForceFeedback(const FCarTelemetry& Telemetry);
 	void UpdateDashboard(const FCarTelemetry& Telemetry);
 	void ToggleEngine();
-	void ResetCarUpright();
 	void LookYaw(float Value);
 	void LookPitch(float Value);
 	bool IsHMDActive() const;

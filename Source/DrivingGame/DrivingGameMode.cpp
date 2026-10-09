@@ -7,6 +7,7 @@
 #include "Misc/Parse.h"
 #include "CarPawn.h"
 #include "DriveTest.h"
+#include "GameFlow.h"
 #include "StreamTest.h"
 #include "GameFramework/PlayerStart.h"
 #include "SeatedVRPawn.h"
@@ -29,9 +30,14 @@ bool ADrivingGameMode::UseFreeCamera()
 		|| FParse::Value(FCommandLine::Get(), TEXT("StreamTest="), Value);
 }
 
+bool ADrivingGameMode::UsesFreeCameraPawn() const
+{
+	return UseFreeCamera() || GameFlow::IsFreeCameraLevel(GetWorld());
+}
+
 UClass* ADrivingGameMode::GetDefaultPawnClassForController_Implementation(AController* InController)
 {
-	return UseFreeCamera() ? ASeatedVRPawn::StaticClass() : Super::GetDefaultPawnClassForController_Implementation(InController);
+	return UsesFreeCameraPawn() ? ASeatedVRPawn::StaticClass() : Super::GetDefaultPawnClassForController_Implementation(InController);
 }
 
 FVector ADrivingGameMode::FindGroundBelow(const FVector& Location) const
@@ -118,7 +124,7 @@ void ADrivingGameMode::BeginPlay()
 		GetWorldTimerManager().SetTimer(Handle, [this]()
 		{
 			FScreenshotRequest::RequestScreenshot(FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() /
-				FString::Printf(TEXT("Screenshots/%s_seat.png"), *ShotName)), /*bShowUI=*/false, /*bAddFilenameSuffix=*/false);
+				FString::Printf(TEXT("Screenshots/%s_seat.png"), *ShotName)), /*bShowUI=*/!GameFlow::GetDebugMenuPage().IsEmpty(), /*bAddFilenameSuffix=*/false);
 			FTimerHandle QuitHandle;
 			GetWorldTimerManager().SetTimer(QuitHandle, [this]() { GEngine->Exec(GetWorld(), TEXT("quit")); }, 2.f, false);
 		}, Delay, false);
@@ -209,7 +215,7 @@ void ADrivingGameMode::TakeNextShot()
 	{
 		const FString File = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() /
 			FString::Printf(TEXT("Screenshots/%s_%02d.png"), *ShotName, ShotIndex++));
-		FScreenshotRequest::RequestScreenshot(File, /*bShowUI=*/false, /*bAddFilenameSuffix=*/false);
+		FScreenshotRequest::RequestScreenshot(File, /*bShowUI=*/!GameFlow::GetDebugMenuPage().IsEmpty(), /*bAddFilenameSuffix=*/false);
 		FTimerHandle NextHandle;
 		GetWorldTimerManager().SetTimer(NextHandle, this, &ADrivingGameMode::TakeNextShot, 2.f, false);
 	}, 4.f, false);

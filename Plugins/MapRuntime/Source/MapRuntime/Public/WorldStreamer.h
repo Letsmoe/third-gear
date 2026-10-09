@@ -16,7 +16,8 @@ struct FWorldTileBuild;
  * spawned as AWorldTileActors a few per frame, and dropped again when they fall out of range.
  *
  * The data is read from <data root>/world/<Region>/ (data root: $THIRD_GEAR_DATA, else the project's External link).
- * -Region=<name> on the command line overrides the region.
+ * -Region=<name> on the command line overrides the region, and the level URL option ?Region=<name> (set by the start menu)
+ * overrides both.
  */
 UCLASS()
 class MAPRUNTIME_API AWorldStreamer : public AActor

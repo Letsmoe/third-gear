@@ -42,5 +42,17 @@ struct WHEELINPUT_API FWheelInputState
 	UPROPERTY(BlueprintReadOnly, Category = "Wheel")
 	int64 Buttons = 0;
 
+	/** D-pad (hat axes ABS_HAT0X / ABS_HAT0Y): X = -1 left, +1 right; Y = -1 up, +1 down; 0 = centred. */
+	UPROPERTY(BlueprintReadOnly, Category = "Wheel")
+	int32 DPadX = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Wheel")
+	int32 DPadY = 0;
+
+	/** Every axis of the device as 0..1 of its range, indexed by the Linux ABS_* code; -1 where the device has no such axis.
+	 *  Raw readings for calibration, independent of the configured axis mapping. Empty while disconnected. */
+	UPROPERTY(BlueprintReadOnly, Category = "Wheel")
+	TArray<float> AxisValues;
+
 	bool IsButtonDown(int32 Index) const { return Index >= 0 && Index < 64 && (Buttons >> Index) & 1; }
 };
