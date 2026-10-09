@@ -8,6 +8,15 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "WorldSnow.h"
+#include "HAL/IConsoleManager.h"
+#include "HAL/PlatformTime.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
+
+static TAutoConsoleVariable<int32> CVarSnowTracks(TEXT("tg.SnowTracks"), 1,
+	TEXT("1 = wheels press tracks into the snow, 0 = off (and the map is cleared)."));
+static TAutoConsoleVariable<int32> CVarSnowTracksStats(TEXT("tg.SnowTracks.Stats"), 0,
+	TEXT("1 = log the CPU time of stamping, scrolling and uploading the track map every 5 seconds."));
 
 namespace SnowTrackConfig
 {
@@ -243,10 +252,11 @@ void USnowTrackSubsystem::FadeForNewSnow(float Cover)
 
 void USnowTrackSubsystem::StampWheel(const void* Key, const FVector& WheelLocationCm, float TyreWidthCm)
 {
-	if (!TrackMap || CenterTexel.X == MAX_int32)
+	if (!TrackMap || CenterTexel.X == MAX_int32 || CVarSnowTracks.GetValueOnGameThread() == 0)
 	{
 		return;
 	}
+	const double StampStartSeconds = FPlatformTime::Seconds();
 	const FVector2D Location(WheelLocationCm.X, WheelLocationCm.Y);
 	FWheelHistory& History = Wheels.FindOrAdd(Key);
 	const double Now = GetWorld()->GetTimeSeconds();
@@ -265,6 +275,8 @@ void USnowTrackSubsystem::StampWheel(const void* Key, const FVector& WheelLocati
 		return;
 	}
 	PressSegment(From, Location, TyreWidthCm * 0.5f);
+	StampSecondsTotal += FPlatformTime::Seconds() - StampStartSeconds;
+	++StampCountTotal;
 }
 
 void USnowTrackSubsystem::PressSegment(const FVector2D& FromCm, const FVector2D& ToCm, float HalfWidthCm)
@@ -286,7 +298,7 @@ void USnowTrackSubsystem::PressSegment(const FVector2D& FromCm, const FVector2D&
 		{
 			const FVector2D Centre((TexelX + 0.5) * TexelSizeCm, (TexelY + 0.5) * TexelSizeCm);
 			const float Distance = SnowTrackMath::DistanceToSegment(Centre, FromCm, ToCm);
-			const float Compaction = 1.f - FMath::SmoothStep(HalfWidthCm - 2.5f, HalfWidthCm + 2.5f, Distance);
+			const float Compaction = 1.f - FMath::SmoothStep(HalfWidthCm - 3.f, HalfWidthCm + 3.f, Distance);
 			const float RidgeOffset = (Distance - RidgeCentreCm) / 4.5f;
 			const float Ridge = FMath::Exp(-RidgeOffset * RidgeOffset);
 			uint8* Texel = TexelAt(TexelX, TexelY);
@@ -311,6 +323,7 @@ void USnowTrackSubsystem::UploadAndCopy()
 	{
 		return;
 	}
+	const double UploadStartSeconds = FPlatformTime::Seconds();
 	if (!DirtyRects.IsEmpty())
 	{
 		// The render thread reads from Pixels (stable storage); the regions array is freed when the upload is done.
@@ -333,6 +346,55 @@ void USnowTrackSubsystem::UploadAndCopy()
 	}
 	UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Context);
 	bCopyNeeded = false;
+	UploadSecondsTotal += FPlatformTime::Seconds() - UploadStartSeconds;
+}
+
+void USnowTrackSubsystem::ReportCpuStatistics(float DeltaTime)
+{
+	++FramesTotal;
+	StatisticsCountdown -= DeltaTime;
+	if (StatisticsCountdown > 0.f)
+	{
+		return;
+	}
+	StatisticsCountdown = 5.f;
+	if (CVarSnowTracksStats.GetValueOnGameThread() != 0 && FramesTotal > 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("SnowTracks CPU per frame over %d frames: stamping %.3f ms (%.1f wheel stamps), scroll and upload %.3f ms"),
+			FramesTotal, StampSecondsTotal * 1000.0 / FramesTotal, static_cast<double>(StampCountTotal) / FramesTotal, UploadSecondsTotal * 1000.0 / FramesTotal);
+	}
+	StampSecondsTotal = 0.0;
+	UploadSecondsTotal = 0.0;
+	StampCountTotal = 0;
+	FramesTotal = 0;
+}
+
+void USnowTrackSubsystem::LayTestTracksAhead()
+{
+	const APlayerController* Controller = GetWorld()->GetFirstPlayerController();
+	const APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+	if (!Pawn)
+	{
+		return;
+	}
+	bTestTracksLaid = true;
+	const FVector2D Start(Pawn->GetActorLocation().X, Pawn->GetActorLocation().Y);
+	const float StartYawRadians = FMath::DegreesToRadians(Pawn->GetActorRotation().Yaw);
+	constexpr float HalfTrackWidthCm = 78.f;
+	constexpr float StepCm = 25.f;
+	// Two wheel lines along a curve that bends to the right with a radius of about 120 m, from 4 m to 45 m ahead.
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		const float Offset = Side == 0 ? -HalfTrackWidthCm : HalfTrackWidthCm;
+		const void* Key = reinterpret_cast<const uint8*>(this) + Side;
+		for (float Distance = 400.f; Distance < 4500.f; Distance += StepCm)
+		{
+			const float Heading = StartYawRadians + Distance / 12000.f;
+			const FVector2D Centre = Start + FVector2D(FMath::Cos(StartYawRadians) + FMath::Cos(Heading), FMath::Sin(StartYawRadians) + FMath::Sin(Heading)) * (0.5f * Distance);
+			const FVector2D Wheel = Centre + FVector2D(-FMath::Sin(Heading), FMath::Cos(Heading)) * Offset;
+			StampWheel(Key, FVector(Wheel.X, Wheel.Y, 0.0), 20.f);
+		}
+	}
 }
 
 void USnowTrackSubsystem::Tick(float DeltaTime)
@@ -343,6 +405,17 @@ void USnowTrackSubsystem::Tick(float DeltaTime)
 		return;
 	}
 	SnowCover = ReadWorldSnowCover(GetWorld());
+	if (CVarSnowTracks.GetValueOnGameThread() == 0)
+	{
+		if (!bClearedWhileOff && CenterTexel.X != MAX_int32)
+		{
+			ClearAll();
+			bClearedWhileOff = true;
+		}
+		UploadAndCopy();
+		return;
+	}
+	bClearedWhileOff = false;
 	FadeCheckCountdown -= DeltaTime;
 	if (FadeCheckCountdown <= 0.f)
 	{
@@ -350,7 +423,13 @@ void USnowTrackSubsystem::Tick(float DeltaTime)
 		FadeForNewSnow(SnowCover);
 	}
 	FollowViewer();
+	const bool bLayRequested = FParse::Param(FCommandLine::Get(), TEXT("SnowLay"));
+	if (bLayRequested && !bTestTracksLaid && GetWorld()->GetTimeSeconds() > 3.5 && SnowCover > SnowTrackConfig::MinimumCover && CenterTexel.X != MAX_int32)
+	{
+		LayTestTracksAhead();
+	}
 	UploadAndCopy();
+	ReportCpuStatistics(DeltaTime);
 	if (Wheels.Num() > 64)
 	{
 		const double Now = GetWorld()->GetTimeSeconds();

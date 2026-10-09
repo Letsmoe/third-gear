@@ -36,9 +36,78 @@ return float3(0, 0, -lowering_cm);
 
 # Pixel shader. Heights below are in cm, positions in cm; p is in metres.
 SNOW_HLSL = """
-float2 p = WorldPos.xy / 100.0;
 // Size of a pixel on the surface, cm: from the depth, not from screen-space derivatives, which are wrong along triangle edges.
 float pixel_cm = PixelDepth * 0.001;
+// Tyre tracks from the deformation map (SnowTrackSubsystem; R compaction, G ridge, BA direction of travel). The 1 m mesh
+// cannot hold a 20 cm rut, so the rut is a height field in the pixel shader: a parallax ray march finds where the view ray
+// meets the rut floor or wall (so the walls hold up at grazing angles and in stereo), and the colour, tread and normal
+// are taken there. The map is bilinear 8 bit; its 0.5 iso-line is the rut edge, which stays crisp at pixel resolution.
+float map_fade = 1.0 - smoothstep(3000.0, 4200.0, length(WorldPos.xy - CameraPos.xy));
+float depth_cm = Depth * 100.0;
+float rut_scale = map_fade * saturate(depth_cm / 1.5) * saturate(Cover * 2.0);
+float rut_depth_cm = 0.7 * depth_cm;
+#define RUT_UV(q_) frac((q_) / 10240.0)
+#define RUT_MASK(q_) smoothstep(0.42, 0.58, Texture2DSampleLevel(TrackMap, TrackMapSampler, RUT_UV(q_), 0).r)
+
+// Scan textures are sampled at the unshifted position: the ray march moves the position discontinuously, which would wreck their mip selection.
+float2 surface_p = WorldPos.xy / 100.0;
+float2 hit_xy = WorldPos.xy;
+float hit_drop = 0.0;
+if (rut_scale > 0.01 && rut_depth_cm > 0.3 && PixelDepth < 4000.0)
+{
+    float3 to_eye = normalize(CameraVector);
+    float2 shift_per_cm = -to_eye.xy / max(to_eye.z, 0.12);
+    float step_drop = rut_depth_cm / 24.0;
+    float previous_gap = 0.0;
+    float previous_drop = 0.0;
+    float2 previous_xy = WorldPos.xy;
+    bool found = false;
+    [loop] for (int i = 0; i <= 24; i++)
+    {
+        float drop = i * step_drop;
+        float2 q = WorldPos.xy + shift_per_cm * drop;
+        // Gap between the floor of the rut and the ray: positive while the ray is still in the air above it.
+        float gap = RUT_MASK(q) * rut_scale * rut_depth_cm - drop;
+        if (gap <= 0.0)
+        {
+            float low_drop = previous_drop;
+            float high_drop = drop;
+            // Bisection on the crossing between the last two samples sharpens the wall edge beyond the step size.
+            [unroll] for (int j = 0; j < 4; j++)
+            {
+                float mid_drop = 0.5 * (low_drop + high_drop);
+                float mid_gap = RUT_MASK(WorldPos.xy + shift_per_cm * mid_drop) * rut_scale * rut_depth_cm - mid_drop;
+                if (mid_gap > 0.0) { low_drop = mid_drop; } else { high_drop = mid_drop; }
+            }
+            hit_drop = 0.5 * (low_drop + high_drop);
+            hit_xy = WorldPos.xy + shift_per_cm * hit_drop;
+            found = true;
+            break;
+        }
+        previous_gap = gap;
+        previous_drop = drop;
+        previous_xy = q;
+    }
+    if (!found)
+    {
+        hit_drop = rut_depth_cm;
+        hit_xy = WorldPos.xy + shift_per_cm * rut_depth_cm;
+    }
+}
+// Grain and ripples stay at the surface position: at the hit point a wall would smear them into streaks.
+float2 p = surface_p;
+float compaction = RUT_MASK(hit_xy) * rut_scale;
+float4 rut_sample = Texture2DSampleLevel(TrackMap, TrackMapSampler, RUT_UV(hit_xy), 0);
+float2 travel = normalize((rut_sample.ba - 0.5) * 2.0 + float2(1e-4, 0.0));
+float2 across = float2(-travel.y, travel.x);
+// Tread: transverse blocks with a shallow V, 4.5 cm pitch, repeating every 20 cm across the tyre; only inside the rut.
+float fade_tread = saturate(1.0 - pixel_cm / 1.4);
+#define TREAD_H(q_) (0.5 * smoothstep(0.30, 0.5, abs(frac(dot((q_) / 100.0, travel) / 0.045 + 0.35 * abs(frac(dot((q_) / 100.0, across) / 0.2) - 0.5)) - 0.5) * 2.0) * fade_tread)
+#define RUT_H(q_) (-RUT_MASK(q_) * rut_scale * rut_depth_cm + Texture2DSampleLevel(TrackMap, TrackMapSampler, RUT_UV(q_), 0).g * rut_scale * 1.8 + RUT_MASK(q_) * rut_scale * TREAD_H(q_))
+float rut_h = RUT_H(hit_xy);
+float rut_dx = (RUT_H(hit_xy + float2(2.0, 0)) - rut_h) / 2.0;
+float rut_dy = (RUT_H(hit_xy + float2(0, 2.0)) - rut_h) / 2.0;
+
 float road = VertexRoad;
 float footway = VertexFootway;
 float edge = VertexEdge * 5.1;
@@ -64,35 +133,15 @@ float h = SNOW_H(p);
 float step_m = 0.02;
 float dhx = (SNOW_H(p + float2(step_m, 0)) - h) / (step_m * 100.0);
 float dhy = (SNOW_H(p + float2(0, step_m)) - h) / (step_m * 100.0);
-
-// Tyre tracks from the deformation map (SnowTrackSubsystem; R compaction, G ridge, BA direction of travel). The 1 m mesh
-// is too coarse for a 20 cm rut, so the rut is drawn in the pixel shader: packed colour, a normal from the height
-// field (rut floor at the packed depth, ridges of pushed aside snow) and the tread of the tyre.
-float2 map_uv = frac(WorldPos.xy / 10240.0);
-float4 rut = Texture2DSample(TrackMap, TrackMapSampler, map_uv);
-float map_fade = 1.0 - smoothstep(3000.0, 4200.0, length(WorldPos.xy - CameraPos.xy));
-float depth_cm = Depth * 100.0;
-float snow_here = saturate(depth_cm / 1.5) * saturate(Cover * 2.0);
-float compaction = rut.r * map_fade * snow_here;
-float2 travel = normalize((rut.ba - 0.5) * 2.0 + float2(1e-4, 0.0));
-float2 across = float2(-travel.y, travel.x);
-// Tread: transverse blocks with a shallow V, 4.5 cm pitch, repeating every 20 cm across the tyre. Fine detail fades out before it aliases.
-float fade_tread = saturate(1.0 - pixel_cm / 1.4);
-#define TREAD_H(q) (0.45 * smoothstep(0.30, 0.5, abs(frac(dot((q), travel) / 0.045 + 0.35 * abs(frac(dot((q), across) / 0.2) - 0.5)) - 0.5) * 2.0) * fade_tread)
-#define RUT_H(uv_, q_) (Texture2DSample(TrackMap, TrackMapSampler, (uv_)).g * map_fade * snow_here * 1.8 - Texture2DSample(TrackMap, TrackMapSampler, (uv_)).r * map_fade * snow_here * 0.7 * depth_cm + compaction * TREAD_H(q_))
-float2 texel_uv = 1.0 / 2048.0;
-float rut_h = RUT_H(map_uv, p);
-float rut_dx = (RUT_H(map_uv + float2(texel_uv.x, 0), p + float2(0.05, 0)) - rut_h) / 5.0;
-float rut_dy = (RUT_H(map_uv + float2(0, texel_uv.y), p + float2(0, 0.05)) - rut_h) / 5.0;
-dhx += rut_dx * 1.5;
-dhy += rut_dy * 1.5;
+dhx += rut_dx;
+dhy += rut_dy;
 
 // Colour. Fresh snow is bright and slightly cool; trodden and road snow is greyer and dirtier.
 float macro = DgValueNoise(p / 5.0 + 11.0);
 // Same albedo as the ground's snow (SNOW_TONE in create_materials.py) so the layer fades into it unseen.
 float3 fresh = float3(0.86, 0.855, 0.865) * float3(0.975, 0.99, 1.0) * lerp(0.93, 1.03, macro);
-float3 trodden_scan = Texture2DSample(Snow1Color, Snow1ColorSampler, p / 2.5).rgb;
-float3 road_scan = Texture2DSample(AsphaltSnowColor, AsphaltSnowColorSampler, p / 2.5).rgb;
+float3 trodden_scan = Texture2DSample(Snow1Color, Snow1ColorSampler, surface_p / 2.5).rgb;
+float3 road_scan = Texture2DSample(AsphaltSnowColor, AsphaltSnowColorSampler, surface_p / 2.5).rgb;
 float3 trodden_color = fresh * (0.62 + 0.45 * dot(trodden_scan, 0.333));
 float3 road_snow = lerp(fresh * 0.86, trodden_color * 0.8, 0.5);
 float3 wet_road = road_scan * 1.3;
@@ -101,10 +150,11 @@ float3 road_color = lerp(wet_road, road_snow, road_cover);
 float3 color = lerp(fresh, trodden_color, trodden);
 color = lerp(color, road_color, road);
 // Packed snow is denser: greyer and darker, and on thin road snow the wet asphalt shows through.
-float3 packed = color * float3(0.52, 0.56, 0.64);
-color = lerp(color, packed, compaction);
+float3 packed = color * float3(0.93, 0.95, 0.98);
+color = lerp(color, packed, compaction * (0.5 + 0.5 * road));
+color *= lerp(1.0, 0.88, saturate(hit_drop / 6.0) * compaction);
 float reveal = compaction * road * (1.0 - saturate((depth_cm - 2.0) / 4.0));
-color = lerp(color, wet_road * 0.8, reveal * 0.6);
+color = lerp(color, wet_road * 0.8, reveal * 0.5);
 
 // Rough and soft: snow is a diffuse scatterer; tracks are compacted and a little glossier.
 float rough = lerp(0.95, 0.7, saturate(tracks + trodden * 0.5));

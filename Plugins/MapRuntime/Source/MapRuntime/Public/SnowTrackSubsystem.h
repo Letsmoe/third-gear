@@ -51,6 +51,11 @@ private:
 		double LastStampTime = 0.0;
 	};
 
+	/** Test helper (-SnowLay): stamps two wheel tracks along a gentle curve ahead of the player pawn, as a car would have driven it. */
+	void LayTestTracksAhead();
+	/** Adds the time of one stamp or upload to the per-frame statistics and logs them every few seconds (tg.SnowTracks.Stats). */
+	void ReportCpuStatistics(float DeltaTime);
+
 	/** Moves the window to the viewer in ScrollStepTexels steps and clears the strips that enter it. */
 	void FollowViewer();
 	void ClearAll();
@@ -78,4 +83,11 @@ private:
 	float FadeCheckCountdown = 0.f;
 	float SnowCover = 0.f;
 	bool bCopyNeeded = false;
+	bool bTestTracksLaid = false;
+	bool bClearedWhileOff = false;
+	double StampSecondsTotal = 0.0;
+	double UploadSecondsTotal = 0.0;
+	int32 StampCountTotal = 0;
+	int32 FramesTotal = 0;
+	float StatisticsCountdown = 5.f;
 };
