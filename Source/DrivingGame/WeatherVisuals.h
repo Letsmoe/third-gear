@@ -7,6 +7,7 @@
 
 class ADirectionalLight;
 class ARainEffect;
+class UCloudSkyRig;
 class APostProcessVolume;
 class UExponentialHeightFogComponent;
 class UMaterialParameterCollection;
@@ -96,6 +97,7 @@ private:
 	void ApplyFog();
 	void ApplyExposure();
 	void ApplyMaterialParameters();
+	void ApplyClouds();
 
 	/** How much direct sun gets through the clouds right now, 0 to 1. */
 	float SunTransmission() const;
@@ -123,6 +125,10 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UMaterialParameterCollection> Parameters;
+
+	/** Clouds in the sky, from the sky light capture (CloudSky.h). */
+	UPROPERTY()
+	TObjectPtr<UCloudSkyRig> CloudSky;
 
 	FWeatherVisualState Target;
 	FWeatherVisualState Current;

@@ -1,5 +1,6 @@
 #include "WeatherVisuals.h"
 
+#include "CloudSky.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
@@ -22,6 +23,9 @@ DEFINE_LOG_CATEGORY_STATIC(LogWeatherVisuals, Log, All);
 
 namespace WeatherVisualsDetail
 {
+	/** Sky luminance factor under a traced cloud deck, to match the light of the plain-atmosphere overcast sky. */
+	constexpr float TracedDeckSkyGain = 1.2f;
+
 	/** Latitude of the map origin, as in WeatherSubsystem.cpp. */
 	constexpr double MapLatitudeDegrees = 53.4880;
 
@@ -230,6 +234,8 @@ void UWeatherVisualsSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		UE_LOG(LogWeatherVisuals, Warning, TEXT("%s missing; run Scripts/create_weather_parameters.py"), WeatherVisualsDetail::ParameterCollectionPath);
 	}
 	SpawnEffects();
+	CloudSky = NewObject<UCloudSkyRig>(this);
+	CloudSky->Initialise(&InWorld);
 	UE_LOG(LogWeatherVisuals, Log, TEXT("Weather visuals: sun %s, atmosphere %s, fog %s, post process %s, %d overrides"),
 		Sun.IsValid() ? TEXT("yes") : TEXT("no"), Atmosphere.IsValid() ? TEXT("yes") : TEXT("no"),
 		Fog.IsValid() ? TEXT("yes") : TEXT("no"), PostProcess.IsValid() ? TEXT("yes") : TEXT("no"), Overrides.Num());
@@ -371,6 +377,7 @@ void UWeatherVisualsSubsystem::Tick(float DeltaTime)
 	ApplyFog();
 	ApplyExposure();
 	ApplyMaterialParameters();
+	ApplyClouds();
 }
 
 TStatId UWeatherVisualsSubsystem::GetStatId() const
@@ -525,9 +532,16 @@ void UWeatherVisualsSubsystem::ApplySky()
 	const float DeckTransmission = FMath::Lerp(1.f, WeatherVisualsDetail::OvercastSunTransmission, Overcast);
 	const float DeckGain = FMath::Lerp(1.f, WeatherVisualsDetail::OvercastDiffuseShare / DeckTransmission, Overcast);
 	const float SkyGain = WeatherVisualsDetail::ClearSkyGain * FMath::Lerp(1.f - 0.95f * Overcast, DeckGain, Daylight);
+	// The traced cloud deck absorbs part of the light the atmosphere alone would give, which would make an overcast
+	// day darker than it was without clouds; this puts back what it takes (measured against the plain atmosphere).
+	float TracedDeckGain = 1.f;
+	if (CloudSky && CloudSky->IsActive())
+	{
+		TracedDeckGain = FMath::Lerp(1.f, WeatherVisualsDetail::TracedDeckSkyGain, Overcast);
+	}
 	// A flash lights the cloud deck from inside.
 	const float Flash = 1.f + 40.f * FlashLevel();
-	Component->SetSkyLuminanceFactor(FLinearColor(SkyGain, SkyGain, SkyGain) * Flash);
+	Component->SetSkyLuminanceFactor(FLinearColor(SkyGain, SkyGain, SkyGain) * Flash * TracedDeckGain);
 }
 
 float UWeatherVisualsSubsystem::NightFactor() const
@@ -577,6 +591,26 @@ void UWeatherVisualsSubsystem::ApplyExposure()
 	{
 		PanelExposure->Set(EV100, ECVF_SetByCode);
 	}
+}
+
+void UWeatherVisualsSubsystem::ApplyClouds()
+{
+	CloudSkyFrameLog::Record(GetWorld());
+	if (!CloudSky || !CloudSky->IsActive())
+	{
+		return;
+	}
+	FCloudSkyInputs Inputs;
+	Inputs.CloudCover = Current.CloudCover;
+	Inputs.RainIntensity = FMath::Clamp(Current.RainMillimetresPerHour * (1.f - Current.SnowFraction) / 10.f, 0.f, 1.f);
+	Inputs.Wind = Current.Wind;
+	Inputs.Seconds = ElapsedSeconds;
+	if (Sun.IsValid())
+	{
+		Inputs.SunDirection = -Sun->GetActorForwardVector();
+	}
+	Inputs.SunVisibility = WeatherVisualsDetail::SmoothStep01(0.3f, 0.9f, SunTransmission());
+	CloudSky->Update(Inputs);
 }
 
 void UWeatherVisualsSubsystem::ApplyMaterialParameters()
