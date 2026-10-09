@@ -196,7 +196,11 @@ budgeted steps and enabling collision per ground chunk within 150 m. `-Region=<r
 (default bergedorf_test). `Scripts/stream_test.sh [region] [route] [kmh]` flies through at driving speed and prints
 frame times and per-tile build/spawn times (bergedorf_core at 100 km/h: median 5.8 ms, 99 % < 9.8 ms; the one
 remaining ~45 ms hitch is garbage collection in the editor binary). Run: `env MAP=Streamed Scripts/run_desktop.sh
--Region=bergedorf_core`. Gotchas: a triangle (A, B, C) faces along `Cross(C-A, B-A)`; reserve arrays of
+-Region=bergedorf_core`. Horizon: `build_horizon_world.py <region>` writes 2 km tiles out to 13 km into
+`world/<region>/horizon/` (25/50/125 m grid, terrain 0xFFFF = hole where the region's tiles are, major roads, buildings,
+single trees in woods within 1.5 km, canopy blocks beyond, flat ring to 60 km); loaded at start at far detail, never
+unloaded, `-NoHorizon` skips. Tile meshes use the static draw path (the dynamic one is invisible to Lumen's surface
+cache, so shade went black). Gotchas: a triangle (A, B, C) faces along `Cross(C-A, B-A)`; reserve arrays of
 `FDynamicMesh3` (TArray relocates bitwise and breaks attribute parent pointers).
 
 **Prebaked maps (older pipeline, still in the repo; materials and vegetation models are shared with the streamed world):**
