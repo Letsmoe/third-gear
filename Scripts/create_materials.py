@@ -156,8 +156,9 @@ FDgRoadDefects D = DgRoadDefects(CrackMask, CrackMaskSampler, CrackNormal, Crack
 float crack = D.Masks.x;
 float seal = D.Masks.y;
 float patch = D.Masks.z;
-// Patches are fresher, darker asphalt; cracks hold dirt and shadow; the sealant is black bitumen with a dull sheen.
-float3 c = Color * lerp(1.0, 0.86, patch) * (1.0 - crack * 0.8);
+// Cracks hold dirt and shadow; the sealant is black bitumen with a dull sheen.
+// Patches weather to a lighter grey than the road (tone 0) or stay fresh and black (tone 1).
+float3 c = Color * lerp(1.0, lerp(1.45, 0.7, D.Masks.w), patch) * (1.0 - crack * 0.8);
 c = lerp(c, float3(0.03, 0.029, 0.028), seal * 0.85);
 Roughness = lerp(lerp(Rough * lerp(1.0, 0.92, patch), 0.5, seal), 1.0, crack);
 // A patch's fresher surface shows less of its aggregate.

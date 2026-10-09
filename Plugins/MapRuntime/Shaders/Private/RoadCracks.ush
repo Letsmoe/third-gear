@@ -6,11 +6,11 @@
 #define DG_CRACK_CELL_METRES 2.0
 #define DG_CRACK_LAYERS 3
 
-// What the defects of a point add up to: x open crack, y tar sealant, z patch repair (0 to 1), and their normal
-// perturbation in UV space.
+// What the defects of a point add up to: x open crack, y tar sealant, z patch repair (0 to 1), w the patch's tone
+// (0 weathered light, 1 fresh black), and their normal perturbation in UV space.
 struct FDgRoadDefects
 {
-	float3 Masks;
+	float4 Masks;
 	float2 NormalXY;
 };
 
@@ -45,7 +45,11 @@ void DgAddCrackLayer(Texture2D Mask, SamplerState MaskSampler, Texture2D Normal,
 	float2 UvDx = mul(CellMatrix, Dx) * GradientScale;
 	float2 UvDy = mul(CellMatrix, Dy) * GradientScale;
 	float4 Sampled = Mask.SampleGrad(MaskSampler, Uv, UvDx, UvDy);
-	Defects.Masks = max(Defects.Masks, Sampled.rgb);
+	if (Sampled.b > Defects.Masks.z)
+	{
+		Defects.Masks.w = Sampled.a;
+	}
+	Defects.Masks.xyz = max(Defects.Masks.xyz, Sampled.rgb);
 	float2 TileNormal = Normal.SampleGrad(NormalSampler, Uv, UvDx, UvDy).xy * 2.0 - 1.0;
 	// Back from tile space to cell space, then from the layer's rotated grid to UV space.
 	Defects.NormalXY += mul(transpose(LayerMatrix), mul(transpose(CellMatrix), TileNormal));
@@ -56,7 +60,7 @@ FDgRoadDefects DgRoadDefects(Texture2D Mask, SamplerState MaskSampler, Texture2D
 	float2 Uv, float Wear)
 {
 	FDgRoadDefects Defects;
-	Defects.Masks = 0;
+	Defects.Masks = float4(0, 0, 0, 0.5);
 	Defects.NormalXY = 0;
 	float Density = saturate(Wear * lerp(0.25, 1.75, DgValueNoise(Uv / 41.0 + 3.7))) * 0.45;
 	float2 Dx = ddx(Uv);

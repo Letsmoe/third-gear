@@ -2,12 +2,12 @@
 over plain asphalt by a cell hash (see ROAD_CRACKS_HLSL in Scripts/create_materials.py), so they never repeat.
 
 Tiles: meandering open cracks with branches, tar-sealed crack lines, alligator cracking, block cracking, a transverse
-crack, hairline networks, and patch repairs: cut-out rectangles, trench strips, hand-laid patches and patches laid
-over fatigue cracking. Every defect stays inside its tile's margin, so cells can be
+crack, hairline networks, and patch repairs: trench strips, clusters of lobed pothole patches in light and dark tones
+with loose rims, and patches laid into fatigue cracking. Every defect stays inside its tile's margin, so cells can be
 rotated and mirrored freely without cut-off cracks at the borders.
 
 Output in <data root>/texturegen/road_cracks/:
-  T_RoadCracks_Mask.png    R open crack (1 = crack), G tar sealant, B patch repair (1 = fresh black, lower = older), A height (0.5 = road surface)
+  T_RoadCracks_Mask.png    R open crack (1 = crack), G tar sealant, B patch repair, A patch tone (0 weathered light, 1 fresh black)
   T_RoadCracks_Normal.png  DirectX tangent-space normal from the height
 Usage: <osmimport venv python> -I Tools/texturegen/road_cracks.py [--preview out.jpg]
 """
@@ -31,12 +31,10 @@ TILE_METRES = 2.0
 SUPERSAMPLE = 2
 PIXELS_PER_METRE = TILE_PIXELS / TILE_METRES
 MARGIN = 0.12  # share of the tile kept free of defects at each border
-# Depths in metres, turned into the height channel around HEIGHT_NEUTRAL.
+# Depths in metres; the normal map is computed from them.
 CRACK_DEPTH = 0.006
 SEALANT_RAISE = 0.0015
 PATCH_STEP = 0.003
-HEIGHT_RANGE = 0.02
-HEIGHT_NEUTRAL = 0.5
 
 
 class TileCanvas:
@@ -47,6 +45,10 @@ class TileCanvas:
         self.crack = Image.new("L", (size, size), 0)
         self.sealant = Image.new("L", (size, size), 0)
         self.patch = Image.new("L", (size, size), 0)
+        # Tone of each patch (0 weathered light grey, 1 fresh black), and the gap left where a patch came loose,
+        # drawn after the patches so they don't cover it.
+        self.shade = Image.new("L", (size, size), 128)
+        self.rim = Image.new("L", (size, size), 0)
         self.scale = PIXELS_PER_METRE * SUPERSAMPLE
 
     def pixels(self, points):
@@ -161,8 +163,17 @@ def alligator(canvas, rng, radius_x, radius_y, cell):
 
 
 def patch_shade(rng):
-    """Patch mask value: 1 is fresh black asphalt, lower values are older patches closer to the road's grey."""
-    return int(rng.uniform(0.5, 1.0) * 255)
+    """Tone of one patch: most cold-mix patches weather lighter than the road around them, some stay darker."""
+    if rng.random() < 0.65:
+        return int(rng.uniform(0.0, 0.35) * 255)
+    return int(rng.uniform(0.65, 1.0) * 255)
+
+
+def fill_patch(canvas, rng, outline):
+    """Fills a patch outline in the patch and shade layers."""
+    pixels = canvas.pixels(outline)
+    ImageDraw.Draw(canvas.patch).polygon(pixels, fill=255)
+    ImageDraw.Draw(canvas.shade).polygon(pixels, fill=patch_shade(rng))
 
 
 def patch_repair(canvas, rng, width=None, height=None, centre=None):
@@ -175,7 +186,7 @@ def patch_repair(canvas, rng, width=None, height=None, centre=None):
     for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
         x, y = sx * width / 2, sy * height / 2
         corners.append((cx + x * math.cos(angle) - y * math.sin(angle), cy + x * math.sin(angle) + y * math.cos(angle)))
-    ImageDraw.Draw(canvas.patch).polygon(canvas.pixels(ragged_outline(rng, corners)), fill=patch_shade(rng))
+    fill_patch(canvas, rng, ragged_outline(rng, corners))
     sealed_joints(canvas, rng, corners)
     return corners
 
@@ -217,22 +228,68 @@ def trench_strip(canvas, rng):
     tapered_crack(canvas, rng, path, 0.004)
 
 
-def hand_patch(canvas, rng):
-    """An irregular hand-laid patch of cold asphalt, as filled into potholes and broken cracking."""
-    cx, cy = random_start(rng)
-    radius = rng.uniform(0.2, 0.5)
+def blob_outline(rng, centre, radius):
+    """A lobed pothole outline: a circle whose radius wanders smoothly with a few bulges, plus millimetre jitter."""
+    count = 72
+    angles = np.linspace(0, 2 * math.pi, count, endpoint=False)
+    reach = np.ones(count)
+    for lobes in (2, 3, 5):
+        reach += rng.uniform(0.06, 0.18) * np.cos(lobes * angles + rng.uniform(0, 2 * math.pi))
+    stretch = rng.uniform(1.0, 1.6)
+    turn = rng.uniform(0, math.pi)
     outline = []
-    for angle in np.linspace(0, 2 * math.pi, 15)[:-1]:
-        reach = radius * rng.uniform(0.65, 1.25)
-        outline.append((cx + math.cos(angle) * reach * 1.3, cy + math.sin(angle) * reach))
-    ImageDraw.Draw(canvas.patch).polygon(canvas.pixels(outline), fill=patch_shade(rng))
+    for angle, scale in zip(angles, reach):
+        x, y = math.cos(angle) * radius * scale * stretch, math.sin(angle) * radius * scale
+        outline.append((centre[0] + x * math.cos(turn) - y * math.sin(turn) + rng.normal(0, 0.003),
+                        centre[1] + x * math.sin(turn) + y * math.cos(turn) + rng.normal(0, 0.003)))
+    return outline
+
+
+def loose_rim(canvas, rng, outline):
+    """Dark gaps along parts of a patch's edge, where it has shrunk away from the road around it."""
+    count = len(outline)
+    for _ in range(int(rng.integers(1, 4))):
+        first = int(rng.integers(0, count))
+        length = int(rng.integers(count // 8, count // 3))
+        stretch = [outline[(first + i) % count] for i in range(length)]
+        tapered_crack(canvas, rng, stretch, rng.uniform(0.006, 0.012))
+    # tapered_crack drew into the crack layer; move it to the rim layer so the patch doesn't erase it
+    canvas.rim = Image.fromarray(np.maximum(np.asarray(canvas.rim), np.asarray(canvas.crack)))
+    canvas.crack = Image.new("L", canvas.crack.size, 0)
+
+
+def pothole_patches(canvas, rng, count):
+    """A cluster of overlapping pothole patches along a wheel path, each its own tone, some with loose rims."""
+    start = random_start(rng)
+    heading = rng.uniform(0, 2 * math.pi)
+    centre = start
+    for _ in range(count):
+        radius = rng.uniform(0.14, 0.36)
+        outline = blob_outline(rng, centre, radius)
+        fill_patch(canvas, rng, outline)
+        if rng.random() < 0.6:
+            existing = canvas.crack.copy()
+            canvas.crack = Image.new("L", canvas.crack.size, 0)
+            loose_rim(canvas, rng, outline)
+            canvas.crack = existing
+        step = radius * rng.uniform(1.0, 2.0)
+        heading += rng.normal(0, 0.5)
+        lower, upper = MARGIN * TILE_METRES + 0.3, (1 - MARGIN) * TILE_METRES - 0.3
+        centre = (min(max(centre[0] + math.cos(heading) * step, lower), upper),
+                  min(max(centre[1] + math.sin(heading) * step, lower), upper))
 
 
 def patch_over_cracking(canvas, rng):
-    """A patch laid over an area of fatigue cracking, the cracking still showing around it."""
-    centre = alligator(canvas, rng, rng.uniform(0.55, 0.72), rng.uniform(0.4, 0.55), rng.uniform(0.12, 0.2))
-    shifted = (centre[0] + rng.uniform(-0.15, 0.15), centre[1] + rng.uniform(-0.1, 0.1))
-    patch_repair(canvas, rng, width=rng.uniform(0.6, 0.95), height=rng.uniform(0.45, 0.7), centre=shifted)
+    """Pothole patches laid into an area of fatigue cracking, the cracking still showing around them."""
+    centre = alligator(canvas, rng, rng.uniform(0.55, 0.72), rng.uniform(0.4, 0.55), rng.uniform(0.12, 0.22))
+    for _ in range(int(rng.integers(1, 3))):
+        spot = (centre[0] + rng.uniform(-0.25, 0.25), centre[1] + rng.uniform(-0.15, 0.15))
+        outline = blob_outline(rng, spot, rng.uniform(0.12, 0.25))
+        fill_patch(canvas, rng, outline)
+        existing = canvas.crack.copy()
+        canvas.crack = Image.new("L", canvas.crack.size, 0)
+        loose_rim(canvas, rng, outline)
+        canvas.crack = existing
 
 
 def block_cracking(canvas, rng):
@@ -273,12 +330,9 @@ def make_tile(index, rng):
     elif index == 7:
         alligator(canvas, rng, rng.uniform(0.5, 0.72), rng.uniform(0.3, 0.55), rng.uniform(0.12, 0.22))
     elif index == 8:
-        patch_repair(canvas, rng)
-        hairlines(canvas, rng)
-    elif index == 9:
         trench_strip(canvas, rng)
-    elif index == 10:
-        hand_patch(canvas, rng)
+    elif index < 11:
+        pothole_patches(canvas, rng, int(rng.integers(2, 6)))
     elif index < 13:
         patch_over_cracking(canvas, rng)
     elif index == 13:
@@ -320,15 +374,17 @@ def build_atlas(seed=7):
     for index in range(TILES_PER_SIDE * TILES_PER_SIDE):
         canvas = make_tile(index, rng)
         crack, sealant, patch = downsample(canvas.crack), downsample(canvas.sealant), downsample(canvas.patch)
+        shade = downsample(canvas.shade)
         crack *= 1.0 - sealant * 0.85  # the tar covers most of a sealed crack
         crack *= 1.0 - np.clip(patch * 4.0, 0.0, 1.0)  # a patch covers the cracking it was laid over
+        crack = np.maximum(crack, downsample(canvas.rim))
         # Dirt and water staining darken the asphalt a couple of centimetres either side of a crack.
         crack = np.maximum(crack, np.clip(ndimage.gaussian_filter(crack, 6.0) * 1.2, 0, 0.3))
         height = height_of(crack, sealant, patch)
         row, column = divmod(index, TILES_PER_SIDE)
         area = (slice(row * TILE_PIXELS, (row + 1) * TILE_PIXELS), slice(column * TILE_PIXELS, (column + 1) * TILE_PIXELS))
         mask[area] = np.dstack([
-            crack, sealant, patch, np.clip(HEIGHT_NEUTRAL + height / HEIGHT_RANGE, 0, 1)
+            crack, sealant, patch, shade
         ]).__mul__(255).round().astype(np.uint8)
         normal[area] = normal_from_height(height)
     return mask, normal
