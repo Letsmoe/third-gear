@@ -63,7 +63,9 @@ take_gpu_slot() {
 	exec 8>>"${GPU_SLOT_FILES[0]}" 9>>"${GPU_SLOT_FILES[1]}"
 	local roomy_checks=0
 	while true; do
-		if flock -n 8; then
+		# A short blocking wait rather than a bare try: blocked waiters (older copies of this script) otherwise
+		# always win slot 0 the moment it is released.
+		if flock -w 10 8; then
 			exec 9>&-
 			GPU_SLOT=0
 			return 0
@@ -73,12 +75,11 @@ take_gpu_slot() {
 		else
 			roomy_checks=0
 		fi
-		if [ "$roomy_checks" -ge 15 ] && flock -n 9; then
+		if [ "$roomy_checks" -ge 5 ] && flock -n 9; then
 			exec 8>&-
 			GPU_SLOT=1
 			return 0
 		fi
-		sleep 3
 	done
 }
 
