@@ -2,7 +2,7 @@
 the guide lines through the junctions. Ties network.py, layout.py and junctions.py together."""
 from dataclasses import dataclass
 
-from . import assumptions, lines as line_rules, tags as osm_tags
+from . import assumptions, corrections, lines as line_rules, tags as osm_tags
 from .cross_section import Travel
 from .junctions import JunctionLines
 from .layout import build_layouts
@@ -36,6 +36,7 @@ def build(ways, sections: dict, urban: dict, signal_points) -> RoadLines:
     """The lines of the given ways. sections and urban: per way id (urban: True inside towns); signal_points: (x, y)
     of the traffic signals, which decide where left turns get guide lines."""
     network = SegmentNetwork(ways, sections)
+    corrections.fix_short_narrowings(network)
     painted = {segment.id: line_rules.painted_lines(segment.way.tags, segment.section, _is_rural(segment.way.tags))
                for segment in network.segments}
     urban_by_segment = {segment.id: urban[segment.way.id] for segment in network.segments}

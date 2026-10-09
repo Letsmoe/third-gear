@@ -94,6 +94,13 @@ WIDTH_TAG_LANE_ONLY_GAP = 1.0
 # No travel lane gets narrower than this when the strips are fitted to a width= tag.
 MIN_TRAVEL_LANE_WIDTH = 2.0
 
+# A road piece shorter than this that is narrower than the road on both sides of it is a tagging mistake (a real
+# narrowing needs two tapers of up to 30 m and some road between them): it takes the narrower neighbour's
+# cross-section.
+SHORT_NARROWING_MAX_LENGTH = 80.0
+# Narrower means by at least this much.
+NARROWING_MIN_DIFFERENCE = 0.3
+
 # ---- Lines (sources: <data root>/downloads/road_rules/NOTES.md) ----
 
 # Classes whose lane, centre and edge lines are painted at all.
@@ -145,6 +152,10 @@ GUIDE_LINE_DASH = (1.5, 1.5)
 JUNCTION_CROSS_LENGTH = 1.0
 # The edge line of the through road continues across the mouth of a side road as a broken broad line.
 EDGE_GUIDE_DASH = (1.5, 1.5)
+# Where a road joins or leaves another at a shallow angle (merging and diverging lanes), the other road's edge line on
+# that side stays broken until the joining carriageway is MERGE_GAP away from it.
+MERGE_MAX_ANGLE = 45.0
+MERGE_GAP = 2.0
 # Two arms are one road going straight through a junction when their directions differ by at most this much.
 THROUGH_MAX_DEFLECTION_DEGREES = 35.0
 # Side arms of these classes (driveways, parking aisles) don't interrupt the lines of the road they join.

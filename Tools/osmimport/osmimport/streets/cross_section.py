@@ -64,6 +64,13 @@ class CrossSection:
         """The number of travel lanes, both directions together (an unmarked two-way road has two)."""
         return len(self.travel_lanes())
 
+    def mirrored(self) -> "CrossSection":
+        """The same cross-section seen along the other direction: strips in reverse order, directions swapped."""
+        swapped = {Travel.FORWARD: Travel.BACKWARD, Travel.BACKWARD: Travel.FORWARD}
+        strips = tuple(Strip(strip.kind, strip.width, swapped.get(strip.travel, strip.travel))
+                       for strip in reversed(self.strips))
+        return CrossSection(strips, self.marked, self.width_source)
+
     def strip_edges(self) -> list:
         """(strip, left edge, right edge) of every strip, as offsets from the way's centre line, which runs down the
         middle of the carriageway; positive is to the right."""

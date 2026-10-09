@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 
-from . import assumptions, polyline, tags as osm_tags
+from . import assumptions, corrections, polyline, tags as osm_tags
 from .cross_section import Travel
 from .layout import arm_keys, arm_lines
 from .lines import LineKey, LineKind, Side, mirrored
@@ -54,6 +54,29 @@ class JunctionLines:
                     result[end] = 0.0
                     continue
                 result[end] = self._clear_distance(end, others) + assumptions.CORNER_RADIUS
+            for through_pair in self._through_pairs(ends):
+                for end in through_pair:
+                    result.update(self._merge_mouths(end, ends, through_pair, result[end]))
+        return result
+
+    def _merge_mouths(self, end: SegmentEnd, ends: list, through_pair: tuple, mouth: float) -> dict:
+        """{(end, LineKey facing out of the node): distance} for the edge and cycle lines of a through arm on the
+        side where another road joins or leaves at a shallow angle: they stay broken until that road's carriageway
+        is MERGE_GAP away, not just clear."""
+        result = {}
+        direction = self.network.arm_direction(end)
+        for other in ends:
+            if other in through_pair or self.is_minor(other):
+                continue
+            if corrections.deflection(self.network, end, other) < 180.0 - assumptions.MERGE_MAX_ANGLE:
+                continue
+            side = Side.LEFT
+            if float(np.dot(self.network.arm_direction(other), polyline.right_of(direction))) > 0:
+                side = Side.RIGHT
+            distance = max(self._clear_distance(end, [other], assumptions.MERGE_GAP), mouth)
+            for kind in (LineKind.EDGE, LineKind.CYCLE, LineKind.CYCLE_OUTER):
+                key = LineKey(kind, side)
+                result[(end, key)] = max(distance, result.get((end, key), 0.0))
         return result
 
     def is_minor(self, end: SegmentEnd) -> bool:
@@ -71,12 +94,13 @@ class JunctionLines:
             return []
         return major
 
-    def _clear_distance(self, end: SegmentEnd, others: list) -> float:
-        """How far from the node the arm's carriageway, across its whole width, is clear of the other arms'."""
+    def _clear_distance(self, end: SegmentEnd, others: list, gap: float = 0.0) -> float:
+        """How far from the node the arm's carriageway, across its whole width, is clear of the other arms' (and
+        at least gap away from them)."""
         line = self.network.arm_line(end)
         half_width = self._segment(end).section.width() / 2
         other_lines = [(polyline.cut_polyline(self.network.arm_line(other), 0.0, MOUTH_SEARCH_LIMIT),
-                        self._segment(other).section.width() / 2) for other in others]
+                        self._segment(other).section.width() / 2 + gap) for other in others]
         limit = min(MOUTH_SEARCH_LIMIT, polyline.length(line) * assumptions.TAPER_MAX_SEGMENT_SHARE)
         across = np.linspace(-half_width, half_width, MOUTH_PROBE_POINTS)
         for distance in np.arange(0.0, limit, MOUTH_SEARCH_STEP):
@@ -143,10 +167,13 @@ class JunctionLines:
             if guide_kind == "cycle_furt":
                 continued.append(LineKey(LineKind.CYCLE_OUTER, key.side))
             for line_key in continued:
-                start = self._mouth_point(entering, entering_lines[line_key], mouths)
-                end = self._mouth_point(leaving, leaving_lines[mirrored(line_key)], mouths)
-                curve = polyline.smooth_curve(start, -self._direction_at_mouth(entering, mouths), end,
-                                              self._direction_at_mouth(leaving, mouths), assumptions.LINE_POINT_SPACING)
+                entering_mouth = line_mouth(mouths, entering, line_key)
+                leaving_mouth = line_mouth(mouths, leaving, mirrored(line_key))
+                start = self._mouth_point(entering, entering_lines[line_key], entering_mouth)
+                end = self._mouth_point(leaving, leaving_lines[mirrored(line_key)], leaving_mouth)
+                curve = polyline.smooth_curve(start, -self._direction_at_mouth(entering, entering_mouth), end,
+                                              self._direction_at_mouth(leaving, leaving_mouth),
+                                              assumptions.LINE_POINT_SPACING)
                 result.append((guide_kind, curve))
         return result
 
@@ -183,20 +210,20 @@ class JunctionLines:
         for key in arm_keys(layouts[entering.segment].painted, entering):
             if key.kind not in CROSSED_KINDS or mirrored(key) not in leaving_painted:
                 continue
-            chords.append((self._mouth_point(entering, entering_lines[key], mouths),
-                           self._mouth_point(leaving, leaving_lines[mirrored(key)], mouths)))
+            chords.append((self._mouth_point(entering, entering_lines[key], mouths.get(entering, 0.0)),
+                           self._mouth_point(leaving, leaving_lines[mirrored(key)], mouths.get(leaving, 0.0))))
         return chords
 
     def _entry_chords(self, layouts: list, end: SegmentEnd, mouths: dict) -> list:
         """(start, end) of the painted lane and centre lines of an arm ending at the junction, run on straight
         across it."""
         lines = arm_lines(layouts[end.segment].lines, end)
-        inward = -self._direction_at_mouth(end, mouths)
+        inward = -self._direction_at_mouth(end, mouths.get(end, 0.0))
         reach = 2.0 * mouths.get(end, 0.0) + self._segment(end).section.width()
         chords = []
         for key in arm_keys(layouts[end.segment].painted, end):
             if key.kind in CROSSED_KINDS:
-                start = self._mouth_point(end, lines[key], mouths)
+                start = self._mouth_point(end, lines[key], mouths.get(end, 0.0))
                 chords.append((start, start + inward * reach))
         return chords
 
@@ -237,10 +264,13 @@ class JunctionLines:
             end_key = _line_right_of_lane(Travel.FORWARD, outgoing, min(lane, outgoing))
             if start_key not in entering_lines or end_key not in target_lines:
                 continue
-            start = self._mouth_point(entering, entering_lines[start_key], mouths)
-            end = self._mouth_point(target, target_lines[end_key], mouths)
-            curve = polyline.smooth_curve(start, -self._direction_at_mouth(entering, mouths), end,
-                                          self._direction_at_mouth(target, mouths), assumptions.LINE_POINT_SPACING)
+            entering_mouth = line_mouth(mouths, entering, start_key)
+            target_mouth = line_mouth(mouths, target, end_key)
+            start = self._mouth_point(entering, entering_lines[start_key], entering_mouth)
+            end = self._mouth_point(target, target_lines[end_key], target_mouth)
+            curve = polyline.smooth_curve(start, -self._direction_at_mouth(entering, entering_mouth), end,
+                                          self._direction_at_mouth(target, target_mouth),
+                                          assumptions.LINE_POINT_SPACING)
             result.append(("guide", curve))
         return result
 
@@ -271,8 +301,7 @@ class JunctionLines:
 
     def _deflection(self, first: SegmentEnd, second: SegmentEnd) -> float:
         """How many degrees a path from one arm into the other turns (0 for a straight continuation)."""
-        through = float(np.dot(self.network.arm_direction(first), -self.network.arm_direction(second)))
-        return math.degrees(math.acos(max(-1.0, min(1.0, through))))
+        return corrections.deflection(self.network, first, second)
 
     def _is_signalised(self, node) -> bool:
         if len(self.signal_points) == 0:
@@ -280,16 +309,21 @@ class JunctionLines:
         distances = np.hypot(*(self.signal_points - self.network.node_xy[node]).T)
         return bool(distances.min() <= assumptions.SIGNAL_JUNCTION_RADIUS)
 
-    def _mouth_point(self, end: SegmentEnd, offset: float, mouths: dict) -> np.ndarray:
-        """The point of a line (offset facing out of the node) at the arm's mouth."""
+    def _mouth_point(self, end: SegmentEnd, offset: float, distance: float) -> np.ndarray:
+        """The point of a line (offset facing out of the node) at a distance out along the arm."""
         line = self.network.arm_line(end)
-        distance = min(mouths.get(end, 0.0), polyline.length(line))
+        distance = min(distance, polyline.length(line))
         return polyline.point_at(line, distance) + polyline.right_of(polyline.direction_at(line, distance)) * offset
 
-    def _direction_at_mouth(self, end: SegmentEnd, mouths: dict) -> np.ndarray:
-        """The direction out of the node at the arm's mouth."""
+    def _direction_at_mouth(self, end: SegmentEnd, distance: float) -> np.ndarray:
+        """The direction out of the node at a distance out along the arm."""
         line = self.network.arm_line(end)
-        return polyline.direction_at(line, min(mouths.get(end, 0.0), polyline.length(line)))
+        return polyline.direction_at(line, min(distance, polyline.length(line)))
+
+
+def line_mouth(mouths: dict, end: SegmentEnd, key: LineKey) -> float:
+    """Where a line (key facing out of the node) of an arm stops: its own distance where it has one, else the arm's."""
+    return mouths.get((end, key), mouths.get(end, 0.0))
 
 
 def _turn_angle(arriving, leaving) -> float:

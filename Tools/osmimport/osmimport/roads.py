@@ -102,6 +102,7 @@ def build(osm: OsmData, dem: HeightGrid, buildings_union=None) -> RoadNetwork:
     bridge_ways = [w for w in ways if not _is_ground(w)]
     lines = road_lines.build(ground_ways, sections, {way_id: context.urban for way_id, context in contexts.items()},
                              _signal_points(osm))
+    _take_corrected_sections(lines, sections, widths)
 
     # --- surface polygons per kind, major road classes win overlaps ---
     strips = _way_surfaces(lines)
@@ -144,6 +145,18 @@ def build(osm: OsmData, dem: HeightGrid, buildings_union=None) -> RoadNetwork:
                       pavement=pavement, height=height, junction_zones=junction_zones)
     net.markings = build_markings(lines, ground)
     return net
+
+
+def _take_corrected_sections(lines, sections: dict, widths: dict):
+    """Ways made of a single segment take its cross-section after road_lines' corrections (in place), so furniture,
+    parking and AI lanes see the same road as the surface."""
+    segments_of = defaultdict(list)
+    for segment in lines.network.segments:
+        segments_of[segment.way.id].append(segment)
+    for way_id, segments in segments_of.items():
+        if len(segments) == 1:
+            sections[way_id] = segments[0].section
+            widths[way_id] = segments[0].section.width()
 
 
 def _signal_points(osm: OsmData) -> list:

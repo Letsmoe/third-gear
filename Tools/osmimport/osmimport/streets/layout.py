@@ -83,7 +83,8 @@ def _taper_blend(fraction):
 
 def build_layouts(network: SegmentNetwork, painted: dict, urban: dict, mouths: dict) -> list:
     """The layout of every segment. painted: segment id -> {LineKey: marking kind}; urban: segment id -> bool;
-    mouths: SegmentEnd -> distance from the junction node where its painted lines stop."""
+    mouths: SegmentEnd -> distance from the junction node where its painted lines stop, and (SegmentEnd, LineKey
+    facing out of the node) -> the distance for single lines that stop elsewhere."""
     layouts = [SegmentLayout(segment, line_rules.section_lines(segment.section), painted[segment.id])
                for segment in network.segments]
     done = set()
@@ -95,7 +96,7 @@ def build_layouts(network: SegmentNetwork, painted: dict, urban: dict, mouths: d
             done.add(node)
         if kind == NodeKind.JUNCTION:
             for end in network.ends_at[node]:
-                _cut_at_mouth(layouts[end.segment], end, mouths.get(end, 0.0))
+                _cut_at_mouth(layouts[end.segment], end, mouths)
     return layouts
 
 
@@ -126,11 +127,14 @@ def _to_segment_frame(key: LineKey, offset: float, end: SegmentEnd):
     return line_rules.mirrored(key), -offset
 
 
-def _cut_at_mouth(layout: SegmentLayout, end: SegmentEnd, mouth: float):
-    """Painted lines stop at the junction's mouth."""
+def _cut_at_mouth(layout: SegmentLayout, end: SegmentEnd, mouths: dict):
+    """Painted lines stop at the junction's mouth (mouths: the arm's distance under the end, and some lines' own
+    distance under (end, key facing out of the node))."""
     shape = _end_shape(layout, end.at_start)
     limit = layout.segment.length() * assumptions.TAPER_MAX_SEGMENT_SHARE
     for key in layout.painted:
+        arm_key, _ = _to_segment_frame(key, 0.0, end)  # mirroring is its own inverse
+        mouth = mouths.get((end, arm_key), mouths.get(end, 0.0))
         shape.cuts[key] = min(mouth, limit)
 
 
