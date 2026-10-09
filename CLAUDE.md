@@ -217,7 +217,9 @@ cache, so shade went black). Gotchas: a triangle (A, B, C) faces along `Cross(C-
    with complex-as-simple collision, then creates `/Game/Maps/<area>` with lighting from `Scripts/world_lighting.py`.
 4. Check visually without a headset: `Scripts/screenshot.sh <map> "x,y,z,pitch,yaw;..."` → `Saved/Screenshots/shot_NN.png`
    (map = name under /Game/Maps or a full package path; env `CMDS="cvar 1,..."` adds console commands; first run after
-   material/foliage changes is slow because shaders compile; env `EXTRA="-SpawnCar"` adds game arguments). Look around on the desktop: `MAP=<map> Scripts/run_desktop.sh`.
+   material/foliage changes is slow because shaders compile; env `EXTRA="-SpawnCar"` adds game arguments). A shot can carry console commands after its fifth number, separated by `|`
+   (`"x,y,z,p,y,Weather.SetTime 20 11|Weather.Override Snow=1"`), so one run covers every view and weather variant;
+   each shot waits for shaders and textures, then `SHOT_SETTLE` seconds (2.5). Look around on the desktop: `MAP=<map> Scripts/run_desktop.sh`.
 Lighting is physically based (sun 75 klx, exposure locked at EV100 13 via unbound PostProcessVolume; needs
 `r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange=True`). Free-fly viewer (`-FreeCam`): WASD/QE, Shift = 50 km/h.
 `build_area.py --reuse` reuses the cached OSM/DEM/road/terrain step (`cache.pkl`, saves ~2 min); `--skip-tiles` only
