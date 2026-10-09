@@ -792,20 +792,23 @@ def _detached_or_villa(facts, flags, tag_bits, heritage):
 # ---------------------------------------------------------------------- roof, storeys, orientation
 
 ROOF_PRIORS = {
-    # Shares per class of the roof shapes in Hamburg's LoD2 model (west half of bergedorf_core, x < 0, buildings
+    # The old town classes (Gründerzeit, 1920s, villa, shop houses) are pitched far more often than LoD2 says (street
+    # photos of Bergedorf, and the flat roofs LoD2 reports there are mostly roofs behind a parapet that the street never
+    # sees), so their flat share is cut to what the photos show. The rest are shares per class of the roof shapes in
+    # Hamburg's LoD2 model (west half of bergedorf_core, x < 0, buildings
     # classified without optional tags; the other half is kept for the check in check_lod2.py). Hamburg has many
     # more flat roofs than the typology photos suggest, so the pre-war classes are nudged toward pitched roofs,
     # which is what the street photos show.
-    "gruenderzeit_clinker": [("flat", 50), ("gabled", 28), ("hipped", 18), ("mansard", 4)],
-    "brick_block_1920s": [("flat", 60), ("gabled", 28), ("hipped", 12)],
+    "gruenderzeit_clinker": [("flat", 22), ("gabled", 34), ("hipped", 26), ("mansard", 18)],
+    "brick_block_1920s": [("flat", 28), ("hipped", 42), ("gabled", 30)],
     "postwar_plaster": [("flat", 55), ("gabled", 27), ("hipped", 14), ("skillion", 4)],
     "slab_block": [("flat", 45), ("gabled", 40), ("hipped", 15)],
     "terraced": [("flat", 45), ("gabled", 40), ("hipped", 10), ("skillion", 5)],
     "semidetached": [("gabled", 60), ("flat", 22), ("hipped", 10), ("skillion", 8)],
     "detached_postwar": [("gabled", 49), ("flat", 29), ("hipped", 15), ("skillion", 5), ("pyramidal", 2)],
-    "villa": [("flat", 40), ("gabled", 28), ("hipped", 25), ("skillion", 4), ("mansard", 3)],
+    "villa": [("flat", 8), ("hipped", 45), ("gabled", 25), ("half_hipped", 14), ("mansard", 8)],
     "modern": [("flat", 48), ("gabled", 48), ("skillion", 4)],
-    "commercial_groundfloor": [("flat", 62), ("gabled", 19), ("hipped", 10), ("pyramidal", 4), ("skillion", 5)],
+    "commercial_groundfloor": [("flat", 35), ("gabled", 30), ("hipped", 22), ("mansard", 9), ("pyramidal", 4)],
     "vierlande_farmhouse": [("half_hipped", 50), ("hipped", 35), ("gabled", 15)],
     "shed_garage": [("flat", 79), ("gabled", 11), ("skillion", 7), ("hipped", 3)],
     "industrial_hall": [("flat", 77), ("gabled", 19), ("skillion", 4)],
@@ -841,6 +844,9 @@ FLAT_SHARE_BY_AREA = [(3.5, 0.97), (4.5, 0.90), (5.5, 0.85), (6.5, 0.70), (7.5, 
                       (10.5, 0.80), (11.5, 0.88), (12.5, 0.93)]
 OVERALL_FLAT_SHARE = 0.52
 AREA_EVIDENCE_WEIGHT = 0.6
+#: The old town classes follow the street photos, so the footprint area moves them less.
+TOWN_AREA_EVIDENCE_WEIGHT = 0.25
+TOWN_CLASSES = {"gruenderzeit_clinker", "brick_block_1920s", "villa", "commercial_groundfloor", "halftimbered_town"}
 
 
 def _logit(probability):
@@ -854,7 +860,8 @@ def _flat_roof_probability(facts, class_name):
     class_share = sum(w for name, w in prior if name == "flat") / sum(w for _, w in prior)
     log_area = math.log2(max(facts.area, 8.0))
     area_share = float(np.interp(log_area, [x for x, _ in FLAT_SHARE_BY_AREA], [y for _, y in FLAT_SHARE_BY_AREA]))
-    shift = AREA_EVIDENCE_WEIGHT * (_logit(area_share) - _logit(OVERALL_FLAT_SHARE))
+    weight = TOWN_AREA_EVIDENCE_WEIGHT if class_name in TOWN_CLASSES else AREA_EVIDENCE_WEIGHT
+    shift = weight * (_logit(area_share) - _logit(OVERALL_FLAT_SHARE))
     return 1.0 / (1.0 + math.exp(-(_logit(class_share) + shift)))
 
 

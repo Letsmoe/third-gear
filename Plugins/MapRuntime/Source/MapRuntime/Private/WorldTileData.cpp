@@ -196,6 +196,57 @@ void ReadBuildingTypes(FByteReader& Reader, TArray<FWorldBuilding>& Buildings)
 	}
 }
 
+/** ROOF: skeleton roofs, matched to the buildings by OSM id. */
+void ReadRoofs(FByteReader& Reader, TArray<FWorldBuilding>& Buildings)
+{
+	const uint32 Count = Reader.Get<uint32>();
+	for (uint32 Index = 0; Index < Count && !Reader.HasFailed(); ++Index)
+	{
+		const uint64 OsmId = Reader.Get<uint64>();
+		const uint32 FaceCount = Reader.Get<uint32>();
+		const uint32 CapCount = Reader.Get<uint32>();
+		FWorldBuilding* Target = nullptr;
+		for (FWorldBuilding& Building : Buildings)
+		{
+			if (Building.OsmId == OsmId && Building.RoofFaces.IsEmpty())
+			{
+				Target = &Building;
+				break;
+			}
+		}
+		FWorldBuilding Scratch;
+		FWorldBuilding& Building = Target ? *Target : Scratch;
+		for (uint32 FaceIndex = 0; FaceIndex < FaceCount && !Reader.HasFailed(); ++FaceIndex)
+		{
+			FWorldRoofFace& Face = Building.RoofFaces.AddDefaulted_GetRef();
+			Face.Kind = Reader.Get<uint8>();
+			Reader.Skip(1);
+			const uint16 VertexCount = Reader.Get<uint16>();
+			const uint16 TriangleCount = Reader.Get<uint16>();
+			Reader.Skip(2);
+			for (uint16 Vertex = 0; Vertex < VertexCount && !Reader.HasFailed(); ++Vertex)
+			{
+				FVector3f& Position = Face.Positions.AddDefaulted_GetRef();
+				Position.X = Reader.Get<float>();
+				Position.Y = Reader.Get<float>();
+				Position.Z = Reader.Get<float>();
+				FVector2f& UV = Face.UVs.AddDefaulted_GetRef();
+				UV.X = Reader.Get<float>();
+				UV.Y = Reader.Get<float>();
+			}
+			Reader.GetArray(Face.Indices, int64(TriangleCount) * 3);
+		}
+		for (uint32 CapIndex = 0; CapIndex < CapCount && !Reader.HasFailed(); ++CapIndex)
+		{
+			FWorldRoofCap& Cap = Building.RoofCaps.AddDefaulted_GetRef();
+			float Values[6];
+			Reader.Read(Values, sizeof(Values));
+			Cap.Start = FVector3f(Values[0], Values[1], Values[2]);
+			Cap.End = FVector3f(Values[3], Values[4], Values[5]);
+		}
+	}
+}
+
 void ReadPlants(FByteReader& Reader, TArray<FWorldPlant>& Plants)
 {
 	const uint32 Count = Reader.Get<uint32>();
@@ -247,6 +298,7 @@ bool ReadSection(uint32 Tag, TConstArrayView<uint8> Raw, FWorldTileData& Out)
 	case MakeTag("MARK"): ReadMarkings(Reader, Out.Markings); break;
 	case MakeTag("BLDG"): ReadBuildings(Reader, Out.Buildings); break;
 	case MakeTag("BTYP"): ReadBuildingTypes(Reader, Out.Buildings); break;
+	case MakeTag("ROOF"): ReadRoofs(Reader, Out.Buildings); break;
 	case MakeTag("VEGE"): ReadPlants(Reader, Out.Plants); break;
 	case MakeTag("POIS"): ReadPois(Reader, Out.Pois); break;
 	default: break;

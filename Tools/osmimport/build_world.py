@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bootstrap"))
 import data_root  # noqa: E402
 from build_area import MARKING_STYLE, SURFACE_SECTIONS, find_start  # noqa: E402
-from osmimport import building_types, buildings, canopy, dem, furniture, geo, landcover, osm, parking, paths, roads, terrain, vegetation  # noqa: E402
+from osmimport import building_types, buildings, canopy, roofs, dem, furniture, geo, landcover, osm, parking, paths, roads, terrain, vegetation  # noqa: E402
 from osmimport import worldtile  # noqa: E402
 
 GRID_CELL = 1.0
@@ -351,7 +351,12 @@ def main():
         writer = writers.get(tile_key(area, point.x, point.y))
         if writer is not None:
             write_building(writer, osm_id, tags, footprint, ground)
-            writer.add_building_type(osm_id, typer.classify(index))
+            building_type = typer.classify(index)
+            writer.add_building_type(osm_id, building_type)
+            roof = roofs.roof_for_building(footprint, building_type.class_id, building_types.ROOF_NAMES[building_type.roof_shape],
+                                           building_type.pitch_degrees)
+            if roof is not None:
+                writer.add_roof(osm_id, roof)
     rng = np.random.default_rng(11)
     for plant, z in zip(plants, plant_z):
         writer = writers.get(tile_key(area, plant.x, plant.y))

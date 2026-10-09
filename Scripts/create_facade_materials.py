@@ -179,6 +179,7 @@ def build_master():
     else:
         m = cm.asset_tools.create_asset("M_FacadeMaster", FOLDER, unreal.Material, unreal.MaterialFactoryNew())
     m.set_editor_property("used_with_nanite", True)
+    m.set_editor_property("used_with_instanced_static_meshes", True)  # the kit buildings are instanced meshes
     default_set = "ms:brick_facade_efa35b96"
 
     texcoord = expr(m, unreal.MaterialExpressionTextureCoordinate, -2400, 0)
