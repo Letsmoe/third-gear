@@ -13,7 +13,8 @@ MATERIALS = ("Brick", "Plaster", "Timber", "Frame", "Glass", "Sill", "RoofTile",
              "PowderCoat", "AdPanel", "Timetable", "StopSignFace", "BinSticker", "Litter", "BinBag",
              "GreenhouseGlass", "Foil", "Aluminium",
              "BrandPaint", "BrandLogo", "PriceBoard", "PumpFace", "WashSign", "CanopyLight", "SafetyYellow",
-             "WashBrush", "Asphalt", "Ground", "Water")
+             "WashBrush", "Asphalt", "Ground", "Water",
+             "FacadeGlass", "RoofSequins")
 
 
 def vec_sub(first, second):

@@ -47,6 +47,8 @@ PREVIEW_COLOURS = {
     "Asphalt": (0.12, 0.12, 0.13, 1.0),
     "Ground": (0.30, 0.38, 0.22, 1.0),
     "Water": (0.10, 0.25, 0.32, 1.0),
+    "FacadeGlass": (0.28, 0.38, 0.48, 1.0),
+    "RoofSequins": (0.88, 0.88, 0.86, 1.0),
 }
 TRANSPARENT = ("Glass", "GreenhouseGlass", "Foil")
 
@@ -95,6 +97,9 @@ def get_material(full_name):
     if name == "Beacon":
         shader.inputs["Emission Color"].default_value = colour
         shader.inputs["Emission Strength"].default_value = 4.0
+    if name == "FacadeGlass":
+        shader.inputs["Metallic"].default_value = 0.5
+        shader.inputs["Roughness"].default_value = 0.15
     if name == "Metal":
         shader.inputs["Metallic"].default_value = 0.6
         shader.inputs["Roughness"].default_value = 0.4
