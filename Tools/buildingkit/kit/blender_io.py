@@ -24,6 +24,8 @@ PREVIEW_COLOURS = {
     "PaintRed": (0.65, 0.04, 0.03, 1.0),
     "PaintGreen": (0.12, 0.38, 0.18, 1.0),
     "Beacon": (1.0, 0.05, 0.02, 1.0),
+    "Lattice": (0.30, 0.33, 0.31, 1.0),
+    "Insulator": (0.55, 0.57, 0.60, 1.0),
 }
 
 # Enercon's tower foot: five green bands from dark at the ground to pale, 3 m each (V of the metre UVs is the height).
