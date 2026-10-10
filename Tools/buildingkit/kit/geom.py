@@ -9,7 +9,7 @@ import random
 
 # Material slot names shared by every style.
 MATERIALS = ("Brick", "Plaster", "Timber", "Frame", "Glass", "Sill", "RoofTile", "Thatch", "Metal", "Concrete", "Paint",
-             "PaintRed", "PaintGreen", "Beacon")
+             "PaintRed", "PaintGreen", "Beacon", "Lattice", "Insulator")
 
 
 def vec_sub(first, second):

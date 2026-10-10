@@ -69,11 +69,15 @@ degrees about Z, origin at `(width, thickness + i * 2.0)`. Back wall: rotate 180
 
 ## Structures on OSM nodes
 
-`generate_structures.py` builds the structures that stand on a node instead of a footprint, so far the wind turbines
-of `kit/turbines.py` (#100): the four models in the Bergedorf extract (Senvion MM100, Nordex N117, Enercon E-92, NEG
-Micon NM48), each as `<Model>_Tower`, `<Model>_Nacelle` and `<Model>_Rotor`. It writes the GLBs to `glb/turbines/`,
-the models assembled in a row to `blend/turbines.blend`, and the contact sheet as `renders/turbines_lineup.png` and
-`renders/turbines_heads.png`.
+`generate_structures.py [family ...]` builds the structures that stand on a node instead of a footprint. Each family
+is a module in `kit/` with `build()` for the pieces and `assemblies()` for how its contact sheet shows them. For a
+family it writes the GLBs to `glb/<family>/`, the models assembled in a row to `blend/<family>.blend`, and the contact
+sheet as `renders/<family>_lineup.png` and `renders/<family>_closeups.png`.
+
+### Wind turbines
+
+`kit/turbines.py` (#100) has the four models in the Bergedorf extract (Senvion MM100, Nordex N117, Enercon E-92, NEG
+Micon NM48), each as `<Model>_Tower`, `<Model>_Nacelle` and `<Model>_Rotor`.
 
 The tower's origin is the centre of its foot on the ground, the nacelle's is on the yaw axis at the top flange, and
 the rotor's is the hub centre with the rotor axis along Y, facing -Y. The rotor attaches to the nacelle at
@@ -81,6 +85,16 @@ the rotor's is the hub centre with the rotor axis along Y, facing -Y. The rotor 
 `kit_stats_turbines.json`; it turns clockwise as seen from the front. The new slots are `Paint`, `PaintRed` for the
 blade tip marking, `PaintGreen` for Enercon's tower foot (the band colour follows the height, V of the metre UVs) and
 `Beacon` for the obstruction lights.
+
+### Power pylons
+
+`kit/pylons.py` (#101) has the 110 kV lattice designs Donau (two arm levels) and one-level (one long arm), each as a
+suspension and an anchor variant and each as one piece: `Donau_Suspension`, `Donau_Anchor`, `OneLevel_Suspension`,
+`OneLevel_Anchor`. The origin is the centre of the foot, the line runs along Y and the arms along X. Every conductor
+and the earth wire has a socket in `kit_stats_pylons.json`, where the runtime hangs the catenary: under the
+insulator on suspension pylons, and at the end of the horizontal insulator on each side (`_Back` and `_Ahead`) on
+anchor pylons. The slots are `Lattice` for the steel angles, `Insulator` for the silicone sheds, `Metal` for fittings
+and `Concrete` for the foundations. The conductor stubs on the sheet are only a preview.
 
 ## Props from Hunyuan 3D
 

@@ -596,7 +596,7 @@ def add_roof_equipment(mesh, y, roof_z):
 
 
 # ================================================================================================= kit entry
-def build_turbines():
+def build():
     """All models as pieces <Model>_Tower, <Model>_Nacelle and <Model>_Rotor, and a spec with the sockets the
     runtime and the assembly need."""
     pieces = OrderedDict()
@@ -630,3 +630,44 @@ def tower_clearance(model):
     height_fraction = min(max(tip_world_z, 0.0), model.tower_height) / model.tower_height
     tower_radius = (model.tower_base_diameter + (model.tower_top_diameter - model.tower_base_diameter) * height_fraction) / 2.0
     return -tip_world_y - tower_radius
+
+
+TITLES = {"MM100": "Senvion MM100", "N117": "Nordex N117", "E92": "Enercon E-92", "NM48": "NEG Micon NM48"}
+
+
+def assemblies():
+    """How the contact sheet shows each model: tower, nacelle and rotor (one blade up) at their sockets, a close-up of
+    the head and, for the MM100, of the tower door."""
+    result = []
+    for model in MODELS.values():
+        hub = (0.0, -model.overhang, model.hub_height)
+        closeups = [{
+            "caption": TITLES[model.name],
+            "target": (0.0, hub[1] + model.nacelle_length * 0.35, hub[2] - model.nacelle_height * 0.15),
+            "direction": (-1.0, 0.4, 0.15),
+            "distance": model.nacelle_length * 2.3,
+            "lens": 40.0,
+        }]
+        if model.name == "MM100":
+            closeups.append({
+                "caption": TITLES[model.name] + ", door",
+                "target": (0.0, -2.5, 1.4),
+                "direction": (-4.5, -5.0, 1.0),
+                "distance": 6.8,
+                "lens": 30.0,
+            })
+        result.append({
+            "name": model.name,
+            "title": "%s\nhub %.0f m, rotor %.0f m" % (TITLES[model.name], model.hub_height, model.rotor_diameter),
+            "parts": [
+                (model.name + "_Tower", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), "XYZ"),
+                (model.name + "_Nacelle", (0.0, 0.0, model.tower_height), (0.0, 0.0, 0.0), "XYZ"),
+                # Spin about the rotor's own axis first (Y), then tilt the front end up.
+                (model.name + "_Rotor", hub, (-model.tilt_degrees, 0.0, 0.0), "YXZ"),
+            ],
+            "half_width": model.rotor_radius,
+            "top": model.hub_height + model.rotor_radius,
+            "extras": None,
+            "closeups": closeups,
+        })
+    return result
