@@ -460,8 +460,33 @@ def build_pylon(design):
     return mesh, sockets
 
 
+# The conductor piece: a straight tube of one metre along X that the game stretches from socket to socket and sags
+# in its material (u along the tube is the position on the span, 0 to 1).
+WIRE_RADIUS = 0.016
+WIRE_SEGMENTS = 32
+WIRE_SIDES = 6
+
+
+def build_wire():
+    """The Wire piece: a 1 m tube along +X from the origin, u = position along it."""
+    mesh = Mesh()
+    for segment in range(WIRE_SEGMENTS):
+        start, end = segment / WIRE_SEGMENTS, (segment + 1) / WIRE_SEGMENTS
+        for side in range(WIRE_SIDES):
+            angles = [2.0 * math.pi * (side + offset) / WIRE_SIDES for offset in (0, 1)]
+            ring = [(math.cos(angle) * WIRE_RADIUS, math.sin(angle) * WIRE_RADIUS) for angle in angles]
+            points = [(start, ring[0][0], ring[0][1]), (end, ring[0][0], ring[0][1]), (end, ring[1][0], ring[1][1]),
+                      (start, ring[1][0], ring[1][1])]
+            middle_angle = (angles[0] + angles[1]) / 2.0
+            uvs = [(start, side / WIRE_SIDES), (end, side / WIRE_SIDES), (end, (side + 1) / WIRE_SIDES),
+                   (start, (side + 1) / WIRE_SIDES)]
+            mesh.add_face(points, "Conductor", smooth=True, uvs=uvs,
+                          desired_normal=(0.0, math.cos(middle_angle), math.sin(middle_angle)))
+    return mesh
+
+
 def build():
-    """Every design as one piece named after it, and the spec with its sockets."""
+    """Every design as one piece named after it, the conductor piece, and the spec with the sockets."""
     pieces = OrderedDict()
     spec = {}
     for design in DESIGNS.values():
@@ -469,6 +494,7 @@ def build():
         pieces[design.name] = mesh
         spec[design.name] = {"height": design.peak_height + EARTH_WIRE_CLAMP, "anchor": design.anchor,
                              "sockets": sockets}
+    pieces["Wire"] = build_wire()
     return pieces, spec
 
 

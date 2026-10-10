@@ -15,7 +15,7 @@ constexpr uint16_t HoleValue = 0xFFFF;
 constexpr double MinimumSurfaceArea = 0.05;
 constexpr double MinimumMarkingLength = 0.3;
 /** The sections in file order after NAME and GRID; each holds a u32 record count and the records. */
-const char* const RecordSections[] = {"SURF", "MARK", "BLDG", "BTYP", "ROOF", "VEGE", "POIS"};
+const char* const RecordSections[] = {"SURF", "MARK", "BLDG", "BTYP", "ROOF", "VEGE", "POIS", "STRU"};
 
 /** Heights as centimetres above the base, clamped to the u16 range below the hole value. */
 uint16_t ToCentimetres(float Height, float Base)

@@ -286,6 +286,32 @@ void ReadPois(FByteReader& Reader, TArray<FWorldPoi>& Pois)
 	}
 }
 
+void ReadStructures(FByteReader& Reader, TArray<FWorldStructure>& Structures)
+{
+	const uint32 Count = Reader.Get<uint32>();
+	for (uint32 Index = 0; Index < Count && !Reader.HasFailed(); ++Index)
+	{
+		FWorldStructure& Structure = Structures.AddDefaulted_GetRef();
+		Structure.Mesh = Reader.Get<uint16>();
+		const uint16 Variant = Reader.Get<uint16>();
+		Structure.Variant = Variant == FWorldPoi::NoVariant ? INDEX_NONE : int32(Variant);
+		Structure.Kind = static_cast<EWorldStructureKind>(Reader.Get<uint8>());
+		Structure.Flags = Reader.Get<uint8>();
+		Reader.Skip(2);
+		Structure.Position.X = Reader.Get<float>();
+		Structure.Position.Y = Reader.Get<float>();
+		Structure.Position.Z = Reader.Get<float>();
+		Structure.Rotation.Yaw = Reader.Get<float>();
+		Structure.Rotation.Pitch = Reader.Get<float>();
+		Structure.Rotation.Roll = Reader.Get<float>();
+		Structure.Scale.X = Reader.Get<float>();
+		Structure.Scale.Y = Reader.Get<float>();
+		Structure.Scale.Z = Reader.Get<float>();
+		Structure.Param0 = Reader.Get<float>();
+		Structure.Param1 = Reader.Get<float>();
+	}
+}
+
 /** The flag of the section with this tag; sections this reader doesn't know have none. */
 EWorldTileSections SectionFlag(uint32 Tag)
 {
@@ -300,6 +326,7 @@ EWorldTileSections SectionFlag(uint32 Tag)
 	case MakeTag("ROOF"): return EWorldTileSections::Roofs;
 	case MakeTag("VEGE"): return EWorldTileSections::Plants;
 	case MakeTag("POIS"): return EWorldTileSections::Pois;
+	case MakeTag("STRU"): return EWorldTileSections::Structures;
 	default: return EWorldTileSections::None;
 	}
 }
@@ -319,6 +346,7 @@ bool ReadSection(uint32 Tag, TConstArrayView<uint8> Raw, FWorldTileData& Out)
 	case MakeTag("ROOF"): ReadRoofs(Reader, Out.Buildings); break;
 	case MakeTag("VEGE"): ReadPlants(Reader, Out.Plants); break;
 	case MakeTag("POIS"): ReadPois(Reader, Out.Pois); break;
+	case MakeTag("STRU"): ReadStructures(Reader, Out.Structures); break;
 	default: break;
 	}
 	return !Reader.HasFailed();

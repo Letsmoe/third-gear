@@ -297,4 +297,67 @@ FOsmData ReadOsm(const std::string& PbfPath, const FLonLatBox& Box)
 	Reader.close();
 	return Data;
 }
+
+namespace
+{
+/** Collects towers, turbines and power lines (ReadFarStructureSources). */
+class FFarStructureHandler : public osmium::handler::Handler
+{
+public:
+	FFarStructureHandler(FFarStructureSources& InSources, const FLonLatBox& InBox) : Sources(InSources), Box(InBox) {}
+
+	void node(const osmium::Node& Node)
+	{
+		if (Node.tags().empty() || !Node.location().valid() || !Box.Contains(Node.location().lon(), Node.location().lat()))
+		{
+			return;
+		}
+		const bool bTower = HasValue(Node.tags(), "power", "tower");
+		const bool bTurbine = HasValue(Node.tags(), "power", "generator") && HasValue(Node.tags(), "generator:source", "wind");
+		if (!bTower && !bTurbine)
+		{
+			return;
+		}
+		FOsmPoint Point{Node.id(), CopyTags(Node.tags()), LonLatToWorld(Node.location().lon(), Node.location().lat())};
+		if (bTower)
+		{
+			Sources.Towers.push_back(std::move(Point));
+		}
+		else
+		{
+			Sources.WindTurbines.push_back(std::move(Point));
+		}
+	}
+
+	void way(const osmium::Way& Way)
+	{
+		if (!HasValue(Way.tags(), "power", "line") || Way.nodes().size() < 2)
+		{
+			return;
+		}
+		FOsmWay& Line = Sources.PowerLines.emplace_back();
+		Line.Id = Way.id();
+		Line.Tags = CopyTags(Way.tags());
+		for (const osmium::NodeRef& Node : Way.nodes())
+		{
+			Line.NodeIds.push_back(Node.ref());
+		}
+	}
+
+private:
+	FFarStructureSources& Sources;
+	FLonLatBox Box;
+};
+}
+
+FFarStructureSources ReadFarStructureSources(const std::string& PbfPath, const FLonLatBox& Box)
+{
+	FFarStructureSources Sources;
+	FFarStructureHandler Handler(Sources, Box);
+	osmium::io::Reader Reader(osmium::io::File(PbfPath), osmium::osm_entity_bits::node | osmium::osm_entity_bits::way,
+							  osmium::io::read_meta::no);
+	osmium::apply(Reader, Handler);
+	Reader.close();
+	return Sources;
+}
 }

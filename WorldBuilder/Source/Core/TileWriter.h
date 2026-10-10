@@ -76,7 +76,7 @@ public:
 
 	void AddPoi(const FPoi& Poi);
 
-	/** Appends a ready-made record to a section (BLDG, BTYP, ROOF, VEGE), for the parts that pack their own. */
+	/** Appends a ready-made record to a section (BLDG, BTYP, ROOF, VEGE, STRU), for the parts that pack their own. */
 	void AddRecord(const char* Tag, std::vector<uint8_t> Record);
 
 	/** Writes the file; throws std::runtime_error when it can't. */

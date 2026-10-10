@@ -44,6 +44,12 @@ Sections:
         direction the car faces, param0 roll in degrees (Unreal sign: positive lowers the right side), param1 pitch in
         degrees (positive nose up). Older readers skip the kind.
         Signal junctions, phases and the speed limit ways are in traffic.json next to world.json.
+  STRU  building kit structure pieces (WorldBuilder only, Structures.h), u32 count; per piece (52 bytes): u16 mesh
+        name (<family>_<piece>), u16 variant name or 0xFFFF, u8 kind (0 static, 1 turbine rotor, 2 conductor), u8 flags,
+        u16 pad, f32 x, y (relative to the file's corner), z (absolute), yaw, pitch, roll (degrees, Unreal's rotator),
+        scale x, y, z, param0, param1. Rotor: roll is the shaft tilt, param0 rpm, param1 start angle. Conductor: from
+        the position along yaw and pitch, scale x metres long, param0 sag in metres. The region's tall structures
+        (turbines, pylons, landmarks) are in structures.tgtile next to world.json, a file of only NAME and STRU.
 """
 import struct
 import zlib

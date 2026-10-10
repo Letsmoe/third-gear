@@ -13,7 +13,9 @@
 
 #include "BuildingRecords.h"
 #include "BuildingTiles.h"
+#include "FarStructures.h"
 #include "HeightGrid.h"
+#include "KitSpecs.h"
 #include "LandCover.h"
 #include "Lanes.h"
 #include "OsmReader.h"
@@ -50,6 +52,8 @@ constexpr double OsmMargin = 150.0;
 constexpr double TerrainMargin = 100.0;
 /** Paths sit this far above the terrain (build_world.py's PATH_LIFT). */
 constexpr float PathLift = 0.04f;
+/** Tall structures (turbines, pylons, landmarks) are placed this far around the region, metres. */
+constexpr double FarStructureReach = 10000.0;
 
 /** A marking kind's style id in the MARK section, painted width and dash (build_world.py's MARKING_STYLES). */
 struct FMarkingStyle
@@ -520,9 +524,10 @@ int TileIndexOf(const FRegion& Region, double X, double Y)
 	return Row * Columns + Column;
 }
 
-/** The furniture and parked cars by the tile they stand in. */
+/** The furniture, parked cars and buildings by the tile they stand in; buildings inside a landmark are left out. */
 std::vector<FTileContents> SortIntoTiles(const FRegion& Region, const FFurniture& Furniture,
-										 const std::vector<FParkedCar>& Cars, const std::vector<FBuilding>& Buildings)
+										 const std::vector<FParkedCar>& Cars, const std::vector<FBuilding>& Buildings,
+										 const FPolygons& Landmarks)
 {
 	std::vector<FTileContents> Contents(Region.Tiles().size());
 	auto Place = [&](double X, double Y, auto Member, const auto* Item) {
@@ -551,6 +556,10 @@ std::vector<FTileContents> SortIntoTiles(const FRegion& Region, const FFurniture
 	for (const FBuilding& Building : Buildings)
 	{
 		const FWorldPoint& Point = Building.RepresentativePoint;
+		if (!Landmarks.empty() && Contains(Landmarks, Point.X, Point.Y))
+		{
+			continue;
+		}
 		Place(Point.X, Point.Y, &FTileContents::Buildings, &Building);
 	}
 	return Contents;
@@ -624,6 +633,29 @@ void AddBars(FRegionInputs& Inputs, const FFurniture& Furniture, FRoadSurfaces& 
 		Inputs.BarIndex.Insert(Box, static_cast<int>(Index));
 	}
 }
+
+/** structures.tgtile: the region's tall structures, placed once for all of it (FarStructures.h). */
+void WriteFarStructures(const FRegion& Region, const std::filesystem::path& OsmPath, const FKitSpecs& Specs,
+						const FTerrainGrid& Terrain, const std::filesystem::path& Path)
+{
+	const FFarStructureSources Sources = ReadFarStructureSources(OsmPath.string(), Region.LonLatBounds(FarStructureReach));
+	const std::vector<FStructurePlacement> Placements = BuildFarStructures(
+		Sources, Specs, [&](double X, double Y) { return Terrain.Sample(X, Y); });
+	const FBox Reach{Region.XMin - FarStructureReach, Region.YMin - FarStructureReach, Region.XMax + FarStructureReach,
+					 Region.YMax + FarStructureReach};
+	FTileWriter Writer(Reach);
+	for (const FStructurePlacement& Placement : Placements)
+	{
+		if (Placement.X >= Reach.X0 && Placement.X <= Reach.X1 && Placement.Y >= Reach.Y0 && Placement.Y <= Reach.Y1)
+		{
+			WriteStructure(Writer, Placement);
+		}
+	}
+	Writer.Write(Path.string());
+	Log("far structures: " + std::to_string(Sources.WindTurbines.size()) + " turbines, " + std::to_string(Sources.Towers.size())
+		+ " pylons on " + std::to_string(Sources.PowerLines.size()) + " lines, " + std::to_string(Placements.size())
+		+ " placements");
+}
 }
 
 std::string DefaultDataRoot()
@@ -673,6 +705,8 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 		+ std::to_string(Streets.Markings.size()) + " painted lines");
 	FRoadSurfaces Roads(Streets, Terrain, Buildings, Threads);
 	Inputs.Roads = &Roads;
+	const FKitSpecs KitSpecs((DataRoot / "building_kit").string());
+	const FPolygons Landmarks = LandmarkFootprints(KitSpecs);
 	const FBuildingIndex BuildingIndex(Osm.Buildings);
 	const FRoadGraph Graph(*Streets.GroundWays, Streets.Widths, BuildingIndex);
 	const FFurniture Furniture = BuildFurniture(Osm, Graph, Roads.Ground(), Buildings);
@@ -680,7 +714,7 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	AddBars(Inputs, Furniture, Roads);
 	const std::vector<FBuilding> KitBuildings = KitBuildingsTask.get();
 	Log("buildings: " + std::to_string(KitBuildings.size()) + " footprints");
-	Inputs.Contents = SortIntoTiles(Region, Furniture, Cars, KitBuildings);
+	Inputs.Contents = SortIntoTiles(Region, Furniture, Cars, KitBuildings, Landmarks);
 	WriteTrafficJson((OutputDirectory / "traffic.json").string(), Furniture.Network);
 	FLaneGraph Lanes = BuildLaneGraph(Streets, Graph, Furniture, Inputs.Extent);
 	std::vector<double> LaneHeights;
@@ -708,6 +742,8 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	ApplyLaneHeights(Lanes, LaneHeights);
 	WriteLanesJson((OutputDirectory / "lanes.json").string(), Lanes);
 	Log("wrote lanes.json");
+	WriteFarStructures(Region, Geodata / "osm" / (Region.OsmExtract + ".osm.pbf"), KitSpecs, Terrain,
+					   OutputDirectory / "structures.tgtile");
 	WriteWorldJson(Region, Tiles, FindStart(Streets, Terrain, Roads.Ground()), OutputDirectory / "world.json");
 	Log("wrote " + std::to_string(Tiles.size()) + " tiles to " + OutputDirectory.string() + " on "
 		+ std::to_string(Threads) + " threads");

@@ -102,6 +102,11 @@ float phase = fmod(Time, 4.0);
 float on = Blinks > 0.5 ? (phase < 1.0 || (phase >= 1.5 && phase < 2.5) ? 1.0 : 0.0) : 1.0;
 return Tint * lerp(Day, NightLuminance, saturate(Night)) * on;
 """
+# A conductor sags on a parabola below its straight chord: u runs 0 to 1 along the span, the sag in metres comes
+# from the instance (custom data 0), set per span by the game (WorldStructures.cpp).
+WIRE_SAG_HLSL = "return float3(0.0, 0.0, -100.0 * Sag * 4.0 * UV.x * (1.0 - UV.x));"
+# How far below its chord the wire mesh may reach, cm, so the bounds cover the deepest sag.
+WIRE_SAG_BOUNDS_CM = 3000.0
 # The height on the tower is 1 - V (V of the kit's metre UVs is the height, flipped by the FBX import).
 BANDS_HLSL = """
 float height = 1.0 - UV.y;
@@ -258,6 +263,27 @@ def build_bands_material():
     return finish(material)
 
 
+def build_wire_material():
+    """M_StructureWire: weathered aluminium conductor, sagged by the world position offset."""
+    material = fresh_material("M_StructureWire")
+    material.set_editor_property("used_with_nanite", False)
+    uv = expr(material, unreal.MaterialExpressionTextureCoordinate, -700, 200)
+    sag = expr(material, unreal.MaterialExpressionPerInstanceCustomData, -700, 300, data_index=0, const_default_value=0.0)
+    custom = expr(material, unreal.MaterialExpressionCustom, -400, 250, code=WIRE_SAG_HLSL,
+                  output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3, description="Sag",
+                  inputs=[custom_input("UV"), custom_input("Sag")])
+    link(uv, "", custom, "UV")
+    link(sag, "", custom, "Sag")
+    colour = expr(material, unreal.MaterialExpressionConstant3Vector, -400, 0, constant=linear((0.42, 0.43, 0.44)))
+    mel.connect_material_property(colour, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    mel.connect_material_property(expr(material, unreal.MaterialExpressionConstant, -400, 100, r=0.5), "",
+                                  unreal.MaterialProperty.MP_ROUGHNESS)
+    mel.connect_material_property(expr(material, unreal.MaterialExpressionConstant, -400, 150, r=0.8), "",
+                                  unreal.MaterialProperty.MP_METALLIC)
+    mel.connect_material_property(custom, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
+    return finish(material)
+
+
 def import_posters():
     """Every poster image as T_<name>: sRGB, clamped, streamed."""
     tasks = []
@@ -304,6 +330,7 @@ def create_materials():
     light_master = build_light_master()
     result = {slot: unreal.load_asset(path) for slot, path in SHARED.items()}
     result["PaintGreen"] = build_bands_material()
+    result["Conductor"] = build_wire_material()
     for slot, (srgb, roughness, metallic) in SOLIDS.items():
         result[slot] = solid_instance(f"MI_Struct_{slot}", solid_master, srgb, roughness, metallic)
     for brand in BRANDS:
@@ -362,6 +389,18 @@ def material_for(family, slot, materials):
     return materials.get(slot)
 
 
+def prepare_wire(mesh):
+    """The conductor: no Nanite (it is sagged by the world position offset), no collision, bounds down to the sag."""
+    settings = mesh.get_editor_property("nanite_settings")
+    settings.enabled = False
+    mesh.set_editor_property("nanite_settings", settings)
+    mesh.set_editor_property("negative_bounds_extension", unreal.Vector(0.0, 0.0, WIRE_SAG_BOUNDS_CM))
+    body_setup = mesh.get_editor_property("body_setup")
+    body_setup.set_editor_property("collision_trace_flag", unreal.CollisionTraceFlag.CTF_USE_SIMPLE_AS_COMPLEX)
+    mesh.set_editor_property("body_setup", body_setup)
+    eal.save_loaded_asset(mesh)
+
+
 def assign_materials(materials):
     """Fills every slot by its name, collides with the mesh itself, and turns on Nanite unless a slot is see-through."""
     for path in sorted(eal.list_assets(f"{FOLDER}/Meshes", recursive=True, include_folder=False)):
@@ -378,6 +417,9 @@ def assign_materials(materials):
                 continue
             mesh.set_material(index, material)
             see_through = see_through or (name in GLAZING and family != "landmarks")
+        if mesh.get_name() == "SM_pylons_Wire":
+            prepare_wire(mesh)
+            continue
         settings = mesh.get_editor_property("nanite_settings")
         settings.enabled = not see_through
         mesh.set_editor_property("nanite_settings", settings)

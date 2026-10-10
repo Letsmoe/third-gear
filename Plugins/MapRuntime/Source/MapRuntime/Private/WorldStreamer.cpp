@@ -26,6 +26,7 @@
 #include "WorldFurniture.h"
 #include "WorldKitBuildings.h"
 #include "WorldSnow.h"
+#include "WorldStructuresActor.h"
 #include "WorldTileActor.h"
 #include "WorldTileData.h"
 #include "WorldTileMesher.h"
@@ -811,6 +812,22 @@ void AWorldStreamer::LoadAroundBlocking(const FVector& Location)
 		FPlatformTime::Seconds() - StartTime);
 }
 
+void AWorldStreamer::SpawnTallStructures()
+{
+	const FString Path = FPaths::Combine(WorldDir, TEXT("structures.tgtile"));
+	if (FParse::Param(FCommandLine::Get(), TEXT("NoStructures")) || !FPaths::FileExists(Path))
+	{
+		return;
+	}
+	FActorSpawnParameters Parameters;
+	Parameters.Owner = this;
+	AWorldStructuresActor* Structures = GetWorld()->SpawnActor<AWorldStructuresActor>(Parameters);
+	if (Structures)
+	{
+		Structures->Load(Path);
+	}
+}
+
 void AWorldStreamer::BeginPlay()
 {
 	Super::BeginPlay();
@@ -819,6 +836,7 @@ void AWorldStreamer::BeginPlay()
 		return;
 	}
 	PrepareAssets();
+	SpawnTallStructures();
 	FVector Location;
 	FTransform StartTransform;
 	if (!GetViewerLocation(Location) && GetStartTransform(StartTransform))
