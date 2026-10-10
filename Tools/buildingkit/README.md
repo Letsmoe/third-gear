@@ -140,13 +140,17 @@ their ground, water and approach roads (`Asphalt`, `Ground` and `Water` are shee
 
 ### Landmarks
 
-`kit/landmarks.py` (#111) builds landmarks from measured data instead of kit pieces. The Elbphilharmonie takes its
-footprint from the LoD2 model and its wave roof from the 2020 bDOM, both read from the archives in
-`<data root>/downloads` (through `unzip`, since Python's zipfile can't read their compression). The brick base runs up
-to the plaza at 37 m above sea level, the glass superstructure with its 5 by 3.5 m panel grid up to the measured roof,
-and the arch over the plaza opens the south facade. The origin is the middle of the footprint on the quay (8.3 m above
-sea level, x east, y north); its UTM position is in `kit_stats_landmarks.json`. `FacadeGlass` and `RoofSequins` are its
-own slots.
+`kit/landmarks.py` (#111) builds landmarks that get their own model. The rule: footprint and heights from the Hamburg
+LoD2 model, the shapes LoD2 simplifies measured once in the bDOM, everything else modelled by hand from photos. The
+Elbphilharmonie reads its footprint from the LoD2 archive in `<data root>/downloads` (through `unzip`, since Python's
+zipfile can't read its compression). Its wave roof is hand-modelled: the sharp points along each facade's roof edge
+and the low points between them are constants, measured in the bDOM and checked against photos; arcs hang between
+the points, and the sheets between the facades follow straight creases from each south point to its north partner.
+The brick base has real openings (windows, slots, doors and the Kaistudio window set into the wall), the glass carries
+horseshoe balconies and eye-shaped slits, and two arches cut into it above the plaza. The `FacadeGlass` UVs count
+facade elements (5 by 3.5 m); `posters/draw_landmarks.py` draws the element texture for the sheet. The origin is the
+middle of the footprint on the quay (8.3 m above sea level, x east, y north); its UTM position is in
+`kit_stats_landmarks.json`.
 
 ### Greenhouses
 

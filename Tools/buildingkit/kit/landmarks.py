@@ -1,40 +1,33 @@
-"""Landmarks (#111): buildings that get a model of their own, built from measured data rather than from kit pieces.
+"""Landmarks (#111): buildings that get a model of their own instead of kit pieces.
 
-The Elbphilharmonie comes from two Hamburg open data sets in the data root: the footprint from the LoD2 model
-(downloads/lod2_hamburg, where the building is a plain prism) and the wave roof from the 2020 bDOM, the 1 m surface
-model (downloads/bdom_hamburg). Heights of the brick base and the plaza come from the German Wikipedia article.
+The rule for a landmark: the footprint and heights come from the Hamburg LoD2 model, the shapes LoD2 simplifies are
+measured in the bDOM (the 1 m surface model), and everything else is modelled by hand from photos.
+
+The Elbphilharmonie reads its footprint from the LoD2 archive in the data root (downloads/lod2_hamburg). Its wave roof
+is modelled by hand: the points along each facade's roof edge and the low points between them were measured once in
+the 2020 bDOM and checked against photos, and are constants here. Heights of the brick base and the plaza come from
+the German Wikipedia article.
 
 Frame: metres, Z up, x east and y north, the origin at the middle of the footprint on the quay (8.3 m above sea
 level). The spec records the UTM 32N position and the sea level height of the origin, so the runtime can place it.
 """
 
-import io
 import math
 import os
+import random
 import re
 import subprocess
 from collections import OrderedDict
-
-import numpy
 
 from .geom import Mesh
 
 DATA_ROOT = os.environ.get("THIRD_GEAR_DATA", "/mnt/storage/third-gear")
 LOD2_ZIP = os.path.join(DATA_ROOT, "downloads", "lod2_hamburg", "LoD2-DE_HH.zip")
-BDOM_ZIP = os.path.join(DATA_ROOT, "downloads", "bdom_hamburg", "dom1_xyz_hh_2020.zip")
-TILE = (565000, 5932000)  # south-west corner of the 1 km tile that holds the building
 QUAY_LEVEL = 8.3  # sea level height of the quay around the building, measured in the bDOM
 PLAZA_LEVEL = 37.0  # the plaza on top of the Kaispeicher, above sea level
-PLAZA_CLEAR = 3.5  # from the plaza floor to the underside of the glass superstructure, estimated from photos
+PLAZA_CLEAR = 4.0  # from the plaza floor to the underside of the glass superstructure, estimated from photos
 PLAZA_SETBACK = 3.0  # how far the plaza's glazing stands back from the facade
 GLASS_PANEL = (5.0, 3.5)  # width and height of one facade element
-ROOF_SAMPLE_INSET = 3.0  # roof heights are read this far inside the edge, where the bDOM is not mixed with the quay
-# The arch over the plaza on the south facade: position along the facade from the west, half width and rise above
-# the plaza floor, from the photo.
-ARCH = (0.67, 7.0, 7.5)
-# Dark recessed slots between the brick blocks of the Kaispeicher, as fractions along the long facades from the west.
-BRICK_SLOTS = (0.32, 0.53, 0.71, 0.89)
-
 
 # ================================================================================================= measured data
 def read_zip_member(archive, member):
@@ -74,26 +67,6 @@ def corners_of(points):
     return corners
 
 
-def read_surface():
-    """The bDOM tile as a 1000 by 1000 grid of sea level heights, row = metres north of the tile corner, smoothed over
-    3 by 3 cells against single-cell noise."""
-    data = numpy.loadtxt(io.BytesIO(read_zip_member(BDOM_ZIP, "dom1_32_565_5932_1_hh.xyz")))
-    grid = numpy.full((1000, 1000), numpy.nan)
-    grid[(data[:, 1] - TILE[1]).astype(int), (data[:, 0] - TILE[0]).astype(int)] = data[:, 2]
-    padded = numpy.pad(grid, 1, mode="edge")
-    stack = [padded[1 + dy:1001 + dy, 1 + dx:1001 + dx] for dy in (-1, 0, 1) for dx in (-1, 0, 1)]
-    return numpy.nanmean(numpy.stack(stack), axis=0)
-
-
-def surface_height(surface, x, y):
-    """Bilinear height of the surface grid at a point in tile metres."""
-    column, row = int(math.floor(x)), int(math.floor(y))
-    fraction_x, fraction_y = x - column, y - row
-    lower = surface[row, column] * (1 - fraction_x) + surface[row, column + 1] * fraction_x
-    upper = surface[row + 1, column] * (1 - fraction_x) + surface[row + 1, column + 1] * fraction_x
-    return lower * (1 - fraction_y) + upper * fraction_y
-
-
 # ================================================================================================= the wedge
 class Wedge:
     """The four-cornered footprint as a bilinear patch: u runs from the narrow west edge to the wide east edge, v from
@@ -128,49 +101,146 @@ class Wedge:
         """Width from the south to the north facade at u."""
         return math.dist(self.point(u, 0.0), self.point(u, 1.0))
 
-    def inset_point(self, u, v, inset):
-        """The point at (u, v) moved inward by inset metres, for reading the roof clear of the facade edge."""
-        u_margin = inset / self.length()
-        v_margin = inset / self.width(u)
-        return self.point(min(max(u, u_margin), 1 - u_margin), min(max(v, v_margin), 1 - v_margin))
-
-    def ring(self, u_steps, v_steps):
-        """(u, v) around the outline counter-clockwise from the south-west corner: south, east, north, west facade."""
-        ring = [(step / u_steps, 0.0) for step in range(u_steps)]
-        ring += [(1.0, step / v_steps) for step in range(v_steps)]
-        ring += [(1.0 - step / u_steps, 1.0) for step in range(u_steps)]
-        ring += [(0.0, 1.0 - step / v_steps) for step in range(v_steps)]
-        return ring
 
 
-class Roof:
-    """The measured roof on the wedge's grid of u_steps by v_steps cells: heights above the quay, read inside the
-    facade and smoothed, so the crests along the facades run as clean curves instead of following the bDOM's noise."""
+class EdgeProfile:
+    """The roof edge along one facade: sharp points at (fraction along the facade, height above the quay), joined by
+    arcs that hang down to the given low point between each pair."""
 
-    def __init__(self, wedge, surface, u_steps, v_steps, smoothing_passes=3):
-        self.u_steps = u_steps
-        self.v_steps = v_steps
-        heights = numpy.empty((u_steps + 1, v_steps + 1))
-        for i in range(u_steps + 1):
-            for j in range(v_steps + 1):
-                x, y = wedge.inset_point(i / u_steps, j / v_steps, ROOF_SAMPLE_INSET)
-                tile_x = x + wedge.origin_utm[0] - TILE[0]
-                tile_y = y + wedge.origin_utm[1] - TILE[1]
-                heights[i, j] = surface_height(surface, tile_x, tile_y) - QUAY_LEVEL
-        for _ in range(smoothing_passes):
-            padded = numpy.pad(heights, 1, mode="edge")
-            heights = sum(padded[1 + di:u_steps + 2 + di, 1 + dj:v_steps + 2 + dj]
-                          for di in (-1, 0, 1) for dj in (-1, 0, 1)) / 9.0
-        self.heights = heights
+    def __init__(self, points, lows):
+        self.points = points
+        self.lows = lows
+
+    def height(self, fraction):
+        """Height of the edge at a fraction along the facade."""
+        for (start, start_height), (end, end_height), low in zip(self.points, self.points[1:], self.lows):
+            if fraction > end and end < 1.0:
+                continue
+            t = min(max((fraction - start) / (end - start), 0.0), 1.0)
+            straight = start_height + (end_height - start_height) * t
+            sag = max(0.0, (start_height + end_height) / 2.0 - low)
+            # The power below one steepens the arc toward its points, so neighbouring arcs meet in a sharp crest.
+            return straight - sag * math.sin(math.pi * t) ** 0.7
+        return self.points[-1][1]
+
+
+# Measured in the bDOM along each facade, sharpened from photos. South and north run from west to east (fraction = u),
+# east and west from south to north (fraction = v).
+SOUTH_EDGE = EdgeProfile([(0.0, 100.0), (0.33, 92.0), (0.74, 83.0), (1.0, 74.0)], [88.0, 79.0, 70.0])
+NORTH_EDGE = EdgeProfile([(0.0, 96.0), (0.28, 93.0), (0.73, 81.0), (1.0, 77.0)], [88.0, 77.0, 74.0])
+EAST_EDGE = EdgeProfile([(0.0, 74.0), (0.52, 80.0), (1.0, 77.0)], [73.0, 74.0])
+WEST_EDGE = EdgeProfile([(0.0, 100.0), (1.0, 96.0)], [93.0])
+# Glazed openings cut into the roof, from the bDOM: centre (u, v), size along the length and across, depth.
+ROOF_OPENINGS = [(0.33, 0.57, 4.0, 11.0, 2.5), (0.83, 0.54, 5.5, 19.0, 2.5)]
+
+
+class HandRoof:
+    """The wave roof as sheets spanned between the four edge profiles. Each point on the south edge is paired with
+    one on the north edge, and the crease between them runs straight across the roof; the mesh follows the creases,
+    so they stay sharp."""
+
+    def __init__(self, wedge, row_spacing=1.0, column_spacing=1.0):
+        self.wedge = wedge
+        self.south_creases = [fraction for fraction, _ in SOUTH_EDGE.points]
+        self.north_creases = [fraction for fraction, _ in NORTH_EDGE.points]
+        rows = max(4, round(min(wedge.width(0.0), wedge.width(1.0)) / row_spacing))
+        cusp_rows = [fraction for fraction, _ in EAST_EDGE.points + WEST_EDGE.points]
+        self.rows = sorted(set([row / rows for row in range(rows + 1)] + cusp_rows))
+        self.columns = []
+        for index in range(len(self.south_creases) - 1):
+            share = (self.south_creases[index + 1] - self.south_creases[index]
+                     + self.north_creases[index + 1] - self.north_creases[index]) / 2.0
+            self.columns.append(max(3, round(share * wedge.length() / column_spacing)))
+
+    def creases_at(self, v):
+        """u of each crease where it crosses the row at v."""
+        return [(1.0 - v) * south + v * north for south, north in zip(self.south_creases, self.north_creases)]
 
     def height(self, u, v):
-        """Roof height above the quay at a grid node (u, v)."""
-        return float(self.heights[round(u * self.u_steps), round(v * self.v_steps)])
+        """Roof height above the quay at (u, v): the south and north edges blended across along the creases, with
+        the west and east edges' differences blended in along the length (a Coons patch), less any opening."""
+        creases = self.creases_at(v)
+        index = 0
+        while index < len(creases) - 2 and u > creases[index + 1]:
+            index += 1
+        t = (u - creases[index]) / (creases[index + 1] - creases[index])
+        south_u = self.south_creases[index] + t * (self.south_creases[index + 1] - self.south_creases[index])
+        north_u = self.north_creases[index] + t * (self.north_creases[index + 1] - self.north_creases[index])
+        across = (1.0 - v) * SOUTH_EDGE.height(south_u) + v * NORTH_EDGE.height(north_u)
+        west_difference = WEST_EDGE.height(v) - ((1.0 - v) * SOUTH_EDGE.height(0.0) + v * NORTH_EDGE.height(0.0))
+        east_difference = EAST_EDGE.height(v) - ((1.0 - v) * SOUTH_EDGE.height(1.0) + v * NORTH_EDGE.height(1.0))
+        height = across + (1.0 - u) * west_difference + u * east_difference
+        opening = self.opening_at(u, v)
+        if opening is not None:
+            height -= opening[4]
+        return height
+
+    def opening_at(self, u, v):
+        """The roof opening that contains (u, v), if any."""
+        for opening in ROOF_OPENINGS:
+            centre_u, centre_v, size_u, size_v, _depth = opening
+            along = abs(u - centre_u) * self.wedge.length()
+            across = abs(v - centre_v) * self.wedge.width(u)
+            if along < size_u / 2.0 and across < size_v / 2.0:
+                return opening
+        return None
+
+    def node_grid(self):
+        """(u, v) of every mesh node, row by row from the south edge, columns placed between the creases."""
+        grid = []
+        for v in self.rows:
+            creases = self.creases_at(v)
+            row = []
+            for index, count in enumerate(self.columns):
+                start, end = creases[index], creases[index + 1]
+                steps = range(count) if index < len(self.columns) - 1 else range(count + 1)
+                row += [(start + (end - start) * step / count, v) for step in steps]
+            grid.append(row)
+        return grid
+
+    def outline(self):
+        """The roof edge counter-clockwise from the south-west corner, as (u, v, facade index), on the mesh's nodes:
+        south, east, north and west facade."""
+        grid = self.node_grid()
+        outline = [(u, v, 0) for u, v in grid[0][:-1]]
+        outline += [(1.0, v, 1) for v in self.rows[:-1]]
+        outline += [(u, v, 2) for u, v in reversed(grid[-1][1:])]
+        outline += [(0.0, v, 3) for v in reversed(self.rows[1:])]
+        return outline
 
 
 # ================================================================================================= geometry
 PLAZA_FLOOR = PLAZA_LEVEL - QUAY_LEVEL
 GLASS_BOTTOM = PLAZA_FLOOR + PLAZA_CLEAR
+
+
+class Arch:
+    """An arch cut into the glass superstructure above the plaza: elliptical, centred at a fraction u of the length
+    from the west, with a white vault running depth metres into the building."""
+
+    def __init__(self, side, centre, half_width, rise, depth):
+        self.side = side  # "south" or "north"
+        self.centre = centre
+        self.half_width = half_width
+        self.rise = rise
+        self.depth = depth
+
+    def height(self, offset):
+        """Height above the quay of the arch's edge at offset (-1 to 1 across its width), or None outside it."""
+        if abs(offset) >= 1.0:
+            return None
+        return PLAZA_FLOOR + self.rise * math.sqrt(1.0 - offset * offset)
+
+
+# The low wide arch over the plaza facing the Elbe, and the tall narrow one on the city side, both from photos.
+ARCHES = [Arch("south", 0.67, 10.0, 7.0, 8.0), Arch("north", 0.67, 5.0, 20.0, 10.0)]
+# Slots between the brick blocks, as fractions along the long facades from the west: dark with balcony boxes on the
+# south side, white stair towers on the north side.
+SOUTH_SLOTS = (0.32, 0.53, 0.71, 0.89)
+SOUTH_SLOT_BALCONIES = ((16.0,), (10.0, 22.0), (14.0,), (19.0,))
+NORTH_SLOTS = (0.32, 0.56, 0.83)
+ARCH_BACK_SCALE = 0.55  # the vault's back opening, as a share of the arch at the facade
+KAISTUDIO_WINDOW = (0.07, 6.5, 18.0, 25.0)  # fraction from the west on the south facade, width, bottom, top
 
 
 def outward_normal(start, end):
@@ -185,72 +255,162 @@ def facade_point(point, normal, proud):
     return (point[0] + normal[0] * proud, point[1] + normal[1] * proud)
 
 
+class Facade:
+    """One straight facade of the wedge: its ends, outward normal, and how a fraction along it maps to (u, v)."""
+
+    def __init__(self, name, start, end, to_uv):
+        self.name = name
+        self.start = start
+        self.end = end
+        self.to_uv = to_uv
+        self.length = math.dist(start, end)
+        self.direction = ((end[0] - start[0]) / self.length, (end[1] - start[1]) / self.length)
+        self.normal = outward_normal(start, end)
+
+    def point(self, along, z, proud):
+        """The 3D point along metres from the start at height z, proud metres in front of the facade."""
+        x = self.start[0] + self.direction[0] * along + self.normal[0] * proud
+        y = self.start[1] + self.direction[1] * along + self.normal[1] * proud
+        return (x, y, z)
+
+
 class Elbphilharmonie:
-    """Builds the model from the measured wedge and roof."""
+    """Builds the model from the measured wedge and roof, with the details added by hand from photos."""
 
     def __init__(self, wedge, roof):
         self.wedge = wedge
         self.roof = roof
-        self.u_steps = roof.u_steps
-        self.v_steps = roof.v_steps
         self.mesh = Mesh()
+        w = wedge
+        self.facades = [
+            Facade("south", w.west_south, w.east_south, lambda f: (f, 0.0)),
+            Facade("east", w.east_south, w.east_north, lambda f: (1.0, f)),
+            Facade("north", w.east_north, w.west_north, lambda f: (1.0 - f, 1.0)),
+            Facade("west", w.west_north, w.west_south, lambda f: (0.0, 1.0 - f)),
+        ]
 
     def build(self):
         """All parts in order, bottom to top."""
         self.add_brick_base()
         self.add_plaza()
         self.add_glass_walls()
-        self.add_arch()
+        for arch in ARCHES:
+            self.add_arch(arch)
+        for index, facade in enumerate(self.facades):
+            self.add_glass_openings(facade, index)
         self.add_roof()
         return self.mesh
 
     # ------------------------------------------------------------------ brick base
     def add_brick_base(self):
-        """The Kaispeicher: brick walls up to the plaza floor, its recessed slots, small windows and loading doors."""
+        """The Kaispeicher: brick walls up to the plaza floor with real openings (windows, slots, doors and the
+        Kaistudio window set into the wall), the balcony boxes in the south slots and the white stair towers on the
+        north side."""
         corners = [self.wedge.west_south, self.wedge.east_south, self.wedge.east_north, self.wedge.west_north]
-        self.mesh.prism(corners, "xy", 0.0, PLAZA_FLOOR, "Brick", caps="H")
-        for index in range(4):
-            start, end = corners[index], corners[(index + 1) % 4]
-            self.add_brick_facade(start, end, long_facade=index in (0, 2), reverse=index == 2)
+        self.mesh.prism(corners, "xy", 0.0, PLAZA_FLOOR, "Brick", caps="H", sides=False)
+        for facade in self.facades:
+            openings = self.brick_openings(facade)
+            self.add_wall_with_openings(facade, openings)
+            for opening in openings:
+                self.add_opening(facade, opening)
+            if facade.name == "south":
+                for slot_index, fraction in enumerate(SOUTH_SLOTS):
+                    for bottom in SOUTH_SLOT_BALCONIES[slot_index]:
+                        self.balcony_box(facade, fraction * facade.length, bottom)
+            if facade.name == "north":
+                for fraction in NORTH_SLOTS:
+                    self.stair_tower(facade, (1.0 - fraction) * facade.length)
 
-    def add_brick_facade(self, start, end, long_facade, reverse):
-        """Windows, slots and doors on one brick facade from start to end; reverse counts the slot positions from
-        the end, so they are measured from the west on the north facade too."""
-        normal = outward_normal(start, end)
-        length = math.dist(start, end)
-        slots = [1.0 - fraction if reverse else fraction for fraction in BRICK_SLOTS] if long_facade else []
-        for fraction in slots:
-            self.facade_rectangle(start, end, normal, fraction * length - 1.5, fraction * length + 1.5, 0.6,
-                                  PLAZA_FLOOR - 0.4, "PowderCoat", 0.03)
-        self.add_brick_windows(start, end, normal, length, slots)
-        door_count = int(length / 16.0)
-        for door in range(door_count):
-            along = (door + 0.5) * length / door_count
-            self.facade_rectangle(start, end, normal, along - 1.6, along + 1.6, 0.0, 3.6, "PowderCoat", 0.03)
+    def brick_openings(self, facade):
+        """Every opening in one brick facade as (start, end, bottom, top, depth, back material), along the facade
+        in metres from its start."""
+        openings = []
+        slots = []
+        if facade.name == "south":
+            slots = [fraction * facade.length for fraction in SOUTH_SLOTS]
+            for along in slots:
+                openings.append((along - 1.5, along + 1.5, 0.6, PLAZA_FLOOR - 0.4, 0.8, "PowderCoat"))
+            fraction, width, bottom, top = KAISTUDIO_WINDOW
+            along = fraction * facade.length
+            openings.append((along - width / 2.0, along + width / 2.0, bottom, top, 0.6, "PowderCoat"))
+        if facade.name == "north":
+            slots = [(1.0 - fraction) * facade.length for fraction in NORTH_SLOTS]
+        door_count = int(facade.length / 16.0)
+        doors = [(door + 0.5) * facade.length / door_count for door in range(door_count)]
+        for along in doors:
+            if any(abs(along - slot) < 3.5 for slot in slots):
+                continue
+            openings.append((along - 1.6, along + 1.6, 0.0, 3.6, 0.4, "PowderCoat"))
+        openings += self.window_openings(facade, slots)
+        return openings
 
-    def add_brick_windows(self, start, end, normal, length, slots):
-        """The warehouse's small square windows in rows a storey apart, clear of the slots and the doors' row."""
-        columns = int(length / 4.2)
+    def window_openings(self, facade, slots):
+        """The warehouse's small square windows, set 35 cm into the wall, in rows a storey apart, clear of the slots,
+        the stair towers and the Kaistudio window."""
+        windows = []
+        columns = int(facade.length / 4.2)
         for row in range(1, 9):
             z = 2.0 + row * 2.9
             if z + 0.9 > PLAZA_FLOOR - 0.6:
                 break
             for column in range(columns):
-                along = (column + 0.5) * length / columns
-                if any(abs(along - fraction * length) < 2.6 for fraction in slots):
+                along = (column + 0.5) * facade.length / columns
+                if any(abs(along - slot) < 3.0 for slot in slots):
                     continue
-                self.facade_rectangle(start, end, normal, along - 0.45, along + 0.45, z, z + 0.9, "PowderCoat",
-                                      0.02)
+                if facade.name == "south" and abs(along - KAISTUDIO_WINDOW[0] * facade.length) < 4.5 and z > 16.0:
+                    continue
+                windows.append((along - 0.45, along + 0.45, z, z + 0.9, 0.35, "PowderCoat"))
+        return windows
 
-    def facade_rectangle(self, start, end, normal, along_start, along_end, bottom, top, material, proud):
-        """A flat rectangle on a facade, from along_start to along_end metres from start, slightly proud."""
-        length = math.dist(start, end)
-        direction = ((end[0] - start[0]) / length, (end[1] - start[1]) / length)
-        left = facade_point((start[0] + direction[0] * along_start, start[1] + direction[1] * along_start), normal,
-                            proud)
-        right = facade_point((start[0] + direction[0] * along_end, start[1] + direction[1] * along_end), normal, proud)
-        self.mesh.add_face([(left[0], left[1], bottom), (right[0], right[1], bottom), (right[0], right[1], top),
-                            (left[0], left[1], top)], material, desired_normal=normal)
+    def add_wall_with_openings(self, facade, openings):
+        """The brick face of a facade with holes where the openings are: the wall is cut into bands at every
+        opening's top and bottom, and each band into runs of solid wall between the openings."""
+        heights = sorted({0.0, PLAZA_FLOOR} | {value for opening in openings for value in opening[2:4]})
+        for bottom, top in zip(heights, heights[1:]):
+            middle = (bottom + top) / 2.0
+            cut_by = sorted((start, end) for start, end, low, high, _depth, _material in openings
+                            if low < middle < high)
+            position = 0.0
+            for start, end in cut_by + [(facade.length, facade.length)]:
+                if start > position + 1e-6:
+                    self.rectangle(facade, position, start, bottom, top, "Brick", 0.0)
+                position = max(position, end)
+
+    def add_opening(self, facade, opening):
+        """The inside of one opening: the brick reveals on all four sides, a stone sill at the bottom, and the dark
+        back at its depth."""
+        start, end, bottom, top, depth, material = opening
+        front = [facade.point(start, bottom, 0.0), facade.point(end, bottom, 0.0), facade.point(end, top, 0.0),
+                 facade.point(start, top, 0.0)]
+        back = [facade.point(start, bottom, -depth), facade.point(end, bottom, -depth),
+                facade.point(end, top, -depth), facade.point(start, top, -depth)]
+        self.mesh.add_face(back, material, desired_normal=facade.normal)
+        direction = (facade.direction[0], facade.direction[1], 0.0)
+        sides = [(0, 1, (0.0, 0.0, 1.0), "Concrete"), (1, 2, (-direction[0], -direction[1], 0.0), "Brick"),
+                 (2, 3, (0.0, 0.0, -1.0), "Brick"), (3, 0, direction, "Brick")]
+        for first, second, normal, side_material in sides:
+            if first == 0 and bottom <= 0.0:
+                continue
+            self.mesh.add_face([front[first], front[second], back[second], back[first]], side_material,
+                               desired_normal=normal)
+
+    def balcony_box(self, facade, along, bottom):
+        """A grey box balcony sticking out of a slot, 3 m wide, 1.2 m deep and 1 m high."""
+        corners = [facade.point(along - 1.5, 0.0, 0.0), facade.point(along + 1.5, 0.0, 0.0),
+                   facade.point(along + 1.5, 0.0, 1.2), facade.point(along - 1.5, 0.0, 1.2)]
+        self.mesh.prism([(x, y) for x, y, _ in corners], "xy", bottom, bottom + 1.0, "Metal")
+
+    def stair_tower(self, facade, along):
+        """A white stair tower standing 0.8 m proud of the north facade, up to the plaza floor."""
+        corners = [facade.point(along - 2.0, 0.0, 0.0), facade.point(along + 2.0, 0.0, 0.0),
+                   facade.point(along + 2.0, 0.0, 0.8), facade.point(along - 2.0, 0.0, 0.8)]
+        self.mesh.prism([(x, y) for x, y, _ in corners], "xy", 0.0, PLAZA_FLOOR + 0.3, "Paint", caps="H")
+
+    def rectangle(self, facade, along_start, along_end, bottom, top, material, proud):
+        """A flat rectangle on a facade, proud metres in front of it."""
+        self.mesh.add_face([facade.point(along_start, bottom, proud), facade.point(along_end, bottom, proud),
+                            facade.point(along_end, top, proud), facade.point(along_start, top, proud)], material,
+                           desired_normal=facade.normal)
 
     # ------------------------------------------------------------------ plaza
     def add_plaza(self):
@@ -272,97 +432,171 @@ class Elbphilharmonie:
                                    (b[0], b[1], PLAZA_FLOOR + 1.1), (a[0], a[1], PLAZA_FLOOR + 1.1)], "Glass")
 
     # ------------------------------------------------------------------ glass superstructure
+    def arch_at(self, u, v):
+        """The arch whose opening contains the outline point (u, v), and the point's offset across it."""
+        for arch in ARCHES:
+            on_side = (arch.side == "south" and v == 0.0) or (arch.side == "north" and v == 1.0)
+            if not on_side:
+                continue
+            offset = (u - arch.centre) * self.wedge.length() / arch.half_width
+            if abs(offset) < 1.0:
+                return arch, offset
+        return None, 0.0
+
     def wall_bottom(self, u, v):
-        """Lower edge of the glass wall at an outline point: the glass bottom, raised over the plaza arch."""
-        centre, half_width, rise = ARCH
-        if v > 0.0:
+        """Lower edge of the glass wall at an outline point: the glass bottom, or the edge of an arch."""
+        arch, offset = self.arch_at(u, v)
+        if arch is None:
             return GLASS_BOTTOM
-        offset = (u - centre) * self.wedge.length() / half_width
-        if abs(offset) >= 1.0:
-            return GLASS_BOTTOM
-        return max(GLASS_BOTTOM, PLAZA_FLOOR + rise * math.sqrt(1.0 - offset * offset))
+        return max(GLASS_BOTTOM, arch.height(offset))
 
     def add_glass_walls(self):
-        """The superstructure's facades from the glass bottom up to the measured roof edge, one metre at a time, with
-        the dark grid of the facade elements on them."""
-        ring = self.wedge.ring(self.u_steps, self.v_steps)
-        for index, (u, v) in enumerate(ring):
-            next_u, next_v = ring[(index + 1) % len(ring)]
+        """The superstructure's facades from the glass bottom (or an arch) up to the roof edge, on the roof's outline
+        nodes so the two meet exactly. Their UVs count facade elements, so one tile of the FacadeGlass texture is one
+        element."""
+        width, height = GLASS_PANEL
+        outline = self.roof.outline()
+        travelled = 0.0
+        for index, (u, v, facade) in enumerate(outline):
+            next_u, next_v, _next_facade = outline[(index + 1) % len(outline)]
+            if index == 0 or facade != outline[index - 1][2]:
+                travelled = 0.0
             start, end = self.wedge.point(u, v), self.wedge.point(next_u, next_v)
-            normal = outward_normal(start, end)
+            step = math.dist(start, end)
             bottoms = (self.wall_bottom(u, v), self.wall_bottom(next_u, next_v))
             tops = (self.roof.height(u, v), self.roof.height(next_u, next_v))
+            uvs = [(travelled / width, (bottoms[0] - GLASS_BOTTOM) / height),
+                   ((travelled + step) / width, (bottoms[1] - GLASS_BOTTOM) / height),
+                   ((travelled + step) / width, (tops[1] - GLASS_BOTTOM) / height),
+                   (travelled / width, (tops[0] - GLASS_BOTTOM) / height)]
             self.mesh.add_face([(start[0], start[1], bottoms[0]), (end[0], end[1], bottoms[1]),
                                 (end[0], end[1], tops[1]), (start[0], start[1], tops[0])], "FacadeGlass",
-                               desired_normal=normal)
-        self.add_panel_grid(ring)
-
-    def add_panel_grid(self, ring):
-        """Mullions every element width along each facade and transoms every element height, slightly proud."""
-        width, height = GLASS_PANEL
-        travelled = 0.0
-        for index, (u, v) in enumerate(ring):
-            next_u, next_v = ring[(index + 1) % len(ring)]
-            start, end = self.wedge.point(u, v), self.wedge.point(next_u, next_v)
-            normal = outward_normal(start, end)
-            step = math.dist(start, end)
-            bottom = self.wall_bottom(u, v)
-            top = self.roof.height(u, v)
-            if int((travelled + step) / width) > int(travelled / width):
-                self.mullion(start, normal, bottom, top)
+                               desired_normal=outward_normal(start, end), uvs=uvs)
             travelled += step
-            z = GLASS_BOTTOM + height
-            while z < min(top, self.roof.height(next_u, next_v)) - 0.2:
-                if z > max(bottom, self.wall_bottom(next_u, next_v)):
-                    a, b = facade_point(start, normal, 0.06), facade_point(end, normal, 0.06)
-                    self.mesh.add_face([(a[0], a[1], z - 0.06), (b[0], b[1], z - 0.06), (b[0], b[1], z + 0.06),
-                                        (a[0], a[1], z + 0.06)], "Metal", desired_normal=normal)
-                z += height
 
-    def mullion(self, point, normal, bottom, top):
-        """One vertical frame line on the facade."""
-        side = (-normal[1] * 0.06, normal[0] * 0.06)
-        a = facade_point((point[0] - side[0], point[1] - side[1]), normal, 0.06)
-        b = facade_point((point[0] + side[0], point[1] + side[1]), normal, 0.06)
-        self.mesh.add_face([(a[0], a[1], bottom), (b[0], b[1], bottom), (b[0], b[1], top - 0.1),
-                            (a[0], a[1], top - 0.1)], "Metal", desired_normal=normal)
+    def add_glass_openings(self, facade, seed):
+        """The balconies and slits in the glass, one element at a time: white-lipped horseshoe balconies, clustered
+        high up toward the west as in the photos, and dark eye-shaped slits, denser toward the east."""
+        rng = random.Random(seed * 7 + 1)
+        width, height = GLASS_PANEL
+        columns = int(facade.length / width)
+        for column in range(columns):
+            fraction = (column + 0.5) / columns
+            u, v = facade.to_uv(fraction)
+            roof = self.roof.height(u, v)
+            along = fraction * facade.length
+            row = 0
+            while GLASS_BOTTOM + (row + 1) * height < roof - 1.5:
+                bottom = GLASS_BOTTOM + row * height
+                row += 1
+                if self.near_arch(u, v, bottom + height):
+                    continue
+                self.maybe_opening(facade, rng, along, bottom, u)
 
-    # ------------------------------------------------------------------ arch and roof
-    def add_arch(self):
-        """The vault behind the arch over the plaza on the south facade: a white curved soffit running six metres
-        into the building, closed by dark glass."""
-        depth = 6.0
+    def near_arch(self, u, v, top):
+        """Whether an element reaching up to top would cut into an arch or its frame."""
+        for arch in ARCHES:
+            on_side = (arch.side == "south" and v == 0.0) or (arch.side == "north" and v == 1.0)
+            reach = (arch.half_width + 4.0) / self.wedge.length()
+            if on_side and abs(u - arch.centre) < reach and top < PLAZA_FLOOR + arch.rise + 6.0:
+                return True
+        return False
+
+    def maybe_opening(self, facade, rng, along, bottom, u):
+        """Rolls for a balcony or a slit in one element."""
+        horseshoe_chance = 0.4 if u < 0.55 and bottom > 22.0 else 0.06
+        slit_chance = 0.16 if u > 0.35 else 0.05
+        if facade.name == "east":
+            slit_chance = 0.25
+        roll = rng.random()
+        if roll < horseshoe_chance:
+            self.horseshoe(facade, along + rng.uniform(-0.8, 0.8), bottom + 0.4)
+        elif roll < horseshoe_chance + slit_chance:
+            self.slit(facade, along + rng.uniform(-1.2, 1.2), bottom + 0.6)
+
+    def horseshoe(self, facade, along, bottom, half_width=1.3, depth=1.5, segments=12):
+        """A horseshoe balcony: the dark opening of a half ellipse hanging from a straight top edge, with the white
+        bent-glass lip around its curve standing out from the facade."""
+        top = bottom + depth + 0.6
+        opening = []
+        lip_inner = []
+        lip_outer = []
+        for step in range(segments + 1):
+            angle = math.pi * step / segments
+            x, z = math.cos(angle), math.sin(angle)
+            opening.append(facade.point(along + half_width * x, top - depth * z, 0.03))
+            lip_inner.append(facade.point(along + half_width * x, top - depth * z, 0.04))
+            lip_outer.append(facade.point(along + half_width * 1.18 * x, top - depth * 1.18 * z, 0.35))
+        self.mesh.add_face(opening, "PowderCoat", desired_normal=facade.normal)
+        for step in range(segments):
+            quad = [lip_inner[step], lip_inner[step + 1], lip_outer[step + 1], lip_outer[step]]
+            self.mesh.add_face(quad, "Paint", smooth=True, desired_normal=facade.normal)
+
+    def slit(self, facade, along, bottom, half_width=0.28, height=2.2, segments=8):
+        """A dark eye-shaped slit where the glass is bent open."""
+        right = []
+        left = []
+        for step in range(segments + 1):
+            t = step / segments
+            bulge = half_width * math.sin(math.pi * t)
+            z = bottom + height * t
+            right.append(facade.point(along + bulge, z, 0.03))
+            left.append(facade.point(along - bulge, z, 0.03))
+        self.mesh.add_face(right + list(reversed(left[1:-1])), "PowderCoat", desired_normal=facade.normal)
+
+    # ------------------------------------------------------------------ arches and roof
+    def add_arch(self, arch):
+        """The vault behind an arch: a white soffit that narrows into the building like a funnel, so its inside shows
+        from the front, closed at the back by a dark wall."""
         steps = 24
-        centre, half_width, rise = ARCH
+        facade_v = 0.0 if arch.side == "south" else 1.0
+        inward = 1.0 if arch.side == "south" else -1.0
         previous = None
         for step in range(steps + 1):
             offset = -1.0 + 2.0 * step / steps
-            u = centre + offset * half_width / self.wedge.length()
-            z = PLAZA_FLOOR + rise * math.sqrt(max(0.0, 1.0 - offset * offset))
-            front = self.wedge.point(u, 0.0)
-            back = self.wedge.point(u, depth / self.wedge.width(u))
+            front = self.arch_point(arch, offset, 1.0, facade_v, 0.0)
+            back = self.arch_point(arch, offset, ARCH_BACK_SCALE, facade_v, inward * arch.depth)
             if previous is not None:
-                front_before, back_before, z_before = previous
-                self.mesh.add_face([(front_before[0], front_before[1], z_before), (front[0], front[1], z),
-                                    (back[0], back[1], z), (back_before[0], back_before[1], z_before)], "Paint",
-                                   smooth=True, desired_normal=(0.0, 0.0, -1.0))
-                self.mesh.add_face([(back_before[0], back_before[1], PLAZA_FLOOR), (back[0], back[1], PLAZA_FLOOR),
-                                    (back[0], back[1], z), (back_before[0], back_before[1], z_before)], "Glass",
-                                   desired_normal=(0.0, -1.0, 0.0))
-            previous = (front, back, z)
+                self.add_vault_step(arch, previous, (front, back), facade_v, inward)
+            previous = (front, back)
+
+    def arch_point(self, arch, offset, scale, facade_v, depth):
+        """A point on an arch's edge at offset across it, with the arch scaled down by scale, depth metres behind
+        the facade (negative toward -v)."""
+        u = arch.centre + offset * scale * arch.half_width / self.wedge.length()
+        v = facade_v + depth / self.wedge.width(u)
+        x, y = self.wedge.point(u, v)
+        z = PLAZA_FLOOR + arch.rise * scale * math.sqrt(max(0.0, 1.0 - offset * offset))
+        return (x, y, z)
+
+    def add_vault_step(self, arch, previous, current, facade_v, inward):
+        """One step of a vault: the soffit strip, facing the arch's axis, and the dark back wall below it."""
+        front_before, back_before = previous
+        front, back = current
+        axis = self.wedge.point(arch.centre, facade_v + inward * arch.depth / 2.0 / self.wedge.width(arch.centre))
+        middle = [(front[k] + back[k]) / 2.0 for k in range(3)]
+        toward_axis = (axis[0] - middle[0], axis[1] - middle[1], PLAZA_FLOOR - middle[2])
+        self.mesh.add_face([front_before, front, back, back_before], "Paint", smooth=True, desired_normal=toward_axis)
+        self.mesh.add_face([(back_before[0], back_before[1], PLAZA_FLOOR), (back[0], back[1], PLAZA_FLOOR), back,
+                            back_before], "PowderCoat", desired_normal=(0.0, -inward, 0.0))
 
     def add_roof(self):
-        """The measured roof as a smooth surface over the wedge."""
-        heights = [[self.roof.height(i / self.u_steps, j / self.v_steps) for j in range(self.v_steps + 1)]
-                   for i in range(self.u_steps + 1)]
-        for i in range(self.u_steps):
-            for j in range(self.v_steps):
-                corners = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)]
+        """The roof sheets on the roof's node grid, flat-shaded so the creases stay sharp; cells in an opening are
+        dark glass."""
+        grid = self.roof.node_grid()
+        for row, next_row in zip(grid, grid[1:]):
+            for column in range(len(row) - 1):
+                corners = [row[column], row[column + 1], next_row[column + 1], next_row[column]]
                 points = []
-                for ci, cj in corners:
-                    x, y = self.wedge.point(ci / self.u_steps, cj / self.v_steps)
-                    points.append((x, y, heights[ci][cj]))
-                self.mesh.add_face(points, "RoofSequins", smooth=True, desired_normal=(0.0, 0.0, 1.0))
+                for u, v in corners:
+                    x, y = self.wedge.point(u, v)
+                    points.append((x, y, self.roof.height(u, v)))
+                middle_u = sum(u for u, _ in corners) / 4.0
+                middle_v = sum(v for _, v in corners) / 4.0
+                material = "RoofSequins"
+                if self.roof.opening_at(middle_u, middle_v) is not None:
+                    material = "PowderCoat"
+                self.mesh.add_face(points, material, desired_normal=(0.0, 0.0, 1.0))
 
 
 # ================================================================================================= kit entry
@@ -373,7 +607,7 @@ def elbphilharmonie():
     """The model and its wedge, built once per run."""
     if "model" not in _CACHE:
         wedge = Wedge(read_footprint())
-        roof = Roof(wedge, read_surface(), u_steps=116, v_steps=40)
+        roof = HandRoof(wedge)
         _CACHE["model"] = (Elbphilharmonie(wedge, roof).build(), wedge, roof)
     return _CACHE["model"]
 
@@ -408,12 +642,20 @@ def quay_and_water(wedge):
     return mesh
 
 
+def preview_textures():
+    """The facade element texture from posters/draw_landmarks.py, for the sheet."""
+    posters = os.path.join(DATA_ROOT, "building_kit", "posters")
+    return {"FacadeGlass": os.path.join(posters, "elbphilharmonie_glass.png")}
+
+
 def assemblies():
-    """The Elbphilharmonie from the Elbe like the reference photo, from the east, the roof from above and the plaza
-    arch up close."""
+    """The Elbphilharmonie from the Elbe and from the city side like the reference photos, from the east, the roof
+    from above, and both arches up close."""
     mesh, wedge, _roof = elbphilharmonie()
     lower, upper = mesh.bounds()
-    arch_x, arch_y = wedge.point(ARCH[0], 0.0)
+    south_arch, north_arch = ARCHES
+    south_x, south_y = wedge.point(south_arch.centre, 0.0)
+    north_x, north_y = wedge.point(north_arch.centre, 1.0)
     middle = (0.0, 0.0, upper[2] * 0.45)
     return [{
         "name": "Elbphilharmonie",
@@ -426,11 +668,15 @@ def assemblies():
         "closeups": [
             {"caption": "From the Elbe", "target": middle, "direction": (0.05, -1.0, 0.12), "distance": 260.0,
              "lens": 35.0},
+            {"caption": "From the city side", "target": middle, "direction": (0.35, 1.0, 0.35), "distance": 240.0,
+             "lens": 35.0},
             {"caption": "From the east", "target": middle, "direction": (1.0, -0.35, 0.15), "distance": 230.0,
              "lens": 35.0},
             {"caption": "The roof", "target": (0.0, 0.0, upper[2] * 0.8), "direction": (-0.3, -0.6, 1.0),
              "distance": 200.0, "lens": 35.0},
-            {"caption": "Plaza and arch", "target": (arch_x, arch_y, PLAZA_FLOOR + 4.0),
-             "direction": (-0.15, -1.0, 0.05), "distance": 45.0, "lens": 35.0},
+            {"caption": "Plaza arch, Elbe side", "target": (south_x, south_y, PLAZA_FLOOR + 5.0),
+             "direction": (-0.15, -1.0, 0.1), "distance": 55.0, "lens": 35.0},
+            {"caption": "Tall arch, city side", "target": (north_x, north_y, PLAZA_FLOOR + 12.0),
+             "direction": (0.1, 1.0, 0.15), "distance": 70.0, "lens": 35.0},
         ],
     }]
