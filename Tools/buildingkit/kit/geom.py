@@ -8,7 +8,8 @@ import math
 import random
 
 # Material slot names shared by every style.
-MATERIALS = ("Brick", "Plaster", "Timber", "Frame", "Glass", "Sill", "RoofTile", "Thatch", "Metal", "Concrete")
+MATERIALS = ("Brick", "Plaster", "Timber", "Frame", "Glass", "Sill", "RoofTile", "Thatch", "Metal", "Concrete", "Paint",
+             "PaintRed", "PaintGreen", "Beacon")
 
 
 def vec_sub(first, second):
@@ -274,6 +275,38 @@ class Mesh:
         if caps:
             self.add_face(ring_start, material, desired_normal=tuple(-c for c in axis))
             self.add_face(ring_end, material, desired_normal=axis)
+
+    def lathe(self, profile, material, segments=32, materials=None):
+        """Body of revolution about the Y axis, smooth sides. profile is a list of (y, radius) with y never decreasing; two
+        points with the same y make a flat ring step. An end with a radius above zero gets a flat cap. materials
+        optionally maps a profile segment index to a material."""
+        materials = materials or {}
+        rings = []
+        for y, radius in profile:
+            rings.append([
+                (radius * math.cos(2 * math.pi * i / segments), y, radius * math.sin(2 * math.pi * i / segments))
+                for i in range(segments)
+            ])
+        for index in range(len(profile) - 1):
+            segment_material = materials.get(index, material)
+            (y0, r0), (y1, r1) = profile[index], profile[index + 1]
+            for i in range(segments):
+                j = (i + 1) % segments
+                angle = 2 * math.pi * (i + 0.5) / segments
+                # The outward normal leans along the axis by the slope of the profile.
+                outward = (math.cos(angle) * (y1 - y0), -(r1 - r0), math.sin(angle) * (y1 - y0))
+                if abs(y1 - y0) < 1e-9:
+                    outward = (0.0, 1.0 if r0 > r1 else -1.0, 0.0)
+                quad = [rings[index][i], rings[index][j], rings[index + 1][j], rings[index + 1][i]]
+                if r0 < 1e-9:
+                    quad = [rings[index][i], rings[index + 1][j], rings[index + 1][i]]
+                elif r1 < 1e-9:
+                    quad = [rings[index][i], rings[index][j], rings[index + 1][i]]
+                self.add_face(quad, segment_material, smooth=True, desired_normal=outward)
+        if profile[0][1] > 1e-9:
+            self.add_face(rings[0], materials.get(0, material), desired_normal=(0.0, -1.0, 0.0))
+        if profile[-1][1] > 1e-9:
+            self.add_face(rings[-1], materials.get(len(profile) - 2, material), desired_normal=(0.0, 1.0, 0.0))
 
     # ------------------------------------------------------------------ transforms and queries
     def copy(self):

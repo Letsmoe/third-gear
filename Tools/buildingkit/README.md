@@ -67,6 +67,21 @@ degrees about Z, origin at `(width, thickness + i * 2.0)`. Back wall: rotate 180
 `Corner_L` at the front left, `Corner_R` at `(width - thickness, 0)`, `Corner_L` rotated 180 at `(width, depth)` and
 `Corner_R` rotated 180 at `(thickness, depth)`.
 
+## Structures on OSM nodes
+
+`generate_structures.py` builds the structures that stand on a node instead of a footprint, so far the wind turbines
+of `kit/turbines.py` (#100): the four models in the Bergedorf extract (Senvion MM100, Nordex N117, Enercon E-92, NEG
+Micon NM48), each as `<Model>_Tower`, `<Model>_Nacelle` and `<Model>_Rotor`. It writes the GLBs to `glb/turbines/`,
+the models assembled in a row to `blend/turbines.blend`, and the contact sheet as `renders/turbines_lineup.png` and
+`renders/turbines_heads.png`.
+
+The tower's origin is the centre of its foot on the ground, the nacelle's is on the yaw axis at the top flange, and
+the rotor's is the hub centre with the rotor axis along Y, facing -Y. The rotor attaches to the nacelle at
+`rotor_socket` and is tilted front end up by `rotor_tilt_degrees`, both written per model to
+`kit_stats_turbines.json`; it turns clockwise as seen from the front. The new slots are `Paint`, `PaintRed` for the
+blade tip marking, `PaintGreen` for Enercon's tower foot (the band colour follows the height, V of the metre UVs) and
+`Beacon` for the obstruction lights.
+
 ## Props from Hunyuan 3D
 
 `props/run_props.sh` runs the whole chain. ComfyUI is started from a private venv in
