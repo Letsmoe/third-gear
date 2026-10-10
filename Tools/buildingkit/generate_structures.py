@@ -28,11 +28,12 @@ import bpy  # noqa: E402
 import numpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
-from kit import blender_io, bridges, greenhouses, petrol, pylons, shelters, turbines  # noqa: E402
+from kit import blender_io, bridges, greenhouses, landmarks, petrol, pylons, shelters, turbines  # noqa: E402
 from kit.geom import Mesh  # noqa: E402
 
 FAMILIES = {"turbines": turbines, "pylons": pylons, "shelters": shelters, "greenhouses": greenhouses,
-            "petrol": petrol, "bridges": bridges}
+            "petrol": petrol, "bridges": bridges,
+            "landmarks": landmarks}
 SMALL_FAMILY_HEIGHT = 12.0  # below this the scale reference is a person instead of a house
 CLOSEUP_TILE = (1300, 900)
 

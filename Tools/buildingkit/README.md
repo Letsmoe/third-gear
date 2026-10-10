@@ -138,6 +138,16 @@ includes the wing walls, so it is what the OSM bridge way should measure. `deck_
 runtime sweeps along a curved way; railings, abutments and piers are placed along it. The sheet shows samples with
 their ground, water and approach roads (`Asphalt`, `Ground` and `Water` are sheet-only slots).
 
+### Landmarks
+
+`kit/landmarks.py` (#111) builds landmarks from measured data instead of kit pieces. The Elbphilharmonie takes its
+footprint from the LoD2 model and its wave roof from the 2020 bDOM, both read from the archives in
+`<data root>/downloads` (through `unzip`, since Python's zipfile can't read their compression). The brick base runs up
+to the plaza at 37 m above sea level, the glass superstructure with its 5 by 3.5 m panel grid up to the measured roof,
+and the arch over the plaza opens the south facade. The origin is the middle of the footprint on the quay (8.3 m above
+sea level, x east, y north); its UTM position is in `kit_stats_landmarks.json`. `FacadeGlass` and `RoofSequins` are its
+own slots.
+
 ### Greenhouses
 
 `kit/greenhouses.py` (#103) is a footprint style, not a node structure: the pieces are meant to be placed along a
