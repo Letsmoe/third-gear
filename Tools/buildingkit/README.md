@@ -88,9 +88,10 @@ blade tip marking, `PaintGreen` for Enercon's tower foot (the band colour follow
 
 ### Power pylons
 
-`kit/pylons.py` (#101) has the 110 kV lattice designs Donau (two arm levels) and one-level (one long arm), each as a
+`kit/pylons.py` (#101) has the 110 kV lattice designs Donau (two arm levels) and one-level (one long arm), and the
+spun concrete barrel pole (three arm levels, middle one widest) of the line through the Curslack wind farm, each as a
 suspension and an anchor variant and each as one piece: `Donau_Suspension`, `Donau_Anchor`, `OneLevel_Suspension`,
-`OneLevel_Anchor`. The origin is the centre of the foot, the line runs along Y and the arms along X. Every conductor
+`OneLevel_Anchor`, `Barrel_Suspension`, `Barrel_Anchor`. The origin is the centre of the foot, the line runs along Y and the arms along X. Every conductor
 and the earth wire has a socket in `kit_stats_pylons.json`, where the runtime hangs the catenary: under the
 insulator on suspension pylons, and at the end of the horizontal insulator on each side (`_Back` and `_Ahead`) on
 anchor pylons. The slots are `Lattice` for the steel angles, `Insulator` for the silicone sheds, `Metal` for fittings

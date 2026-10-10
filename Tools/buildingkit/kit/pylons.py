@@ -43,6 +43,8 @@ class PylonDesign:
     brace_size: float
     first_panel: float = 4.2
     panel_ratio: float = 0.88
+    structure: str = "lattice"  # "lattice" (steel angles) or "pole" (spun concrete with steel arms)
+    pole_top_diameter: float = 0.0
     sockets: list = field(default_factory=list)
 
     @property
@@ -76,7 +78,21 @@ def one_level(anchor):
     )
 
 
-DESIGNS = OrderedDict((design.name, design) for design in [donau(False), donau(True), one_level(False), one_level(True)])
+def barrel(anchor):
+    """The concrete barrel design: a spun concrete pole with three steel arm levels, the middle one widest, one
+    conductor per side on each. base_half_width is the pole's radius at the ground."""
+    arms = [CrossArm(20.5, 3.3, 0.6, [3.0]), CrossArm(24.5, 4.7, 0.7, [4.4]), CrossArm(28.5, 3.3, 0.6, [3.0])]
+    return PylonDesign(
+        name="Barrel_" + ("Anchor" if anchor else "Suspension"),
+        title="Barrel, concrete, " + ("anchor" if anchor else "suspension"),
+        base_half_width=0.65 if anchor else 0.48, waist_half_width=0.0, arms=arms, peak_height=31.5, anchor=anchor,
+        leg_size=0.0, brace_size=0.06, structure="pole", pole_top_diameter=0.6 if anchor else 0.45,
+    )
+
+
+DESIGNS = OrderedDict((design.name, design) for design in [
+    donau(False), donau(True), one_level(False), one_level(True), barrel(False), barrel(True)])
+POLE_TOP_GAP = 1.5  # steel earth wire mast on top of a concrete pole
 
 
 # ================================================================================================= steel angles
@@ -344,7 +360,10 @@ def add_conductor_hardware(mesh, design, arm, sockets, level_name):
     for side in (-1, 1):
         for index, distance in enumerate(arm.conductors):
             x = side * distance
-            beam_half = add_conductor_beam(mesh, design, arm, x)
+            if design.structure == "pole":
+                beam_half = pole_beam_size(arm, abs(x))[1] / 2.0
+            else:
+                beam_half = add_conductor_beam(mesh, design, arm, x)
             name = "%s_%s%d" % (level_name, "L" if side < 0 else "R", index + 1)
             if design.anchor:
                 add_tension_strings(mesh, x, arm.height, beam_half, sockets, name)
@@ -360,17 +379,82 @@ def add_earth_wire_peak(mesh, design, sockets):
     sockets.append({"name": "EarthWire", "position": [0.0, 0.0, round(z + EARTH_WIRE_CLAMP, 3)]})
 
 
+# ================================================================================================= concrete pole
+def pole_radius_at(design, z):
+    """Radius of the spun concrete pole, tapering linearly from the ground to its top."""
+    pole_top = design.peak_height - POLE_TOP_GAP
+    fraction = min(max(z / pole_top, 0.0), 1.0)
+    return design.base_half_width + (design.pole_top_diameter / 2.0 - design.base_half_width) * fraction
+
+
+def add_pole(mesh, design):
+    """The pole with its concrete collar at the ground and the steel earth wire mast on top."""
+    pole_top = design.peak_height - POLE_TOP_GAP
+    mesh.cylinder(0.0, 0.0, -0.3, pole_top, design.base_half_width, "Concrete", segments=32, caps="H",
+                  radius_top=design.pole_top_diameter / 2.0)
+    mesh.cylinder(0.0, 0.0, -0.3, 0.35, design.base_half_width + 0.35, "Concrete", segments=32, caps="H")
+    mesh.cylinder(0.0, 0.0, pole_top - 0.3, pole_top + 0.05, design.pole_top_diameter / 2.0 + 0.03, "Metal",
+                  segments=24)
+    mesh.cylinder(0.0, 0.0, pole_top + 0.05, design.peak_height, 0.09, "Lattice", segments=12, radius_top=0.06)
+
+
+def pole_beam_size(arm, distance):
+    """Height and width of the tapered steel arm beam at a distance from the pole axis."""
+    fraction = min(distance / arm.reach, 1.0)
+    return arm.depth + (0.22 - arm.depth) * fraction, 0.24 + (0.14 - 0.24) * fraction
+
+
+def tapered_beam(mesh, side, start_x, end_x, bottom, start_size, end_size):
+    """A closed box beam along X from start_x to end_x with its bottom on z = bottom, tapering in height and width."""
+    rings = []
+    for x, (height, width) in ((start_x, start_size), (end_x, end_size)):
+        half = width / 2.0
+        rings.append([(x, -half, bottom), (x, half, bottom), (x, half, bottom + height), (x, -half, bottom + height)])
+    for i in range(4):
+        j = (i + 1) % 4
+        quad = [rings[0][i], rings[0][j], rings[1][j], rings[1][i]]
+        middle = tuple(sum(point[k] for point in quad) / 4.0 for k in range(3))
+        centre = (middle[0], 0.0, bottom + (start_size[0] + end_size[0]) / 4.0)
+        mesh.add_face(quad, "Lattice", desired_normal=(0.0, middle[1] - centre[1], middle[2] - centre[2]))
+    mesh.add_face(rings[0], "Lattice", desired_normal=(-side, 0.0, 0.0))
+    mesh.add_face(rings[1], "Lattice", desired_normal=(side, 0.0, 0.0))
+
+
+def add_pole_arm(mesh, design, arm, side):
+    """A tapered steel beam from a clamp band on the pole to the tip, held by two struts from a lower band."""
+    radius = pole_radius_at(design, arm.height)
+    start_x = side * (radius - 0.05)
+    tip_x = side * arm.reach
+    tapered_beam(mesh, side, start_x, tip_x, arm.height, pole_beam_size(arm, radius), pole_beam_size(arm, arm.reach))
+    strut_z = arm.height - 1.6
+    strut_radius = pole_radius_at(design, strut_z)
+    beam_band = (arm.height - 0.05, arm.height + arm.depth + 0.05, radius)
+    strut_band = (strut_z - 0.15, strut_z + 0.15, strut_radius)
+    for bottom, top, band_radius in (beam_band, strut_band):
+        mesh.cylinder(0.0, 0.0, bottom, top, band_radius + 0.03, "Metal", segments=24)
+    for sign_y in (-1, 1):
+        root = (side * (strut_radius + 0.02), sign_y * 0.12, strut_z)
+        head = (side * arm.reach * 0.7, sign_y * 0.05, arm.height)
+        mesh.tube(root, head, 0.045, "Lattice", segments=8)
+
+
 # ================================================================================================= kit entry
 def build_pylon(design):
     """One complete pylon and its sockets."""
     mesh = Mesh()
     sockets = []
-    add_foundations(mesh, design)
-    add_body(mesh, design)
-    add_anti_climb(mesh, design)
+    if design.structure == "pole":
+        add_pole(mesh, design)
+    else:
+        add_foundations(mesh, design)
+        add_body(mesh, design)
+        add_anti_climb(mesh, design)
     for level, arm in enumerate(sorted(design.arms, key=lambda arm: arm.height)):
         for side in (-1, 1):
-            add_cross_arm(mesh, design, arm, side)
+            if design.structure == "pole":
+                add_pole_arm(mesh, design, arm, side)
+            else:
+                add_cross_arm(mesh, design, arm, side)
         add_conductor_hardware(mesh, design, arm, sockets, "Arm%d" % (level + 1))
     add_earth_wire_peak(mesh, design, sockets)
     return mesh, sockets
@@ -424,7 +508,7 @@ def assemblies():
             "distance": widest * 1.9,
             "lens": 40.0,
         }]
-        if design.name.startswith("Donau"):
+        if design.name.startswith(("Donau", "Barrel")):
             closeups.append({
                 "caption": design.title + ", foot",
                 "target": (0.0, 0.0, 2.2),
