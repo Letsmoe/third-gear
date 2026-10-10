@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "BuildingRecords.h"
+#include "BridgeStructures.h"
 #include "BuildingTiles.h"
 #include "FarStructures.h"
 #include "HeightGrid.h"
@@ -745,8 +746,15 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	const std::vector<FParkedCar> Cars = BuildParkedCars(Osm, Graph, Furniture.Zebras, Roads.Ground(), Buildings, Inputs.Extent);
 	AddBars(Inputs, Furniture, Roads);
 	FSiteCounts SiteCounts;
-	const FSiteStructures Sites = BuildSiteStructures(Osm, Graph, Roads.Ground(), Buildings, KitSpecs,
+	FSiteStructures Sites = BuildSiteStructures(Osm, Graph, Roads.Ground(), Buildings, KitSpecs,
 													  [&](double X, double Y) { return Terrain.Sample(X, Y); }, &SiteCounts);
+	int RoadBridgeCount = 0;
+	int FootBridgeCount = 0;
+	const std::vector<FSitePlacement> BridgePieces = BuildBridgeStructures(
+		Osm, Streets, Roads, KitSpecs, [&](double X, double Y) { return Terrain.Sample(X, Y); }, &RoadBridgeCount, &FootBridgeCount);
+	Sites.Placements.insert(Sites.Placements.end(), BridgePieces.begin(), BridgePieces.end());
+	Log("bridges: " + std::to_string(RoadBridgeCount) + " road, " + std::to_string(FootBridgeCount) + " foot, "
+		+ std::to_string(BridgePieces.size()) + " pieces");
 	Landmarks.insert(Landmarks.end(), Sites.Replaced.begin(), Sites.Replaced.end());
 	Log("site structures: " + std::to_string(SiteCounts.BusMasts) + " bus masts, " + std::to_string(SiteCounts.Shelters)
 		+ " shelters, " + std::to_string(SiteCounts.Bins) + " bins, " + std::to_string(SiteCounts.Stations) + " petrol stations, "

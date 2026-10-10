@@ -1,5 +1,6 @@
 #include "Paths.h"
 
+#include "BridgeStructures.h"
 #include "PolygonQuery.h"
 
 #include <algorithm>
@@ -235,7 +236,7 @@ FPathSurfaces::FPathSurfaces(const FOsmData& Osm)
 		const std::string* Highway = FindTag(Tags, "highway");
 		const std::string* Tunnel = FindTag(Tags, "tunnel");
 		if (TagIs(Tags, "highway", "steps") || TagIn(Tags, "footway", {"sidewalk", "crossing"})
-			|| (Tunnel != nullptr && *Tunnel != "no"))
+			|| (Tunnel != nullptr && *Tunnel != "no") || IsFootBridge(Tags))
 		{
 			continue;
 		}

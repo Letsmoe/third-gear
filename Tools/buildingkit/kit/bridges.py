@@ -284,6 +284,166 @@ def build_timber_footbridge(span, width, height):
     return mesh
 
 
+# ================================================================================================= segments
+# Pieces the game lays along a deck of any length and width (WorldBuilder's BridgeStructures.cpp). Frame as everywhere
+# in the family: the deck runs along +Y, the walking or road surface is z = 0, +X is to the right of the direction of
+# travel. Pieces marked "unit" are one metre in the dimensions the game scales (X for the width, Y for the length, Z for
+# the height); the rest keep their size and are repeated.
+SEGMENT_LENGTH = 2.0  # nominal length of the repeated segments; the game stretches each a little to fill the deck
+EDGE_BEAM_WIDTH = 0.75
+EDGE_BEAM_BOTTOM = -0.35
+FOOT_RAIL_BAY = 1.5
+FOOT_GIRDER_DEPTH = 0.35
+
+
+def build_block():
+    """Unit concrete block: x -0.5 to 0.5, y 0 to 1, z -1 to 0. Slab, abutment wall, pier cap and bank seat."""
+    mesh = Mesh()
+    mesh.box(-0.5, 0.5, 0.0, 1.0, -1.0, 0.0, "Concrete")
+    return mesh
+
+
+def build_edge_beam():
+    """The cap along the outer edge of a road deck: its kerb face at x = 0, the fascia at x = EDGE_BEAM_WIDTH."""
+    mesh = Mesh()
+    polygon = [(0.0, EDGE_BEAM_BOTTOM), (EDGE_BEAM_WIDTH, EDGE_BEAM_BOTTOM), (EDGE_BEAM_WIDTH, KERB), (0.0, KERB)]
+    mesh.prism(polygon, "xz", 0.0, SEGMENT_LENGTH, "Concrete")
+    return mesh
+
+
+def build_infill_rail():
+    """One bay of the road bridge railing, standing on the edge beam (its foot at z = KERB + 0.02)."""
+    mesh = Mesh()
+    add_infill_railing(mesh, 0.0, 0.0, SEGMENT_LENGTH, 1.0)
+    return mesh
+
+
+def build_post_rail():
+    """One bay of the rural railing, posts and two rails."""
+    mesh = Mesh()
+    add_rail_railing(mesh, 0.0, 0.0, SEGMENT_LENGTH, 1.0)
+    return mesh
+
+
+def build_guard_rail():
+    """One bay of steel guard rail with its beam on the -X side; the game turns it around for the left edge."""
+    mesh = Mesh()
+    add_guard_rail(mesh, 0.0, 1.0, 0.0, SEGMENT_LENGTH)
+    return mesh
+
+
+def build_wing_wall():
+    """A wing wall, unit: 0.5 m thick, y 0 to 1 running back from the abutment, z -1 at the abutment up to 0 at the
+    deck, its lower edge rising to z = -0.3 at the far end. The game scales Y by the length and Z by the height."""
+    mesh = Mesh()
+    mesh.prism([(0.0, -1.0), (0.0, 0.0), (1.0, 0.0), (1.0, -0.3)], "yz", -0.25, 0.25, "Concrete")
+    return mesh
+
+
+def build_pier_column():
+    """Unit round pier column: radius 0.6, z -1 to 0; the game scales Z by the height."""
+    mesh = Mesh()
+    mesh.cylinder(0.0, 0.0, -1.0, 0.0, 0.6, "Concrete", segments=20)
+    return mesh
+
+
+def build_foot_planks():
+    """Planks across a footbridge deck, unit width, one segment long."""
+    mesh = Mesh()
+    add_plank_deck(mesh, 0.5, 0.0, SEGMENT_LENGTH, 0.0)
+    return mesh
+
+
+def build_foot_girder():
+    """One segment of steel I-girder, 0.2 m flanges, under the planks."""
+    mesh = Mesh()
+    i_girder(mesh, 0.0, 0.0, SEGMENT_LENGTH, -0.05, FOOT_GIRDER_DEPTH, 0.2)
+    return mesh
+
+
+def build_foot_stringer():
+    """One segment of timber stringer under the planks."""
+    mesh = Mesh()
+    mesh.box(-0.07, 0.07, 0.0, SEGMENT_LENGTH, -0.17, -0.05, "Timber")
+    return mesh
+
+
+def build_foot_pile():
+    """Unit timber pile: radius 0.12, z -1 to 0; the game scales Z by the height."""
+    mesh = Mesh()
+    mesh.cylinder(0.0, 0.0, -1.0, 0.0, 0.12, "Timber", segments=10)
+    return mesh
+
+
+def build_foot_rail():
+    """One bay of the steel footbridge railing, 1.1 m high."""
+    mesh = Mesh()
+    add_footbridge_railing(mesh, 0.0, 0.0, FOOT_RAIL_BAY)
+    return mesh
+
+
+def build_foot_rail_timber():
+    """One bay of the timber footbridge handrail: a post at the start, a top rail and a knee rail."""
+    mesh = Mesh()
+    mesh.box(-0.05, 0.05, -0.05, 0.05, -0.35, 1.0, "Timber")
+    mesh.box(-0.06, 0.06, 0.0, SEGMENT_LENGTH, 1.0, 1.08, "Timber")
+    mesh.box(-0.025, 0.025, 0.0, SEGMENT_LENGTH, 0.5, 0.6, "Timber")
+    return mesh
+
+
+SEGMENT_BUILDERS = OrderedDict([
+    ("Block", build_block), ("Edge_Beam", build_edge_beam), ("Rail_Infill", build_infill_rail),
+    ("Rail_Posts", build_post_rail), ("Guard_Rail", build_guard_rail), ("Wing_Wall", build_wing_wall),
+    ("Pier_Column", build_pier_column), ("Foot_Planks", build_foot_planks), ("Foot_Girder", build_foot_girder),
+    ("Foot_Stringer", build_foot_stringer), ("Foot_Pile", build_foot_pile), ("Foot_Rail", build_foot_rail),
+    ("Foot_Rail_Timber", build_foot_rail_timber),
+])
+
+
+def scaled(mesh, scale_x=1.0, scale_y=1.0, scale_z=1.0):
+    """A copy scaled about the origin, as the game stretches the unit pieces."""
+    return mesh.transformed(lambda p: (p[0] * scale_x, p[1] * scale_y, p[2] * scale_z))
+
+
+def laid_road_bridge(width, length, height, railing, guard_rail):
+    """A road bridge as the game lays it from the segments, for the sheet: (parts, extras). The scaled pieces are baked
+    into the extras mesh, the repeated ones are parts. Deck from y = 0 to length, surface at z = 0."""
+    block, wing, column = build_block(), build_wing_wall(), build_pier_column()
+    depth = max(0.45, length / 18.0)
+    slab_width = width + 2.0 * EDGE_BEAM_WIDTH
+    extras = Mesh()
+    extras.add(scaled(block, slab_width, length, depth), 0.0, 0.0, -ASPHALT)
+    for end_y, back in ((0.0, -1.0), (length, 1.0)):
+        wall_y = 0.0 if back < 0 else length - ABUTMENT_THICKNESS
+        extras.add(scaled(block, slab_width - 0.2, ABUTMENT_THICKNESS, height + 0.5 - ASPHALT - depth), 0.0, wall_y,
+                   -ASPHALT - depth)
+        for side in (-1.0, 1.0):
+            wing_piece = scaled(wing, 1.0, WING_LENGTH, height + 0.5)
+            if back > 0:
+                wing_piece = wing_piece.rotated_z(180.0)
+            extras.add(wing_piece, side * (slab_width / 2.0 - 0.4), end_y, 0.0)
+    pier_count = int(length // 20.0)
+    for index in range(1, pier_count + 1) if length > 28.0 else []:
+        y = length * index / (pier_count + 1)
+        for side in (-1.0, 1.0):
+            extras.add(scaled(column, 1.0, 1.0, height + 0.5 - depth), side * width * 0.25, y, -ASPHALT - depth - 0.6)
+        extras.add(scaled(block, width * 0.6, 1.2, 0.6), 0.0, y - 0.6, -ASPHALT - depth)
+    parts = []
+    count = max(1, round(length / SEGMENT_LENGTH))
+    stretch = length / count / SEGMENT_LENGTH
+    rail_piece = "Rail_Infill" if railing == "infill" else "Rail_Posts"
+    for index in range(count):
+        y = index * SEGMENT_LENGTH * stretch
+        parts.append(("Edge_Beam", (width / 2.0, y, 0.0), (0.0, 0.0, 0.0), "XYZ"))
+        parts.append(("Edge_Beam", (-width / 2.0, y + SEGMENT_LENGTH, 0.0), (0.0, 0.0, 180.0), "XYZ"))
+        parts.append((rail_piece, (width / 2.0 + EDGE_BEAM_WIDTH - 0.12, y, 0.0), (0.0, 0.0, 0.0), "XYZ"))
+        parts.append((rail_piece, (-width / 2.0 - EDGE_BEAM_WIDTH + 0.12, y, 0.0), (0.0, 0.0, 0.0), "XYZ"))
+        if guard_rail:
+            parts.append(("Guard_Rail", (width / 2.0 + 0.4, y, 0.0), (0.0, 0.0, 0.0), "XYZ"))
+            parts.append(("Guard_Rail", (-width / 2.0 - 0.4, y + SEGMENT_LENGTH, 0.0), (0.0, 0.0, 180.0), "XYZ"))
+    return parts, extras
+
+
 # ================================================================================================= samples
 SAMPLES = OrderedDict([
     ("Ditch_Slab", {"title": "Ditch crossing, 6 m span\n(Vierlande lane)",
@@ -318,6 +478,10 @@ def build():
         builder = build_steel_footbridge if name == "Foot_Steel" else build_timber_footbridge
         pieces[name] = builder(sample["span"], sample["width"], sample["height"])
         spec[name] = {"span": sample["span"], "width": sample["width"]}
+    for name, builder in SEGMENT_BUILDERS.items():
+        pieces[name] = builder()
+    spec["segment_length"] = SEGMENT_LENGTH
+    spec["edge_beam_width"] = EDGE_BEAM_WIDTH
     return pieces, spec
 
 
@@ -416,9 +580,34 @@ def footbridge_model(name, sample, mesh):
     }
 
 
+def laid_model(name, title, width, length, height, railing, guard_rail, crosses):
+    """The sheet entry for a bridge laid from the segments, side on like the samples."""
+    parts, extras = laid_road_bridge(width, length, height, railing, guard_rail)
+    ground = ground_under(length, width / 2.0 + EDGE_BEAM_WIDTH, height, crosses)
+    extras.add(ground)
+    side_parts = [(piece, (length / 2.0 - location[1], location[0], location[2] + height),
+                   (rotation[0], rotation[1], rotation[2] + 90.0), mode) for piece, location, rotation, mode in parts]
+    extras = extras.rotated_z(90.0).translated(length / 2.0, 0.0, height)
+    return {
+        "name": name, "title": title, "parts": side_parts, "extras": extras,
+        "half_width": length / 2.0 + 10.0, "top": height + 1.5, "depth": width + 20.0,
+        "closeups": [
+            {"caption": title.replace("\n", " "), "target": (0.0, 0.0, height * 0.5), "direction": (-0.35, -1.0, 0.22),
+             "distance": max(length * 1.0, 18.0), "lens": 35.0},
+            {"caption": "Driving onto it", "target": (0.0, 0.0, height + 1.0), "direction": (-1.0, -0.15, 0.05),
+             "distance": length / 2.0 + 14.0, "lens": 35.0},
+        ],
+    }
+
+
 def assemblies():
-    """The three road bridges and the two footbridges, side on, with ground, water and the approach roads."""
+    """The three road bridges and the two footbridges, side on, with ground, water and the approach roads, and two
+    bridges laid from the segments."""
     pieces, _spec = build()
     models = [road_bridge_model(name, sample) for name, sample in SAMPLES.items()]
+    models.append(laid_model("Laid_Town", "Laid from segments, 18 m\n(infill railing)", 8.0, 18.0, 3.5, "infill", False,
+                             "water"))
+    models.append(laid_model("Laid_Long", "Laid from segments, 46 m\n(piers, guard rail)", 9.0, 46.0, 6.0, "infill", True,
+                             "road"))
     models += [footbridge_model(name, sample, pieces[name]) for name, sample in FOOTBRIDGES.items()]
     return models

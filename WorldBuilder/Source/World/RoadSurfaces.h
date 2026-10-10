@@ -33,6 +33,8 @@ struct FBridgeDeck
 	FWorldPoint End;
 	double StartHeight = 0.0;
 	double EndHeight = 0.0;
+	/** The street model's bridge way this deck belongs to. */
+	const FStreetWay* Way = nullptr;
 };
 
 /** The surface of one window: the ground road surface by material, and the pavement. */
@@ -59,6 +61,9 @@ public:
 
 	/** The road surfaces and the pavement of a window, clipped to it. */
 	FWindowRoads InWindow(const FBox& Window) const;
+
+	/** Every bridge deck, in the order of the street model's bridge ways. */
+	const std::vector<FBridgeDeck>& AllBridges() const { return Bridges; }
 
 	/** The bridges overlapping a box. */
 	std::vector<const FBridgeDeck*> BridgesNear(const FBox& Box) const;
