@@ -97,6 +97,15 @@ insulator on suspension pylons, and at the end of the horizontal insulator on ea
 anchor pylons. The slots are `Lattice` for the steel angles, `Insulator` for the silicone sheds, `Metal` for fittings
 and `Concrete` for the foundations. The conductor stubs on the sheet are only a preview.
 
+### Bus stops
+
+`kit/shelters.py` (#102) has the urban glass shelter in two and three bays (`Glass_2Bay`, `Glass_3Bay`: steel frame,
+glass back and side, a back-lit advertising case at the left end, glass roof with the stop name strip, bench), the
+rural `Timber` shelter (boarded back and ends, pent roof) and the `StopSign` (Zeichen 224 on a pole, name plate,
+timetable case). A shelter's origin is the middle of its open front edge, which faces -Y toward the road; the sign's
+is the foot of its pole. The 1.5 m bay and the heights are plausible defaults, still to be measured on photos. New
+slots: `PowderCoat` for the dark steel, `AdPanel` for the lit posters, `SignFace` for printed sign faces.
+
 ## Props from Hunyuan 3D
 
 `props/run_props.sh` runs the whole chain. ComfyUI is started from a private venv in

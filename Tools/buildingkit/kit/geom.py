@@ -9,7 +9,8 @@ import random
 
 # Material slot names shared by every style.
 MATERIALS = ("Brick", "Plaster", "Timber", "Frame", "Glass", "Sill", "RoofTile", "Thatch", "Metal", "Concrete", "Paint",
-             "PaintRed", "PaintGreen", "Beacon", "Lattice", "Insulator")
+             "PaintRed", "PaintGreen", "Beacon", "Lattice", "Insulator",
+             "PowderCoat", "AdPanel", "SignFace")
 
 
 def vec_sub(first, second):
@@ -327,7 +328,8 @@ class Mesh:
                     quad = [rings[index][i], rings[index + 1][j], rings[index + 1][i]]
                 elif r1 < 1e-9:
                     quad = [rings[index][i], rings[index][j], rings[index + 1][i]]
-                self.add_face(quad, segment_material, smooth=True, desired_normal=outward)
+                # Flat ring steps stay flat-shaded; smoothing them across the axis gives crinkled shading.
+                self.add_face(quad, segment_material, smooth=abs(y1 - y0) > 1e-9, desired_normal=outward)
         if profile[0][1] > 1e-9:
             self.add_face(rings[0], materials.get(0, material), desired_normal=(0.0, -1.0, 0.0))
         if profile[-1][1] > 1e-9:

@@ -26,6 +26,9 @@ PREVIEW_COLOURS = {
     "Beacon": (1.0, 0.05, 0.02, 1.0),
     "Lattice": (0.30, 0.33, 0.31, 1.0),
     "Insulator": (0.55, 0.57, 0.60, 1.0),
+    "PowderCoat": (0.10, 0.11, 0.12, 1.0),
+    "AdPanel": (0.85, 0.80, 0.65, 1.0),
+    "SignFace": (0.95, 0.80, 0.10, 1.0),
 }
 
 # Enercon's tower foot: five green bands from dark at the ground to pale, 3 m each (V of the metre UVs is the height).
@@ -56,6 +59,9 @@ def get_material(name):
         material.surface_render_method = "BLENDED"
     if name == "PaintGreen":
         add_band_ramp(material, shader)
+    if name == "AdPanel":
+        shader.inputs["Emission Color"].default_value = colour
+        shader.inputs["Emission Strength"].default_value = 0.6
     if name == "Beacon":
         shader.inputs["Emission Color"].default_value = colour
         shader.inputs["Emission Strength"].default_value = 4.0
