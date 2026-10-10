@@ -619,6 +619,8 @@ def build():
     lower, upper = mesh.bounds()
     spec = {"Elbphilharmonie": {
         "origin_utm32": [round(wedge.origin_utm[0], 2), round(wedge.origin_utm[1], 2)],
+        "footprint_utm32": [[round(wedge.origin_utm[0] + x, 2), round(wedge.origin_utm[1] + y, 2)]
+                            for x, y in (wedge.west_south, wedge.east_south, wedge.east_north, wedge.west_north)],
         "origin_sea_level": QUAY_LEVEL,
         "axes": "x east, y north",
         "height_above_quay": round(upper[2], 2),

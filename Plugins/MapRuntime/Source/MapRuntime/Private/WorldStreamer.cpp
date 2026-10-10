@@ -25,7 +25,9 @@
 #include "AITrafficCar.h"
 #include "WorldFurniture.h"
 #include "WorldKitBuildings.h"
+#include "WorldStructures.h"
 #include "WorldSnow.h"
+#include "WorldStructuresActor.h"
 #include "WorldTileActor.h"
 #include "WorldTileData.h"
 #include "WorldTileMesher.h"
@@ -70,6 +72,8 @@ struct FTileSpawnJob
 	int32 FurnitureStep = 0;
 	/** Next group of building kit pieces to add (see AddKitInstancesStep). */
 	int32 KitStep = 0;
+	/** Next group of structure pieces to add (see AddStructureGroupsStep). */
+	int32 StructureStep = 0;
 };
 
 /** State shared with worker tasks, which may still finish after the streamer is gone. */
@@ -577,6 +581,10 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 		{
 			--Job.NextStep; // more kit pieces to add: come back to this step
 		}
+		else if (Meshes.Structures && !AddStructureGroupsStep(*Actor, *Meshes.Structures, Job.StructureStep++))
+		{
+			--Job.NextStep; // more structure pieces to add: come back to this step
+		}
 		else if (Meshes.Furniture)
 		{
 			FFurnitureMeshes Furniture;
@@ -811,6 +819,22 @@ void AWorldStreamer::LoadAroundBlocking(const FVector& Location)
 		FPlatformTime::Seconds() - StartTime);
 }
 
+void AWorldStreamer::SpawnTallStructures()
+{
+	const FString Path = FPaths::Combine(WorldDir, TEXT("structures.tgtile"));
+	if (FParse::Param(FCommandLine::Get(), TEXT("NoStructures")) || !FPaths::FileExists(Path))
+	{
+		return;
+	}
+	FActorSpawnParameters Parameters;
+	Parameters.Owner = this;
+	AWorldStructuresActor* Structures = GetWorld()->SpawnActor<AWorldStructuresActor>(Parameters);
+	if (Structures)
+	{
+		Structures->Load(Path);
+	}
+}
+
 void AWorldStreamer::BeginPlay()
 {
 	Super::BeginPlay();
@@ -819,6 +843,7 @@ void AWorldStreamer::BeginPlay()
 		return;
 	}
 	PrepareAssets();
+	SpawnTallStructures();
 	FVector Location;
 	FTransform StartTransform;
 	if (!GetViewerLocation(Location) && GetStartTransform(StartTransform))

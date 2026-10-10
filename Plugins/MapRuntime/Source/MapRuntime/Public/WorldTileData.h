@@ -149,6 +149,33 @@ struct FWorldPoi
 	static constexpr uint16 NoVariant = 0xFFFF;
 };
 
+enum class EWorldStructureKind : uint8
+{
+	/** A piece standing still, rotated by Rotation. */
+	Static = 0,
+	/** A turbine rotor: Rotation.Yaw, then Rotation.Roll is the shaft tilt; Param0 rpm, Param1 start angle degrees. */
+	Rotor = 1,
+	/** A conductor along Rotation (yaw and pitch), Scale.X metres long, sagging Param0 metres. */
+	Wire = 2,
+};
+
+/** One placed building kit structure piece (worldtile.py STRU, written by WorldBuilder's Structures.cpp). */
+struct FWorldStructure
+{
+	/** Name index of the piece, <family>_<piece> (pylons_Donau_Anchor). */
+	int32 Mesh = 0;
+	/** Name index of the material variant (a petrol brand, a poster), or INDEX_NONE. */
+	int32 Variant = INDEX_NONE;
+	EWorldStructureKind Kind = EWorldStructureKind::Static;
+	uint8 Flags = 0;
+	/** x, y relative to the file's corner; z absolute. */
+	FVector3f Position = FVector3f::ZeroVector;
+	FRotator3f Rotation = FRotator3f::ZeroRotator;
+	FVector3f Scale = FVector3f::OneVector;
+	float Param0 = 0.f;
+	float Param1 = 0.f;
+};
+
 /** Terrain and road heights and land cover on the tile's vertex grid (row 0 at the tile's y origin). */
 struct FWorldTileGrid
 {
@@ -196,6 +223,7 @@ enum class EWorldTileSections : uint32
 	Roofs = 1 << 6,
 	Plants = 1 << 7,
 	Pois = 1 << 8,
+	Structures = 1 << 9,
 	All = 0xFFFFFFFF,
 };
 ENUM_CLASS_FLAGS(EWorldTileSections);
@@ -213,6 +241,7 @@ struct MAPRUNTIME_API FWorldTileData
 	TArray<FWorldBuilding> Buildings;
 	TArray<FWorldPlant> Plants;
 	TArray<FWorldPoi> Pois;
+	TArray<FWorldStructure> Structures;
 
 	/**
 	 * Reads a .tgtile file. Returns false and fills Error when the file is missing or malformed. Only the sections in

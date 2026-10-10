@@ -28,7 +28,7 @@ import bpy  # noqa: E402
 import numpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
-from kit import blender_io, bridges, greenhouses, landmarks, petrol, pylons, shelters, turbines  # noqa: E402
+from kit import blender_io, bridges, flat_spec, greenhouses, landmarks, petrol, pylons, shelters, turbines  # noqa: E402
 from kit.geom import Mesh  # noqa: E402
 
 FAMILIES = {"turbines": turbines, "pylons": pylons, "shelters": shelters, "greenhouses": greenhouses,
@@ -258,6 +258,7 @@ def build_family(family, output_dir):
     stitch_grid(tile_paths, 2, os.path.join(renders, family + "_closeups.png"))
     with open(os.path.join(output_dir, "kit_stats_%s.json" % family), "w") as handle:
         json.dump({family: {"spec": spec, "pieces": piece_stats(pieces)}}, handle, indent=1)
+    flat_spec.write(os.path.join(output_dir, "kit_spec_%s.txt" % family), family, spec)
     total = sum(kit_mesh.triangle_count() for kit_mesh in pieces.values())
     print("FAMILY %s: %d pieces, %d triangles" % (family, len(pieces), total))
 

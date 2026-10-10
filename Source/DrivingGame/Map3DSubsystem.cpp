@@ -44,7 +44,7 @@ TAutoConsoleVariable<float> CVarLoadRadius(TEXT("tg.Map3D.LoadRadius"), 3200.f,
 	TEXT("Tiles farther than this from the view's centre are never loaded, metres."), ECVF_Default);
 
 constexpr float TileSizeMeters = 250.f;
-constexpr float CentimetresPerMetre = 100.f;
+constexpr float SubsystemCentimetresPerMetre = 100.f;
 constexpr float HorizontalFovDegrees = 40.f;
 
 /** Where the car sits in the minimap picture, as a fraction of the half height below the centre. */
@@ -828,7 +828,7 @@ void UMap3DSubsystem::CollectFinishedTiles()
 		{
 			continue;
 		}
-		const FTransform Transform(FVector(Key.X * TileSizeMeters * CentimetresPerMetre, Key.Y * TileSizeMeters * CentimetresPerMetre, 0.0));
+		const FTransform Transform(FVector(Key.X * TileSizeMeters * SubsystemCentimetresPerMetre, Key.Y * TileSizeMeters * SubsystemCentimetresPerMetre, 0.0));
 		if (Tile.Component)
 		{
 			Tile.Component->SetMeshData(Built->Mesh);
@@ -889,13 +889,13 @@ void UMap3DSubsystem::UpdateMarkers(const FMap3DCamera& Camera)
 	const FVector2f Car = Minimap->GetCarPositionMeters();
 	const float YawDegrees = FMath::RadiansToDegrees(Minimap->GetMinimapHeadingRadians());
 	CarComponent->SetVisibility(true);
-	CarComponent->SetWorldTransform(FTransform(FRotator(0.f, YawDegrees, 0.f), FVector(Car.X, Car.Y, 0.f) * CentimetresPerMetre, FVector(CarScale)));
+	CarComponent->SetWorldTransform(FTransform(FRotator(0.f, YawDegrees, 0.f), FVector(Car.X, Car.Y, 0.f) * SubsystemCentimetresPerMetre, FVector(CarScale)));
 	FVector2f Waypoint;
 	const bool bHasWaypoint = Minimap->GetWaypointMeters(Waypoint);
 	PinComponent->SetVisibility(bHasWaypoint);
 	if (bHasWaypoint)
 	{
-		PinComponent->SetWorldTransform(FTransform(FRotator::ZeroRotator, FVector(Waypoint.X, Waypoint.Y, 0.f) * CentimetresPerMetre, FVector(PinScale)));
+		PinComponent->SetWorldTransform(FTransform(FRotator::ZeroRotator, FVector(Waypoint.X, Waypoint.Y, 0.f) * SubsystemCentimetresPerMetre, FVector(PinScale)));
 	}
 }
 
@@ -926,7 +926,7 @@ void UMap3DSubsystem::UpdateRoute()
 	}
 	FMap3DMeshBuilder Builder;
 	Builder.AddRibbon(Relative, RouteWidthMeters, RouteHeightMeters, EMap3DColor::Route);
-	const FTransform Transform(FVector(Origin.X, Origin.Y, 0.f) * CentimetresPerMetre);
+	const FTransform Transform(FVector(Origin.X, Origin.Y, 0.f) * SubsystemCentimetresPerMetre);
 	if (RouteComponent)
 	{
 		RouteComponent->SetMeshData(Builder.Finish());
@@ -951,7 +951,7 @@ void UMap3DSubsystem::CaptureView(const FMap3DCamera& Camera)
 	Capture->FOVAngle = Camera.HorizontalFovDegrees;
 	const FRotator Rotation = Camera.GetForward().Rotation();
 	Scene->GetWorld()->SendAllEndOfFrameUpdates();
-	Capture->SetWorldLocationAndRotation(Camera.GetLocationMeters() * CentimetresPerMetre, Rotation);
+	Capture->SetWorldLocationAndRotation(Camera.GetLocationMeters() * SubsystemCentimetresPerMetre, Rotation);
 	Scene->GetWorld()->SendAllEndOfFrameUpdates();
 	Capture->CaptureScene();
 	bHasPicture = true;

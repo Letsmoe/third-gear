@@ -28,7 +28,7 @@ namespace
 	/** Terrain tiles are kept this far around the viewer, and dropped beyond twice that. */
 	constexpr double TerrainReachMeters = 1500.0;
 
-	constexpr double CentimetresPerMetre = 100.0;
+	constexpr double WeatherCentimetresPerMetre = 100.0;
 
 	/**
 	 * Unreal centimetres, X east and Y south, to Isobar metres, X east and Y north.
@@ -37,7 +37,7 @@ namespace
 	FVector2d ToIsobarMeters(const FVector& WorldLocation)
 	{
 		// Subtracted from zero rather than negated, so the origin reads 0 and not -0.
-		return FVector2d(WorldLocation.X / CentimetresPerMetre, 0.0 - WorldLocation.Y / CentimetresPerMetre);
+		return FVector2d(WorldLocation.X / WeatherCentimetresPerMetre, 0.0 - WorldLocation.Y / WeatherCentimetresPerMetre);
 	}
 
 	double CommandLineDouble(const TCHAR* Key, double Default)
@@ -97,7 +97,7 @@ namespace
 		const FVector2d Meters = ToIsobarMeters(Location);
 		Output.Logf(TEXT("Weather on day %d at %02d:%02d solar, %.0f m east and %.0f m north of the origin, %.0f m above NHN"),
 			Calendar.DayOfYear + 1, FMath::FloorToInt32(Calendar.GetHourOfDay()),
-			FMath::FloorToInt32(FMath::Fmod(Calendar.GetHourOfDay(), 1.0) * 60.0), Meters.X, Meters.Y, Location.Z / CentimetresPerMetre);
+			FMath::FloorToInt32(FMath::Fmod(Calendar.GetHourOfDay(), 1.0) * 60.0), Meters.X, Meters.Y, Location.Z / WeatherCentimetresPerMetre);
 		TArray<FString> Lines;
 		IsobarDescribePointWeather(Here).ParseIntoArrayLines(Lines);
 		for (const FString& Line : Lines)
@@ -220,7 +220,7 @@ bool UWeatherSubsystem::SampleAt(const FVector& WorldLocation, FIsobarPointWeath
 	{
 		return false;
 	}
-	OutWeather = Weather->SampleAt(ToIsobarMeters(WorldLocation), WorldLocation.Z / CentimetresPerMetre, WeatherSeconds);
+	OutWeather = Weather->SampleAt(ToIsobarMeters(WorldLocation), WorldLocation.Z / WeatherCentimetresPerMetre, WeatherSeconds);
 	return true;
 }
 

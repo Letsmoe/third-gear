@@ -207,7 +207,7 @@ bool FRadioStreamer::SleepUnlessStopped(double Seconds) const
 
 void FRadioStreamer::Run()
 {
-	double RetrySeconds = 1.0;
+	double RetryDelaySeconds = 1.0;
 	while (!bStopRequested)
 	{
 		const bool bReceivedAudio = RunSession();
@@ -218,9 +218,9 @@ void FRadioStreamer::Run()
 		{
 			break;
 		}
-		RetrySeconds = bReceivedAudio ? 1.0 : FMath::Min(RetrySeconds * 2.0, 15.0);
-		UE_LOG(LogRadio, Warning, TEXT("%s: connection lost, retrying in %.0f s"), *StationName, RetrySeconds);
-		if (!SleepUnlessStopped(RetrySeconds))
+		RetryDelaySeconds = bReceivedAudio ? 1.0 : FMath::Min(RetryDelaySeconds * 2.0, 15.0);
+		UE_LOG(LogRadio, Warning, TEXT("%s: connection lost, retrying in %.0f s"), *StationName, RetryDelaySeconds);
+		if (!SleepUnlessStopped(RetryDelaySeconds))
 		{
 			break;
 		}

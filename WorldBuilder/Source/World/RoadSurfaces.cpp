@@ -383,6 +383,7 @@ FRoadSurfaces::FRoadSurfaces(const FStreetModel& Model, const FTerrainGrid& Terr
 		FBridgeDeck& Deck = Bridges.emplace_back();
 		const FPolyline Line = ToWorld(Way.Points);
 		Deck.Polygon = BufferPolyline(Line, Model.Widths.at(Way.Id) / 2.0, ECapStyle::Flat, 8);
+		Deck.Way = &Way;
 		Deck.Start = Line.front();
 		Deck.End = Line.back();
 	}

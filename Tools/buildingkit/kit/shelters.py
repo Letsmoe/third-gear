@@ -2,7 +2,7 @@
 mast with its timetable case and street bin.
 
 Frame: metres, Z up. A shelter's origin is the middle of its open front edge on the pavement; the open side faces -Y,
-toward the road, and the back wall stands at +Y. The sign's origin is the foot of its pole, the sign faces -Y.
+toward the road, and the back wall stands at +Y. The sign's and the bin's origin is the foot of the pole, they face -Y.
 
 The glass shelter follows a photo of the Rathausmarkt stop; its bay width (1.5 m) and heights are estimated from it,
 not measured.
@@ -483,14 +483,24 @@ def build_stop_sign():
     return mesh
 
 
+def build_bin():
+    """The same street bin on a short anthracite post of its own, for the bins OSM maps away from the stops; it faces
+    -Y like the mast."""
+    mesh = Mesh()
+    mesh.cylinder(0.0, 0.0, 0.0, BIN_TOP + 0.08, MAST_RADIUS, "PowderCoat", segments=12)
+    add_street_bin(mesh)
+    return mesh
+
+
 # ================================================================================================= kit entry
 def build():
-    """The shelters and the sign as pieces, and a spec with their footprints."""
+    """The shelters, the sign and the bin as pieces, and a spec with their footprints."""
     pieces = OrderedDict()
     pieces["Glass_2Bay"] = build_glass_shelter(2)
     pieces["Glass_3Bay"] = build_glass_shelter(3)
     pieces["Timber"] = build_timber_shelter()
     pieces["StopSign"] = build_stop_sign()
+    pieces["Bin"] = build_bin()
     spec = {}
     for name, mesh in pieces.items():
         lower, upper = mesh.bounds()
@@ -511,7 +521,7 @@ def preview_textures():
 
 
 TITLES = {"Glass_2Bay": "Glass shelter, 2 bays", "Glass_3Bay": "Glass shelter, 3 bays",
-          "Timber": "Timber shelter", "StopSign": "Stop mast"}
+          "Timber": "Timber shelter", "StopSign": "Stop mast", "Bin": "Street bin"}
 
 
 # Extra close-ups of the printed faces, per piece.

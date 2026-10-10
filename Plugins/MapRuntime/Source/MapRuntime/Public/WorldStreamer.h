@@ -113,6 +113,9 @@ private:
 	/** Adds the region's horizon tiles from horizon/horizon.json, if it was built (Tools/osmimport/build_horizon_world.py). */
 	void AddHorizonTiles();
 
+	/** Spawns the region's turbines, pylons and landmarks (structures.tgtile) once; -NoStructures skips them. */
+	void SpawnTallStructures();
+
 	/** Resolves materials and plant models and measures the models; called once before the first build. */
 	void PrepareAssets();
 
