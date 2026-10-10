@@ -291,6 +291,22 @@ wheels steer and roll, brake, indicator and head lights through the `veh_light` 
 rides a camera over the lanes and prints violations by AI cars, collisions between them, stuck cars and frame times;
 `-NoTraffic` turns it off, `tg.TrafficSpawnAnywhere 1` lets cars appear in view for staging screenshots.
 
+## Maps
+- **Minimap and full map** (`UMinimapSubsystem`, `SMinimapWidgets.*`; data in `Plugins/MapRuntime`: `MapTileCache` reads
+  land cover, water, buildings and footpaths straight from the `.tgtile` files, `MinimapIndex` grids the AI lanes for the
+  roads, `MinimapRoute` plans routes by A* over the lanes' `next` links on a worker thread, `MapPalette` holds the Google
+  Maps style light and dark colours, dark below -3° sun). The minimap sits bottom right, heading-up, 100/200/400/800 m
+  with + and -; M opens the full map (pauses; drag pans, wheel zooms, click sets a waypoint, right click clears it).
+  Needs the lanes, so nothing shows with `-NoTraffic`; hidden in VR and free camera. Switches: `-NoMinimap`, `-OpenMap`,
+  `-MapView=<x>,<y>,<m per px>`, `-MapWaypoint=<x>,<y>`, `-MinimapRadius=<m>`, `-MapDark`, `-MinimapStats`; `-ShowUI`
+  puts the viewport UI into seat shots.
+- **3D view** (`Map3DSubsystem`, `Map3DTileBuilder`, `Map3DMeshBuilder`, `Map3DMeshComponent`): T toggles 2D and 3D.
+  Tile meshes (buildings with their BLDG, BTYP and ROOF roofs, SURF roads and water, MARK markings, trees, signals) live in
+  a private `FPreviewScene` that a scene capture renders without Lumen or shadows, so the main view never sees them;
+  colours come from a palette texture written from `MapPalette`. In the full map right-drag or Ctrl+drag tilts and
+  rotates. Materials `/Game/UI/M_Map3D*` come from `Scripts/create_map3d_material.py`. Cvars `tg.Map3D.*`; switches
+  `-Map3D`, `-MapTilt=`, `-MapRotation=`, `-MapMetersPerPixel=`, `-MapSpin`, `-Map3DStats`, `-Map3DDump`.
+
 ## Car & wheel
 - **Classes** (`Source/DrivingGame/`): `ACarPawn` (default pawn: mesh + attached meshes from settings, seated HMD camera
   at `DriverEyeLocation`, speed/gear/rpm text in front of the driver, keyboard + wheel input, FFB);

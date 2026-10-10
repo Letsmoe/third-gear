@@ -63,6 +63,9 @@ public:
 	virtual void Tick(float DeltaTime) override;
 	virtual TStatId GetStatId() const override;
 
+	/** Sun altitude this frame, degrees (negative at night). */
+	float GetSunAltitudeDegrees() const { return SunAltitudeDegrees; }
+
 	/** The smoothed weather currently shown. */
 	const FWeatherVisualState& GetState() const { return Current; }
 

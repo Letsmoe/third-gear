@@ -385,6 +385,8 @@ void FMenuPages::AddWheelButtonRows(FMenuPage& Page)
 	AddWheelButtonAssign(Page, TEXT("Radio on and off"), TEXT("Switches the car radio on and off."), &UWheelInputSettings::RadioToggleButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Next station"), TEXT("Tunes the next radio station."), &UWheelInputSettings::RadioNextButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Previous station"), TEXT("Tunes the previous radio station."), &UWheelInputSettings::RadioPreviousButtonIndex);
+	AddWheelButtonAssign(Page, TEXT("Minimap zoom in"), TEXT("Shows less of the minimap, in more detail. The + key does the same."), &UWheelInputSettings::MinimapZoomInButtonIndex);
+	AddWheelButtonAssign(Page, TEXT("Minimap zoom out"), TEXT("Shows more of the minimap. The - key does the same."), &UWheelInputSettings::MinimapZoomOutButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Open menu"), TEXT("Pauses the game and opens the menu. Holding the D-pad up for a second does the same."), &UWheelInputSettings::MenuButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Menu confirm"), TEXT("Chooses the selected entry in the menu. D-pad right does this without a button."), &UWheelInputSettings::MenuConfirmButtonIndex);
 	AddWheelButtonAssign(Page, TEXT("Menu back"), TEXT("Goes back one page. D-pad left on an entry does this without a button."), &UWheelInputSettings::MenuBackButtonIndex);

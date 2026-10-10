@@ -228,7 +228,8 @@ void ADrivingGameMode::BeginPlay()
 /** Screenshots include Slate widgets (menu pages, the radio readout) when a menu page is forced or -ShotUI is given. */
 static bool ShotShowsSlateUI()
 {
-	return !GameFlow::GetDebugMenuPage().IsEmpty() || FParse::Param(FCommandLine::Get(), TEXT("ShotUI"));
+	return !GameFlow::GetDebugMenuPage().IsEmpty() || FParse::Param(FCommandLine::Get(), TEXT("ShotUI"))
+		|| FParse::Param(FCommandLine::Get(), TEXT("ShowUI"));
 }
 
 namespace DrivingGameModeShots

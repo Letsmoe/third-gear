@@ -17,6 +17,8 @@ public class MapRuntime : ModuleRules
 		{
 			"Projects",
 			"RenderCore",
+			"Slate",
+			"SlateCore",
 			"GeometryCore",
 			"GeometryFramework",
 			"GeometryAlgorithms",

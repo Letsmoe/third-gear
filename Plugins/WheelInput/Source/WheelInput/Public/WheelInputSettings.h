@@ -116,6 +116,14 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Buttons")
 	int32 RadioPreviousButtonIndex = -1;
 
+	/** Zooms the minimap in one step (-1 = unassigned; the keyboard + key always works). */
+	UPROPERTY(Config, EditAnywhere, Category = "Buttons")
+	int32 MinimapZoomInButtonIndex = -1;
+
+	/** Zooms the minimap out one step (-1 = unassigned; the keyboard - key always works). */
+	UPROPERTY(Config, EditAnywhere, Category = "Buttons")
+	int32 MinimapZoomOutButtonIndex = -1;
+
 	/** Opens and closes the in-game settings menu (-1 = unassigned; the keyboard F1 always works). Assignable in the menu. */
 	UPROPERTY(Config, EditAnywhere, Category = "Menu")
 	int32 MenuButtonIndex = -1;

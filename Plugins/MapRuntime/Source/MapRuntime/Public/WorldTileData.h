@@ -183,6 +183,23 @@ private:
 	float SampleBilinear(const TArray<uint16>& Heights, float LocalX, float LocalY) const;
 };
 
+/** The sections of a tile file, so a reader that needs only some of them can skip decompressing the rest. */
+enum class EWorldTileSections : uint32
+{
+	None = 0,
+	Names = 1 << 0,
+	Grid = 1 << 1,
+	Surfaces = 1 << 2,
+	Markings = 1 << 3,
+	Buildings = 1 << 4,
+	BuildingTypes = 1 << 5,
+	Roofs = 1 << 6,
+	Plants = 1 << 7,
+	Pois = 1 << 8,
+	All = 0xFFFFFFFF,
+};
+ENUM_CLASS_FLAGS(EWorldTileSections);
+
 struct MAPRUNTIME_API FWorldTileData
 {
 	/** Tile corner in world metres. */
@@ -197,8 +214,11 @@ struct MAPRUNTIME_API FWorldTileData
 	TArray<FWorldPlant> Plants;
 	TArray<FWorldPoi> Pois;
 
-	/** Reads a .tgtile file. Returns false and fills Error when the file is missing or malformed. */
-	static bool Load(const FString& Path, FWorldTileData& Out, FString& Error);
+	/**
+	 * Reads a .tgtile file. Returns false and fills Error when the file is missing or malformed. Only the sections in
+	 * Sections are read; the others are skipped without decompressing them.
+	 */
+	static bool Load(const FString& Path, FWorldTileData& Out, FString& Error, EWorldTileSections Sections = EWorldTileSections::All);
 
 	/** Height of a surface vertex at a tile-local position, by the surface's height rule. */
 	float SurfaceHeightAt(const FWorldSurface& Surface, float LocalX, float LocalY) const;
