@@ -313,7 +313,7 @@ def build_tower(model):
         mesh.cylinder(0.0, 0.0, z - 0.08, z + 0.08, radius_at(z) + 0.035, "Paint", segments=48)
     mesh.cylinder(0.0, 0.0, height - 0.12, height, top_radius + 0.06, "Paint", segments=48, caps="LH")
     mesh.cylinder(0.0, 0.0, -0.3, 0.25, base_radius + 0.9, "Concrete", segments=48)
-    add_door(mesh, base_radius)
+    add_door(mesh, radius_at)
     if model.transformer_box:
         add_transformer_box(mesh, base_radius)
     return mesh
@@ -322,29 +322,148 @@ def build_tower(model):
 STAIR_RISER = 0.22
 STAIR_GOING = 0.28
 STAIR_HALF_WIDTH = 0.55
+RAIL_X = STAIR_HALF_WIDTH + 0.03
 HANDRAIL_HEIGHT = 1.0
+RAIL_RADIUS = 0.024
+DOOR_BOTTOM = 1.1
+DOOR_WIDTH = 0.85
+DOOR_HEIGHT = 2.1
+DOOR_CORNER = 0.2
+# The door leaf stands a little proud of the tower skin and the welded frame (collar) around it further still, so
+# neither needs a hole cut into the tower.
+LEAF_PROUD = 0.012
+COLLAR_PROUD = 0.075
+COLLAR_WIDTH = 0.13
 
 
-def add_door(mesh, base_radius):
-    """Door in the tower foot facing -Y, with a landing on posts and a steel stair down to the ground."""
-    door_bottom = 1.1
-    face_y = -base_radius
-    mesh.box(-0.5, 0.5, face_y - 0.06, face_y + 0.3, door_bottom, door_bottom + 2.3, "Metal", skip="B")
-    mesh.box(-0.42, 0.42, face_y - 0.08, face_y - 0.06, door_bottom + 0.05, door_bottom + 2.2, "Metal", skip="B")
+def on_tower(radius_at, arc, z, proud):
+    """Point on the tower surface facing -Y, at an arc length from the front line and a height, pushed out by proud."""
+    radius = radius_at(z) + proud
+    angle = arc / radius_at(z)
+    return (radius * math.sin(angle), -radius * math.cos(angle), z)
+
+
+def door_outline(width, height, corner):
+    """Rounded door outline as (arc, z) around the door's centre line, starting at the bottom middle."""
+    outline = rounded_rectangle(width, height, corner, DOOR_BOTTOM, corner_segments=5)
+    return [(x, z) for x, z in outline]
+
+
+def add_door(mesh, radius_at):
+    """Steel tower door: a welded collar following the curve of the tower, the leaf with hinges, lever handle, lock
+    and a vent grille, then a landing on posts and a steel stair down to the ground."""
+    inner = door_outline(DOOR_WIDTH, DOOR_HEIGHT, DOOR_CORNER)
+    outer = door_outline(DOOR_WIDTH + 2 * COLLAR_WIDTH, DOOR_HEIGHT + 2 * COLLAR_WIDTH, DOOR_CORNER + COLLAR_WIDTH)
+    outer = [(x, z - COLLAR_WIDTH) for x, z in outer]
+    add_collar(mesh, radius_at, inner, outer)
+    add_leaf(mesh, radius_at, inner)
+    add_door_fittings(mesh, radius_at)
+    face_y = -radius_at(0.0)
     landing_front = face_y - 1.3
-    mesh.box(-0.8, 0.8, landing_front, face_y + 0.2, door_bottom - 0.06, door_bottom, "Metal")
-    for x in (-0.75, 0.75):
-        mesh.tube((x, landing_front + 0.05, 0.0), (x, landing_front + 0.05, door_bottom - 0.06), 0.04, "Metal", segments=6)
-    add_stair(mesh, landing_front, door_bottom)
-    for x in (-0.8, 0.8):
-        mesh.tube((x, landing_front, door_bottom), (x, landing_front, door_bottom + HANDRAIL_HEIGHT), 0.025, "Metal", segments=6)
-        mesh.tube((x, landing_front, door_bottom + HANDRAIL_HEIGHT), (x, face_y, door_bottom + HANDRAIL_HEIGHT), 0.025,
-                  "Metal", segments=6)
+    landing_half = RAIL_X + 0.04
+    mesh.box(-landing_half, landing_half, landing_front, face_y + 0.3, DOOR_BOTTOM - 0.06, DOOR_BOTTOM, "Metal")
+    for x in (-RAIL_X, RAIL_X):
+        mesh.tube((x, landing_front + 0.05, 0.0), (x, landing_front + 0.05, DOOR_BOTTOM - 0.06), 0.04, "Metal", segments=8)
+    add_stair(mesh, landing_front, DOOR_BOTTOM, radius_at)
 
 
-def add_stair(mesh, top_y, top_z):
+def add_collar(mesh, radius_at, inner, outer):
+    """The raised frame between the inner (opening) and outer outlines: front face, outer edge and inner reveal."""
+    count = len(inner)
+    for i in range(count):
+        j = (i + 1) % count
+        front = [on_tower(radius_at, *outer[i], COLLAR_PROUD), on_tower(radius_at, *outer[j], COLLAR_PROUD),
+                 on_tower(radius_at, *inner[j], COLLAR_PROUD), on_tower(radius_at, *inner[i], COLLAR_PROUD)]
+        mesh.add_face(front, "Paint", desired_normal=outward_on_tower(front))
+        edge = [on_tower(radius_at, *outer[i], -0.01), on_tower(radius_at, *outer[j], -0.01),
+                on_tower(radius_at, *outer[j], COLLAR_PROUD), on_tower(radius_at, *outer[i], COLLAR_PROUD)]
+        mesh.add_face(edge, "Paint", desired_normal=away_from(edge, inner_centre(radius_at)))
+        reveal = [on_tower(radius_at, *inner[i], LEAF_PROUD), on_tower(radius_at, *inner[j], LEAF_PROUD),
+                  on_tower(radius_at, *inner[j], COLLAR_PROUD), on_tower(radius_at, *inner[i], COLLAR_PROUD)]
+        mesh.add_face(reveal, "Paint", desired_normal=toward(reveal, inner_centre(radius_at)))
+
+
+def inner_centre(radius_at):
+    """Centre of the door opening on the tower surface."""
+    return on_tower(radius_at, 0.0, DOOR_BOTTOM + DOOR_HEIGHT / 2.0, LEAF_PROUD)
+
+
+def face_middle(points):
+    """Average of the points."""
+    return tuple(sum(point[k] for point in points) / len(points) for k in range(3))
+
+
+def away_from(points, centre):
+    """Direction from centre to the middle of the points, flattened onto the tower surface (no radial part)."""
+    middle = face_middle(points)
+    return (middle[0] - centre[0], 0.0, middle[2] - centre[2])
+
+
+def toward(points, centre):
+    """Direction from the middle of the points to centre, flattened onto the tower surface."""
+    away = away_from(points, centre)
+    return (-away[0], -away[1], -away[2])
+
+
+def outward_on_tower(points):
+    """Radial outward direction of the tower at the middle of the points."""
+    middle = face_middle(points)
+    return (middle[0], middle[1], 0.0)
+
+
+def add_leaf(mesh, radius_at, inner):
+    """The door leaf: a fan from its centre to the opening outline, curved with the tower."""
+    centre = inner_centre(radius_at)
+    count = len(inner)
+    for i in range(count):
+        j = (i + 1) % count
+        triangle = [centre, on_tower(radius_at, *inner[i], LEAF_PROUD), on_tower(radius_at, *inner[j], LEAF_PROUD)]
+        mesh.add_face(triangle, "Paint", smooth=True, desired_normal=outward_on_tower(triangle))
+
+
+def add_door_fittings(mesh, radius_at):
+    """Three hinges on the left edge, the lever handle and lock on the right, a louvred vent near the bottom."""
+    hinge_arc = -DOOR_WIDTH / 2.0 + 0.02
+    for height in (0.25, DOOR_HEIGHT / 2.0, DOOR_HEIGHT - 0.3):
+        z = DOOR_BOTTOM + height
+        bottom = on_tower(radius_at, hinge_arc, z - 0.09, LEAF_PROUD + 0.03)
+        top = on_tower(radius_at, hinge_arc, z + 0.09, LEAF_PROUD + 0.03)
+        mesh.tube(bottom, top, 0.025, "Metal", segments=8)
+    handle_z = DOOR_BOTTOM + 1.05
+    handle_arc = DOOR_WIDTH / 2.0 - 0.11
+    rosette_root = on_tower(radius_at, handle_arc, handle_z, LEAF_PROUD)
+    rosette_tip = on_tower(radius_at, handle_arc, handle_z, LEAF_PROUD + 0.06)
+    mesh.tube(rosette_root, rosette_tip, 0.03, "Metal", segments=10)
+    lever_end = on_tower(radius_at, handle_arc - 0.13, handle_z, LEAF_PROUD + 0.06)
+    mesh.tube(rosette_tip, lever_end, 0.012, "Metal", segments=8)
+    lock_root = on_tower(radius_at, handle_arc, handle_z - 0.12, LEAF_PROUD)
+    lock_tip = on_tower(radius_at, handle_arc, handle_z - 0.12, LEAF_PROUD + 0.02)
+    mesh.tube(lock_root, lock_tip, 0.018, "Metal", segments=10)
+    add_vent(mesh, radius_at)
+
+
+def add_vent(mesh, radius_at):
+    """Louvred vent grille in the lower part of the leaf: a frame and slanted slats."""
+    half_width = 0.25
+    bottom = DOOR_BOTTOM + 0.15
+    top = bottom + 0.35
+    frame = [(-half_width, bottom), (half_width, bottom), (half_width, top), (-half_width, top), (-half_width, bottom)]
+    path = [on_tower(radius_at, arc, z, LEAF_PROUD + 0.012) for arc, z in frame]
+    mesh.pipe(path, 0.012, "Metal", segments=6, caps=False)
+    slat_count = 6
+    for slat in range(slat_count):
+        z = bottom + (slat + 0.5) * (top - bottom) / slat_count
+        row = []
+        for arc in (-half_width, 0.0, half_width):
+            row.append((on_tower(radius_at, arc, z + 0.022, LEAF_PROUD), on_tower(radius_at, arc, z - 0.022, LEAF_PROUD + 0.025)))
+        for (upper_a, lower_a), (upper_b, lower_b) in zip(row, row[1:]):
+            quad = [lower_a, lower_b, upper_b, upper_a]
+            mesh.add_face(quad, "Metal", desired_normal=(lower_a[0], lower_a[1], -0.5))
+
+
+def add_stair(mesh, top_y, top_z, radius_at):
     """Straight steel stair running toward -Y from a landing edge at (top_y, top_z) down to the ground: two sloped
-    stringers with the treads between them and a handrail on each side."""
+    stringers with the treads between them, and on each side one bent handrail from the ground to the tower wall."""
     riser_count = max(2, round(top_z / STAIR_RISER))
     riser = top_z / riser_count
     run = (riser_count - 1) * STAIR_GOING
@@ -364,15 +483,18 @@ def add_stair(mesh, top_y, top_z):
         tread_front = foot_y - STAIR_GOING + (step - 1) * STAIR_GOING
         mesh.box(-STAIR_HALF_WIDTH, STAIR_HALF_WIDTH, tread_front, tread_front + STAIR_GOING, tread_z - 0.04, tread_z,
                  "Metal")
-    for x in (-STAIR_HALF_WIDTH - 0.015, STAIR_HALF_WIDTH + 0.015):
-        foot_post = (x, foot_y - STAIR_GOING * 0.5, riser)
-        mesh.tube((x, foot_post[1], 0.0), (x, foot_post[1], riser + HANDRAIL_HEIGHT), 0.025, "Metal", segments=6)
-        mesh.tube((x, foot_post[1], riser + HANDRAIL_HEIGHT), (x, top_y, top_z + HANDRAIL_HEIGHT), 0.025, "Metal",
-                  segments=6)
-        # Joins the stair rail to the landing post at the corner.
-        landing_x = math.copysign(0.8, x)
-        mesh.tube((x, top_y, top_z + HANDRAIL_HEIGHT), (landing_x, top_y, top_z + HANDRAIL_HEIGHT), 0.025, "Metal",
-                  segments=6)
+    foot_post_y = foot_y - STAIR_GOING * 0.5
+    rail_z = top_z + HANDRAIL_HEIGHT
+    wall_y = -math.sqrt(radius_at(rail_z) ** 2 - RAIL_X ** 2) + 0.01
+    for x in (-RAIL_X, RAIL_X):
+        mesh.pipe([
+            (x, foot_post_y, 0.0),
+            (x, foot_post_y, riser + HANDRAIL_HEIGHT),
+            (x, top_y, rail_z),
+            (x, wall_y, rail_z),
+        ], RAIL_RADIUS, "Metal")
+        # Post at the landing corner, ending inside the rail.
+        mesh.tube((x, top_y + 0.05, top_z), (x, top_y + 0.05, rail_z), RAIL_RADIUS, "Metal", segments=8, caps=False)
 
 
 def add_transformer_box(mesh, base_radius):
