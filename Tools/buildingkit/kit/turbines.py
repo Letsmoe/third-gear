@@ -319,22 +319,60 @@ def build_tower(model):
     return mesh
 
 
+STAIR_RISER = 0.22
+STAIR_GOING = 0.28
+STAIR_HALF_WIDTH = 0.55
+HANDRAIL_HEIGHT = 1.0
+
+
 def add_door(mesh, base_radius):
-    """Door in the tower foot facing -Y, with a landing and steps down to the foundation."""
+    """Door in the tower foot facing -Y, with a landing on posts and a steel stair down to the ground."""
     door_bottom = 1.1
     face_y = -base_radius
     mesh.box(-0.5, 0.5, face_y - 0.06, face_y + 0.3, door_bottom, door_bottom + 2.3, "Metal", skip="B")
     mesh.box(-0.42, 0.42, face_y - 0.08, face_y - 0.06, door_bottom + 0.05, door_bottom + 2.2, "Metal", skip="B")
     landing_front = face_y - 1.3
     mesh.box(-0.8, 0.8, landing_front, face_y + 0.2, door_bottom - 0.06, door_bottom, "Metal")
-    step_count = 4
-    for step in range(step_count):
-        top = door_bottom - (step + 1) * (door_bottom - 0.25) / (step_count + 1)
-        front = landing_front - (step + 1) * 0.28
-        mesh.box(-0.55, 0.55, front, front + 0.28, top - 0.04, top, "Metal")
-    for side in (-0.8, 0.8):
-        mesh.tube((side, landing_front, door_bottom), (side, landing_front, door_bottom + 1.0), 0.025, "Metal", segments=6)
-        mesh.tube((side, landing_front, door_bottom + 1.0), (side, face_y, door_bottom + 1.0), 0.025, "Metal", segments=6)
+    for x in (-0.75, 0.75):
+        mesh.tube((x, landing_front + 0.05, 0.0), (x, landing_front + 0.05, door_bottom - 0.06), 0.04, "Metal", segments=6)
+    add_stair(mesh, landing_front, door_bottom)
+    for x in (-0.8, 0.8):
+        mesh.tube((x, landing_front, door_bottom), (x, landing_front, door_bottom + HANDRAIL_HEIGHT), 0.025, "Metal", segments=6)
+        mesh.tube((x, landing_front, door_bottom + HANDRAIL_HEIGHT), (x, face_y, door_bottom + HANDRAIL_HEIGHT), 0.025,
+                  "Metal", segments=6)
+
+
+def add_stair(mesh, top_y, top_z):
+    """Straight steel stair running toward -Y from a landing edge at (top_y, top_z) down to the ground: two sloped
+    stringers with the treads between them and a handrail on each side."""
+    riser_count = max(2, round(top_z / STAIR_RISER))
+    riser = top_z / riser_count
+    run = (riser_count - 1) * STAIR_GOING
+    foot_y = top_y - run
+    stringer_depth = 0.2
+    # Stringer side profile in (y, z): from the foot on the ground up to just under the landing.
+    profile = [
+        (foot_y - STAIR_GOING, 0.0),
+        (foot_y - STAIR_GOING + stringer_depth, 0.0),
+        (top_y, top_z - stringer_depth * 1.4),
+        (top_y, top_z - 0.06),
+    ]
+    for x in (-STAIR_HALF_WIDTH - 0.03, STAIR_HALF_WIDTH):
+        mesh.prism(profile, "yz", x, x + 0.03, "Metal")
+    for step in range(1, riser_count):
+        tread_z = step * riser
+        tread_front = foot_y - STAIR_GOING + (step - 1) * STAIR_GOING
+        mesh.box(-STAIR_HALF_WIDTH, STAIR_HALF_WIDTH, tread_front, tread_front + STAIR_GOING, tread_z - 0.04, tread_z,
+                 "Metal")
+    for x in (-STAIR_HALF_WIDTH - 0.015, STAIR_HALF_WIDTH + 0.015):
+        foot_post = (x, foot_y - STAIR_GOING * 0.5, riser)
+        mesh.tube((x, foot_post[1], 0.0), (x, foot_post[1], riser + HANDRAIL_HEIGHT), 0.025, "Metal", segments=6)
+        mesh.tube((x, foot_post[1], riser + HANDRAIL_HEIGHT), (x, top_y, top_z + HANDRAIL_HEIGHT), 0.025, "Metal",
+                  segments=6)
+        # Joins the stair rail to the landing post at the corner.
+        landing_x = math.copysign(0.8, x)
+        mesh.tube((x, top_y, top_z + HANDRAIL_HEIGHT), (landing_x, top_y, top_z + HANDRAIL_HEIGHT), 0.025, "Metal",
+                  segments=6)
 
 
 def add_transformer_box(mesh, base_radius):
