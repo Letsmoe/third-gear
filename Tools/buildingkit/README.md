@@ -99,12 +99,14 @@ and `Concrete` for the foundations. The conductor stubs on the sheet are only a 
 
 ### Bus stops
 
-`kit/shelters.py` (#102) has the urban glass shelter in two and three bays (`Glass_2Bay`, `Glass_3Bay`: steel frame,
-glass back and side, a back-lit advertising case at the left end, glass roof with the stop name strip, bench), the
-rural `Timber` shelter (boarded back and ends, pent roof) and the `StopSign` (Zeichen 224 on a pole, name plate,
-timetable case). A shelter's origin is the middle of its open front edge, which faces -Y toward the road; the sign's
-is the foot of its pole. The 1.5 m bay and the heights are plausible defaults, still to be measured on photos. New
-slots: `PowderCoat` for the dark steel, `AdPanel` for the lit posters, `SignFace` for printed sign faces.
+`kit/shelters.py` (#102) has Hamburg's JCDecaux glass shelter in two and three bays (`Glass_2Bay`, `Glass_3Bay`:
+slim black posts, a framed glass end, frameless back glass with clamps, the red dot band and the information case,
+an advertising case at the left end, a thin glass roof that overhangs the kerb and rises toward it, a black steel
+bench), the rural `Timber` shelter (boarded back and ends, pent roof), the red HVV `StopSign` mast (square H sign,
+name plate, line plates) and the `StopBin` that stands next to it. A shelter's origin is the middle of its open front
+edge, which faces -Y toward the road; the mast's and the bin's are their feet, and they face -Y too. The shelter
+follows a photo of the Rathausmarkt stop; the 1.5 m bay and the heights are estimates from it. New slots:
+`PowderCoat` for the black steel, `AdPanel` for the lit posters, `SignFace` for printed faces.
 
 ## Props from Hunyuan 3D
 
