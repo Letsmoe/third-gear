@@ -33,7 +33,11 @@ PREVIEW_COLOURS = {
     "BinSticker": (0.97, 0.97, 0.97, 1.0),
     "Litter": (0.86, 0.82, 0.72, 1.0),
     "BinBag": (0.03, 0.03, 0.035, 1.0),
+    "GreenhouseGlass": (0.80, 0.88, 0.88, 0.30),
+    "Foil": (0.92, 0.93, 0.90, 0.55),
+    "Aluminium": (0.72, 0.74, 0.76, 1.0),
 }
+TRANSPARENT = ("Glass", "GreenhouseGlass", "Foil")
 
 # Slot name -> image file; when set, the preview material shows the image through the piece's UVs (posters, signs).
 PREVIEW_TEXTURES = {}
@@ -60,9 +64,9 @@ def get_material(name):
     shader = material.node_tree.nodes["Principled BSDF"]
     shader.inputs["Base Color"].default_value = colour
     shader.inputs["Roughness"].default_value = 0.6
-    if name == "Glass":
+    if name in TRANSPARENT:
         shader.inputs["Alpha"].default_value = colour[3]
-        shader.inputs["Roughness"].default_value = 0.05
+        shader.inputs["Roughness"].default_value = 0.05 if name != "Foil" else 0.4
         material.surface_render_method = "BLENDED"
     if name == "PaintGreen":
         add_band_ramp(material, shader)

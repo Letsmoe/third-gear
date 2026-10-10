@@ -118,6 +118,16 @@ brands, German text) and fits them to the CityLight size with `posters/fit_poste
 the stop panel, a timetable and the bin stickers with PIL, since their text has to be exact. Everything lands in
 `<data root>/building_kit/posters/`, and the contact sheet shows it through `preview_textures()`.
 
+### Greenhouses
+
+`kit/greenhouses.py` (#103) is a footprint style, not a node structure: the pieces are meant to be placed along a
+greenhouse footprint like walls, and the sheet shows whole houses assembled from them the way the runtime would. Two
+glasshouse styles, the modern `Venlo` (4.5 m gutter, 3.2 m spans, 4 m bays, 1 m panes) and the low `VenloOld` (2.6 m
+gutter, brick plinth, 3 m bays, small panes), each with `_Side`, `_Gable`, `_GableDoor` in the wall convention and
+`_Roof`, `_RoofVent`, `_Gutter`, `_Post`, `_Column`, `_Truss` in the house frame (X across the spans, Y along the
+ridges); `glasshouse_parts()` is the placement rule. The foil tunnel has `Tunnel_Section` and `Tunnel_End`. New slots:
+`GreenhouseGlass` (whitewash and the plants inside belong in its material), `Foil` and `Aluminium`.
+
 ## Props from Hunyuan 3D
 
 `props/run_props.sh` runs the whole chain. ComfyUI is started from a private venv in
