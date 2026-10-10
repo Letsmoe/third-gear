@@ -25,6 +25,7 @@
 #include "AITrafficCar.h"
 #include "WorldFurniture.h"
 #include "WorldKitBuildings.h"
+#include "WorldStructures.h"
 #include "WorldSnow.h"
 #include "WorldStructuresActor.h"
 #include "WorldTileActor.h"
@@ -71,6 +72,8 @@ struct FTileSpawnJob
 	int32 FurnitureStep = 0;
 	/** Next group of building kit pieces to add (see AddKitInstancesStep). */
 	int32 KitStep = 0;
+	/** Next group of structure pieces to add (see AddStructureGroupsStep). */
+	int32 StructureStep = 0;
 };
 
 /** State shared with worker tasks, which may still finish after the streamer is gone. */
@@ -577,6 +580,10 @@ bool AWorldStreamer::RunSpawnStep(FTileSpawnJob& Job, bool bCookNow)
 		if (Meshes.Kit && !AddKitInstancesStep(*Actor, *Meshes.Kit, Job.KitStep++))
 		{
 			--Job.NextStep; // more kit pieces to add: come back to this step
+		}
+		else if (Meshes.Structures && !AddStructureGroupsStep(*Actor, *Meshes.Structures, Job.StructureStep++))
+		{
+			--Job.NextStep; // more structure pieces to add: come back to this step
 		}
 		else if (Meshes.Furniture)
 		{

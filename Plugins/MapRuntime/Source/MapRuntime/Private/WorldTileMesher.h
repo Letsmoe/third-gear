@@ -7,6 +7,7 @@ struct FWorldTileData;
 struct FWorldFurnitureInstances;
 struct FWorldSnowMeshes;
 struct FWorldKitInstances;
+struct FWorldStructureInstances;
 
 /** How much of a tile is built, by its distance from the viewer. */
 enum class EWorldTileDetail : uint8
@@ -70,6 +71,8 @@ struct FWorldTileMeshes
 	UE::Geometry::FDynamicMesh3 KitCollisionMesh;
 	/** Wall, window and decoration instances of the kit buildings, or null. */
 	TSharedPtr<FWorldKitInstances> Kit;
+	/** Shelters, bins, petrol stations, greenhouses and bridge parts of the tile (near detail only), or null. */
+	TSharedPtr<FWorldStructureInstances> Structures;
 	TArray<FWorldPlantInstances> Plants;
 	/** Trunk collision cylinders: base point (cm, tile-relative) and diameter (cm). */
 	TArray<FVector> TrunkBases;

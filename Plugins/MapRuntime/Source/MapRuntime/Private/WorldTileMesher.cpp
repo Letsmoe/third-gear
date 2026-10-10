@@ -7,6 +7,7 @@
 #include "Misc/Parse.h"
 #include "WorldFurniture.h"
 #include "WorldKitBuildings.h"
+#include "WorldStructures.h"
 #include "WorldSnow.h"
 #include "WorldTileData.h"
 
@@ -863,6 +864,11 @@ FWorldTileMeshes BuildWorldTileMeshes(const FWorldTileData& Tile, EWorldTileDeta
 		BuildBuilding(Tile, Building, Meshes, Meshes.Buildings);
 	}
 	BuildPlants(Tile, Detail, Context, Meshes);
+	if (Detail == EWorldTileDetail::Near && !Tile.Structures.IsEmpty() && !FParse::Param(FCommandLine::Get(), TEXT("NoTileStructures")))
+	{
+		Meshes.Structures = MakeShared<FWorldStructureInstances>();
+		BuildStructureInstances(Tile, *Meshes.Structures);
+	}
 	if (Detail == EWorldTileDetail::Near && !Tile.Pois.IsEmpty() && CVarFurniture.GetValueOnAnyThread() != 0 && !FParse::Param(FCommandLine::Get(), TEXT("NoFurniture")))
 	{
 		Meshes.Furniture = MakeShared<FWorldFurnitureInstances>();

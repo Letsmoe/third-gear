@@ -254,7 +254,8 @@ FPathSurfaces::FPathSurfaces(const FOsmData& Osm)
 	{
 		const FTags& Tags = Area.Tags;
 		const bool bPathArea = TagIn(Tags, "highway", {"pedestrian", "footway", "service"})
-			|| FindTag(Tags, "area:highway") != nullptr || TagIs(Tags, "place", "square") || TagIs(Tags, "amenity", "parking");
+			|| FindTag(Tags, "area:highway") != nullptr || TagIs(Tags, "place", "square") || TagIs(Tags, "amenity", "parking")
+			|| TagIs(Tags, "amenity", "fuel");
 		if (!bPathArea || TagIn(Tags, "parking", {"underground", "multi-storey", "rooftop"}))
 		{
 			continue;

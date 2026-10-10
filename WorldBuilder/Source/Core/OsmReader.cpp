@@ -64,6 +64,7 @@ bool IsWantedPoint(const osmium::TagList& Tags)
 	return ValueIn(Tags.get_value_by_key("highway"), {"traffic_signals", "stop", "give_way", "crossing", "street_lamp",
 														  "mini_roundabout", "bus_stop"})
 		|| ValueIn(Tags.get_value_by_key("natural"), {"tree"})
+		|| ValueIn(Tags.get_value_by_key("amenity"), {"waste_basket", "fuel"})
 		|| ValueIn(Tags.get_value_by_key("railway"), {"level_crossing"})
 		|| ValueIn(Tags.get_value_by_key("traffic_sign"), {});
 }
@@ -82,7 +83,7 @@ bool IsWantedArea(const osmium::TagList& Tags)
 		|| ValueIn(Tags.get_value_by_key("landuse"), {})
 		|| ValueIn(Tags.get_value_by_key("natural"), {"water", "wood", "scrub", "wetland", "grassland", "heath"})
 		|| ValueIn(Tags.get_value_by_key("leisure"), {"park", "pitch", "playground", "garden"})
-		|| ValueIn(Tags.get_value_by_key("amenity"), {"parking"})
+		|| ValueIn(Tags.get_value_by_key("amenity"), {"parking", "fuel"})
 		|| ValueIn(Tags.get_value_by_key("area:highway"), {})
 		|| ValueIn(Tags.get_value_by_key("place"), {"square"})
 		|| ValueIn(Tags.get_value_by_key("waterway"), {"riverbank", "dock"})

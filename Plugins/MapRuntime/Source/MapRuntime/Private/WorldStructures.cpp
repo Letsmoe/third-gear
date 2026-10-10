@@ -5,6 +5,7 @@
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/StrongObjectPtr.h"
+#include "WorldTileActor.h"
 #include "WorldTileData.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWorldStructures, Log, All);
@@ -12,6 +13,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogWorldStructures, Log, All);
 namespace
 {
 constexpr double CentimetresPerMetre = 100.0;
+/** Groups added per spawn step of a tile; a group is one component with all instances of a piece. */
+constexpr int32 GroupsPerStep = 4;
 
 /** /Game/World/Structures/Meshes/<family>/SM_<piece>: the family is the piece name up to its first underscore. */
 FString StructureMeshPath(const FString& Piece)
@@ -174,4 +177,15 @@ UInstancedStaticMeshComponent* AddStructureGroup(AActor& Owner, USceneComponent&
 		Component->SetCustomDataValue(Index, 0, Group.Sags[Index], /*bMarkRenderStateDirty=*/Index == Group.Sags.Num() - 1);
 	}
 	return Component;
+}
+
+bool AddStructureGroupsStep(AWorldTileActor& Actor, const FWorldStructureInstances& Structures, int32 Step)
+{
+	const int32 First = Step * GroupsPerStep;
+	const int32 Last = FMath::Min(First + GroupsPerStep, Structures.Groups.Num());
+	for (int32 Index = First; Index < Last; ++Index)
+	{
+		AddStructureGroup(Actor, *Actor.GetRootComponent(), Structures.Groups[Index], /*bCollision=*/true);
+	}
+	return Last >= Structures.Groups.Num();
 }

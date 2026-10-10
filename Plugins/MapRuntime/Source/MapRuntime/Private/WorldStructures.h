@@ -61,5 +61,13 @@ UStaticMesh* FindStructureMeshCached(const FString& Piece);
 UInstancedStaticMeshComponent* AddStructureGroup(AActor& Owner, USceneComponent& Parent, const FWorldStructureGroup& Group,
 	bool bCollision);
 
+class AWorldTileActor;
+
+/**
+ * Adds the next few groups of a tile's structures to its actor, with collision, so the spawn stays inside the frame
+ * budget. Step counts up from 0 on each call; returns true after the last group. Game thread.
+ */
+bool AddStructureGroupsStep(AWorldTileActor& Actor, const FWorldStructureInstances& Structures, int32 Step);
+
 /** Replaces the slots a variant has its own material for (MI_Struct_<Slot>_<Variant>) on a component's mesh. */
 void ApplyStructureVariant(class UMeshComponent& Component, UStaticMesh& Mesh, const FString& Variant);

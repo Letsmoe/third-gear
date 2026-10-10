@@ -9,6 +9,8 @@
 #include <string>
 #include <unordered_map>
 
+#include "PlacementFrame.h"
+
 namespace WorldBuilder
 {
 namespace
@@ -30,14 +32,6 @@ constexpr double ReferenceSpan = 300.0;
 constexpr double EarthWireSagShare = 0.8;
 /** Spans longer than this are a data error (a tower missing in OSM), metres. */
 constexpr double LongestSpan = 700.0;
-
-/** A number from 0 to 1 fixed by a position, so placements don't change with the order they are made in. */
-double PositionNoise(double X, double Y, uint64_t Salt)
-{
-	const uint64_t Bits = (static_cast<uint64_t>(std::llround(X * 100.0)) * 0x9E3779B97F4A7C15ull)
-		^ (static_cast<uint64_t>(std::llround(Y * 100.0)) * 0xBF58476D1CE4E5B9ull) ^ (Salt * 0x94D049BB133111EBull);
-	return static_cast<double>((Bits >> 11) % 1000000) / 1000000.0;
-}
 
 std::string Lowercase(std::string Text)
 {

@@ -21,6 +21,7 @@
 #include "OsmReader.h"
 #include "Assumptions.h"
 #include "Paths.h"
+#include "SiteStructures.h"
 #include "Furniture.h"
 #include "Parking.h"
 #include "PolygonQuery.h"
@@ -158,6 +159,8 @@ struct FTileContents
 	std::vector<const FSignalHead*> Heads;
 	std::vector<const FSign*> Signs;
 	std::vector<const FParkedCar*> Cars;
+	/** Shelters, bins, stations, greenhouses and bridge parts standing in this tile. */
+	std::vector<const FSitePlacement*> Structures;
 };
 
 /** White bars painted across the road: zebra stripes and stop lines, both 0.5 m wide. */
@@ -306,18 +309,39 @@ void WriteBars(FTileWriter& Writer, const FRegionInputs& Inputs)
 	}
 }
 
+/** The height of a thing standing on the pavement (kerb above the road) or else on the conformed ground. */
+float FootHeightAt(const FPolygonQuery& OnPavement, const FHeightGrid& Ground, const FHeightGrid& RoadHeight, double X,
+				   double Y)
+{
+	if (OnPavement.Contains(X, Y))
+	{
+		return static_cast<float>(RoadHeight.Sample(X, Y) + KerbHeight);
+	}
+	return static_cast<float>(Ground.Sample(X, Y));
+}
+
+/** The kit structures of a tile (STRU); the ones standing on the footway get their height from the pavement or ground. */
+void WriteSiteStructures(FTileWriter& Writer, const FTileContents& Contents, const FPolygons& Pavement,
+						 const FHeightGrid& Ground, const FHeightGrid& RoadHeight)
+{
+	const FPolygonQuery OnPavement(Pavement);
+	for (const FSitePlacement* Site : Contents.Structures)
+	{
+		FStructurePlacement Placement = Site->Placement;
+		if (Site->bFootHeight)
+		{
+			Placement.Z = FootHeightAt(OnPavement, Ground, RoadHeight, Placement.X, Placement.Y);
+		}
+		WriteStructure(Writer, Placement);
+	}
+}
+
 /** The street furniture and parked cars of a tile, standing on the pavement or the conformed ground. */
 void WritePois(FTileWriter& Writer, const FTileContents& Contents, const FPolygons& Pavement, const FHeightGrid& Ground,
 			   const FHeightGrid& RoadHeight)
 {
 	const FPolygonQuery OnPavement(Pavement);
-	auto FootHeight = [&](double X, double Y) {
-		if (OnPavement.Contains(X, Y))
-		{
-			return static_cast<float>(RoadHeight.Sample(X, Y) + KerbHeight);
-		}
-		return static_cast<float>(Ground.Sample(X, Y));
-	};
+	auto FootHeight = [&](double X, double Y) { return FootHeightAt(OnPavement, Ground, RoadHeight, X, Y); };
 	for (const FLamp* Lamp : Contents.Lamps)
 	{
 		FPoi Poi;
@@ -404,6 +428,7 @@ void BuildTile(const FTileBounds& Tile, size_t TileIndex, const FRegionInputs& I
 	WriteMarkings(Writer, *Inputs.Roads);
 	WriteBars(Writer, Inputs);
 	WritePois(Writer, Inputs.Contents[TileIndex], Pavement, Ground, RoadHeight);
+	WriteSiteStructures(Writer, Inputs.Contents[TileIndex], Pavement, Ground, RoadHeight);
 	for (const FBuilding* Building : Inputs.Contents[TileIndex].Buildings)
 	{
 		WriteBuilding(Writer, *Building, Ground, Window, Box);
@@ -524,10 +549,13 @@ int TileIndexOf(const FRegion& Region, double X, double Y)
 	return Row * Columns + Column;
 }
 
-/** The furniture, parked cars and buildings by the tile they stand in; buildings inside a landmark are left out. */
+/**
+ * The furniture, parked cars, kit structures and buildings by the tile they stand in; buildings inside a landmark or a
+ * footprint a kit structure replaces are left out.
+ */
 std::vector<FTileContents> SortIntoTiles(const FRegion& Region, const FFurniture& Furniture,
 										 const std::vector<FParkedCar>& Cars, const std::vector<FBuilding>& Buildings,
-										 const FPolygons& Landmarks)
+										 const FPolygons& Landmarks, const FSiteStructures& Sites)
 {
 	std::vector<FTileContents> Contents(Region.Tiles().size());
 	auto Place = [&](double X, double Y, auto Member, const auto* Item) {
@@ -552,6 +580,10 @@ std::vector<FTileContents> SortIntoTiles(const FRegion& Region, const FFurniture
 	for (const FParkedCar& Car : Cars)
 	{
 		Place(Car.X, Car.Y, &FTileContents::Cars, &Car);
+	}
+	for (const FSitePlacement& Site : Sites.Placements)
+	{
+		Place(Site.Placement.X, Site.Placement.Y, &FTileContents::Structures, &Site);
 	}
 	for (const FBuilding& Building : Buildings)
 	{
@@ -706,15 +738,22 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	FRoadSurfaces Roads(Streets, Terrain, Buildings, Threads);
 	Inputs.Roads = &Roads;
 	const FKitSpecs KitSpecs((DataRoot / "building_kit").string());
-	const FPolygons Landmarks = LandmarkFootprints(KitSpecs);
+	FPolygons Landmarks = LandmarkFootprints(KitSpecs);
 	const FBuildingIndex BuildingIndex(Osm.Buildings);
 	const FRoadGraph Graph(*Streets.GroundWays, Streets.Widths, BuildingIndex);
 	const FFurniture Furniture = BuildFurniture(Osm, Graph, Roads.Ground(), Buildings);
 	const std::vector<FParkedCar> Cars = BuildParkedCars(Osm, Graph, Furniture.Zebras, Roads.Ground(), Buildings, Inputs.Extent);
 	AddBars(Inputs, Furniture, Roads);
+	FSiteCounts SiteCounts;
+	const FSiteStructures Sites = BuildSiteStructures(Osm, Graph, Roads.Ground(), Buildings, KitSpecs,
+													  [&](double X, double Y) { return Terrain.Sample(X, Y); }, &SiteCounts);
+	Landmarks.insert(Landmarks.end(), Sites.Replaced.begin(), Sites.Replaced.end());
+	Log("site structures: " + std::to_string(SiteCounts.BusMasts) + " bus masts, " + std::to_string(SiteCounts.Shelters)
+		+ " shelters, " + std::to_string(SiteCounts.Bins) + " bins, " + std::to_string(SiteCounts.Stations) + " petrol stations, "
+		+ std::to_string(SiteCounts.Greenhouses) + " greenhouses, " + std::to_string(Sites.Placements.size()) + " pieces");
 	const std::vector<FBuilding> KitBuildings = KitBuildingsTask.get();
 	Log("buildings: " + std::to_string(KitBuildings.size()) + " footprints");
-	Inputs.Contents = SortIntoTiles(Region, Furniture, Cars, KitBuildings, Landmarks);
+	Inputs.Contents = SortIntoTiles(Region, Furniture, Cars, KitBuildings, Landmarks, Sites);
 	WriteTrafficJson((OutputDirectory / "traffic.json").string(), Furniture.Network);
 	FLaneGraph Lanes = BuildLaneGraph(Streets, Graph, Furniture, Inputs.Extent);
 	std::vector<double> LaneHeights;
