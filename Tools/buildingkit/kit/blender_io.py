@@ -20,7 +20,15 @@ PREVIEW_COLOURS = {
     "Thatch": (0.80, 0.68, 0.25, 1.0),
     "Metal": (0.30, 0.32, 0.34, 1.0),
     "Concrete": (0.42, 0.52, 0.44, 1.0),
+    "Paint": (0.80, 0.81, 0.80, 1.0),
+    "PaintRed": (0.65, 0.04, 0.03, 1.0),
+    "PaintGreen": (0.12, 0.38, 0.18, 1.0),
+    "Beacon": (1.0, 0.05, 0.02, 1.0),
 }
+
+# Enercon's tower foot: five green bands from dark at the ground to pale, 3 m each (V of the metre UVs is the height).
+GREEN_BANDS = [(0.03, 0.17, 0.07), (0.07, 0.27, 0.11), (0.15, 0.40, 0.17), (0.30, 0.53, 0.26), (0.50, 0.66, 0.40)]
+GREEN_BAND_HEIGHT = 3.0
 
 
 def reset_scene():
@@ -44,10 +52,38 @@ def get_material(name):
         shader.inputs["Alpha"].default_value = colour[3]
         shader.inputs["Roughness"].default_value = 0.05
         material.surface_render_method = "BLENDED"
+    if name == "PaintGreen":
+        add_band_ramp(material, shader)
+    if name == "Beacon":
+        shader.inputs["Emission Color"].default_value = colour
+        shader.inputs["Emission Strength"].default_value = 4.0
     if name == "Metal":
         shader.inputs["Metallic"].default_value = 0.6
         shader.inputs["Roughness"].default_value = 0.4
     return material
+
+
+def add_band_ramp(material, shader):
+    """Drives the base colour from the height (UV V) through a constant colour ramp of the green bands."""
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    texture_coordinate = nodes.new("ShaderNodeUVMap")
+    separate = nodes.new("ShaderNodeSeparateXYZ")
+    scale = nodes.new("ShaderNodeMath")
+    scale.operation = "DIVIDE"
+    scale.inputs[1].default_value = GREEN_BAND_HEIGHT * len(GREEN_BANDS)
+    ramp = nodes.new("ShaderNodeValToRGB")
+    ramp.color_ramp.interpolation = "CONSTANT"
+    elements = ramp.color_ramp.elements
+    while len(elements) < len(GREEN_BANDS):
+        elements.new(0.0)
+    for index, colour in enumerate(GREEN_BANDS):
+        elements[index].position = index / len(GREEN_BANDS)
+        elements[index].color = (*colour, 1.0)
+    links.new(texture_coordinate.outputs["UV"], separate.inputs[0])
+    links.new(separate.outputs["Y"], scale.inputs[0])
+    links.new(scale.outputs[0], ramp.inputs["Fac"])
+    links.new(ramp.outputs["Color"], shader.inputs["Base Color"])
 
 
 def build_mesh_data(name, kit_mesh):
@@ -179,11 +215,11 @@ def add_label(text, location, size=0.28, rotation=(math.radians(90), 0.0, 0.0)):
     return obj
 
 
-def add_camera(location, target, lens=35.0, orthographic_scale=None):
+def add_camera(location, target, lens=35.0, orthographic_scale=None, clip_end=500.0):
     """Adds a camera looking at target and makes it the scene camera."""
     camera_data = bpy.data.cameras.new("Camera")
     camera_data.lens = lens
-    camera_data.clip_end = 500.0
+    camera_data.clip_end = clip_end
     if orthographic_scale is not None:
         camera_data.type = "ORTHO"
         camera_data.ortho_scale = orthographic_scale

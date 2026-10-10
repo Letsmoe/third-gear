@@ -8,7 +8,8 @@ import math
 import random
 
 # Material slot names shared by every style.
-MATERIALS = ("Brick", "Plaster", "Timber", "Frame", "Glass", "Sill", "RoofTile", "Thatch", "Metal", "Concrete")
+MATERIALS = ("Brick", "Plaster", "Timber", "Frame", "Glass", "Sill", "RoofTile", "Thatch", "Metal", "Concrete", "Paint",
+             "PaintRed", "PaintGreen", "Beacon")
 
 
 def vec_sub(first, second):
@@ -275,6 +276,63 @@ class Mesh:
             self.add_face(ring_start, material, desired_normal=tuple(-c for c in axis))
             self.add_face(ring_end, material, desired_normal=axis)
 
+    def pipe(self, points, radius, material, segments=8, caps=True):
+        """Round bar along a 3D polyline with mitred bends, like a bent railing; smooth sides."""
+        directions = [vec_normalize(vec_sub(end, start)) for start, end in zip(points, points[1:])]
+        helper = (0.0, 0.0, 1.0) if abs(directions[0][2]) < 0.9 else (1.0, 0.0, 0.0)
+        side_a = vec_normalize(vec_cross(directions[0], helper))
+        side_b = vec_cross(directions[0], side_a)
+        offsets = [ring_offsets(side_a, side_b, radius, segments)]
+        for before, after in zip(directions, directions[1:]):
+            side_a = rotate_between(side_a, before, after)
+            side_b = rotate_between(side_b, before, after)
+            offsets.append(ring_offsets(side_a, side_b, radius, segments))
+        rings = [[tuple(points[0][k] + offset[k] for k in range(3)) for offset in offsets[0]]]
+        for joint in range(1, len(points) - 1):
+            rings.append(mitre_ring(points[joint], offsets[joint - 1], directions[joint - 1], directions[joint]))
+        rings.append([tuple(points[-1][k] + offset[k] for k in range(3)) for offset in offsets[-1]])
+        for index in range(len(rings) - 1):
+            for i in range(segments):
+                j = (i + 1) % segments
+                outward = tuple(offsets[index][i][k] + offsets[index][j][k] for k in range(3))
+                quad = [rings[index][i], rings[index][j], rings[index + 1][j], rings[index + 1][i]]
+                self.add_face(quad, material, smooth=True, desired_normal=outward)
+        if caps:
+            self.add_face(rings[0], material, desired_normal=tuple(-c for c in directions[0]))
+            self.add_face(rings[-1], material, desired_normal=directions[-1])
+
+    def lathe(self, profile, material, segments=32, materials=None):
+        """Body of revolution about the Y axis, smooth sides. profile is a list of (y, radius) with y never decreasing; two
+        points with the same y make a flat ring step. An end with a radius above zero gets a flat cap. materials
+        optionally maps a profile segment index to a material."""
+        materials = materials or {}
+        rings = []
+        for y, radius in profile:
+            rings.append([
+                (radius * math.cos(2 * math.pi * i / segments), y, radius * math.sin(2 * math.pi * i / segments))
+                for i in range(segments)
+            ])
+        for index in range(len(profile) - 1):
+            segment_material = materials.get(index, material)
+            (y0, r0), (y1, r1) = profile[index], profile[index + 1]
+            for i in range(segments):
+                j = (i + 1) % segments
+                angle = 2 * math.pi * (i + 0.5) / segments
+                # The outward normal leans along the axis by the slope of the profile.
+                outward = (math.cos(angle) * (y1 - y0), -(r1 - r0), math.sin(angle) * (y1 - y0))
+                if abs(y1 - y0) < 1e-9:
+                    outward = (0.0, 1.0 if r0 > r1 else -1.0, 0.0)
+                quad = [rings[index][i], rings[index][j], rings[index + 1][j], rings[index + 1][i]]
+                if r0 < 1e-9:
+                    quad = [rings[index][i], rings[index + 1][j], rings[index + 1][i]]
+                elif r1 < 1e-9:
+                    quad = [rings[index][i], rings[index][j], rings[index + 1][i]]
+                self.add_face(quad, segment_material, smooth=True, desired_normal=outward)
+        if profile[0][1] > 1e-9:
+            self.add_face(rings[0], materials.get(0, material), desired_normal=(0.0, -1.0, 0.0))
+        if profile[-1][1] > 1e-9:
+            self.add_face(rings[-1], materials.get(len(profile) - 2, material), desired_normal=(0.0, 1.0, 0.0))
+
     # ------------------------------------------------------------------ transforms and queries
     def copy(self):
         clone = Mesh()
@@ -337,6 +395,39 @@ class Mesh:
             if face["material"] not in used:
                 used.append(face["material"])
         return used
+
+
+def ring_offsets(side_a, side_b, radius, segments):
+    """Offsets of a ring of points around an axis spanned by two unit side vectors."""
+    offsets = []
+    for i in range(segments):
+        angle = 2 * math.pi * i / segments
+        offsets.append(tuple(radius * (math.cos(angle) * side_a[k] + math.sin(angle) * side_b[k]) for k in range(3)))
+    return offsets
+
+
+def rotate_between(vector, before, after):
+    """Rotates a vector by the rotation that turns the unit direction before into after (Rodrigues), so a pipe's
+    cross-section frame follows its bends without twisting."""
+    axis = vec_cross(before, after)
+    sine = math.sqrt(vec_dot(axis, axis))
+    cosine = vec_dot(before, after)
+    if sine < 1e-9:
+        return vector
+    axis = (axis[0] / sine, axis[1] / sine, axis[2] / sine)
+    cross = vec_cross(axis, vector)
+    along = vec_dot(axis, vector) * (1 - cosine)
+    return tuple(vector[k] * cosine + cross[k] * sine + axis[k] * along for k in range(3))
+
+
+def mitre_ring(joint, offsets, before, after):
+    """Points where a pipe arriving along before meets the mitre plane of the bend at joint."""
+    plane_normal = vec_normalize((before[0] + after[0], before[1] + after[1], before[2] + after[2]))
+    ring = []
+    for offset in offsets:
+        shift = -vec_dot(offset, plane_normal) / vec_dot(before, plane_normal)
+        ring.append(tuple(joint[k] + offset[k] + before[k] * shift for k in range(3)))
+    return ring
 
 
 def segmental_arch_points(chord_width, rise, segments=14):

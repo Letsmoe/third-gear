@@ -421,6 +421,134 @@ class 10 for its ground floor and class 1 above.
   school in concrete and brick, a Gothic brick church (St. Petri und Pauli), Bergedorf castle, the water tower.
   Handle as landmarks (#81) or as large brick buildings with the class 2 style and a lot of glazing.
 
+### 15. Greenhouse (`greenhouse`)
+
+- Share: the Vierlande are a market-garden area, and the Bergedorf extract has 780 footprints tagged
+  `building=greenhouse`, more than garages (416). Almost none carry other tags (8 have `building:material=glass`).
+  Hamburg as a whole has 1,270.
+- Types: the Venlo glasshouse is the common one, a row of narrow spans with two roof panes each, standing on slim
+  steel posts with gutters between the spans. Older houses are wider single or double spans, often whitewashed
+  with shading paint in summer. Plastic foil tunnels stand on the open fields.
+- Dimensions: Venlo span 3.2 m (also 4.0 m), roof pitch 22 to 26 degrees, post spacing along the gutter 4.0 to
+  5.0 m, gutter height 2.5 to 3.5 m on older Vierlande houses and 4.5 to 6 m on new ones, side wall glass panes
+  about 1.0 to 1.25 m wide. Foil tunnels are 6 to 9 m wide and 3 to 4 m high with a round arch.
+- Walls: glass in aluminium glazing bars on galvanised steel, a low concrete or brick plinth of 0.3 to 0.6 m on
+  older houses, sliding doors in the gable.
+- Roof: glass, with ventilation flaps along the ridge that stand open in summer.
+- Details: heating pipes and boiler houses on larger sites, a chimney, water tanks, plants and staging visible
+  through the glass, shading screens drawn under the roof.
+- Kit note: the module width is the span (3.2 m) along the gable and the post spacing along the side, not the kit's
+  2.0 m. Tracked in #103.
+- OSM recognition: `building=greenhouse`; long rectangular footprints on farm plots along the dykes, often several
+  side by side. Footprints under 30 m² are garden greenhouses with a single span.
+
+## Structures that are not buildings
+
+These stand on OSM nodes, not footprints, and become whole parametric models placed by their tags instead of kit
+pieces along a footprint. Counts are from the Bergedorf extract (`geodata/osm/bergedorf.osm.pbf`, which covers the
+whole district) and the Hamburg extract.
+
+| Structure | Bergedorf | Hamburg | Issue |
+| --- | --- | --- | --- |
+| Wind turbine (`generator:source=wind`) | 31 | 102 | #100 |
+| Power pylon (`power=tower`) | 646 | 2,638 | #101 |
+| Bus stop (`highway=bus_stop`), of which `shelter=yes` | 1,080, 337 | 6,743 | #102 |
+| Windmill (`man_made=windmill`) | 8 | 17 | #104 |
+| Silo (`man_made=silo`) | 128 | 321 | #104 |
+| Water tower (`man_made=water_tower`) | 2 | 11 | #104 |
+| Petrol station (`amenity=fuel`) | 33 | 332 | #105 |
+| Bridge (`bridge=yes` ways) | 795 | 6,111 | #106 |
+
+### Wind turbines
+
+The extract names four models. They are all three-bladed upwind turbines on a tapered steel tube, painted light grey
+(RAL 7035), and the rotor turns clockwise as seen from the front. Rotor tilt is about 5 degrees and the blades are
+coned forward by 2 to 3 degrees. Hub height and rotor diameter are the manufacturers' figures; the OSM `height` tag
+in the extract is the hub height.
+
+| Model | Turbines | Rated power | Rotor diameter | Hub height | Rotor speed |
+| --- | --- | --- | --- | --- | --- |
+| Senvion MM100 | 15 | 2.0 MW | 100 m | 100 m | 8 to 14 rpm |
+| Nordex N117 | 5 | 2.4 MW | 117 m | 91 m | 8 to 14 rpm |
+| Enercon E-92 | 2 | 2.35 MW | 92 m | 104 m | 5 to 16 rpm |
+| NEG Micon NM48 | 4 | 600 kW | 48 m | about 46 m | 22 to 30 rpm |
+
+- The MM100 and the N117 have a long box nacelle with a geared drive, about 4 m wide and high and 13 m long.
+- The E-92 has Enercon's direct drive, with the large ring generator directly behind the hub. Its nacelle is the
+  rounded egg shape. The bottom of the tower carries the Enercon green rings, five bands in shades from dark green
+  at the ground to pale green.
+- The NM48 is the small 1990s turbine, with a short box nacelle and a slender tower of about 3 m at the base.
+- Tower base diameter is about 4.3 m on the 2 MW class, tapering to about 3 m at the top. A door with a small steel
+  stair sits at the foot, and the transformer stands in a small box next to the tower.
+- Every turbine above 100 m total height carries the German day marking: red, white and red bands of 6 m each at
+  the blade tips. At night the nacelle has red flashing obstruction lights, synchronised across a wind farm, which is
+  one of the most visible things in the dark marsh.
+- Untagged turbines (10 in the extract) take the model whose rated power matches, or the MM100.
+
+### Power pylons and lines
+
+- Almost every line in the extract is 110 kV (97 of 99 lines); one 380 kV line crosses the district.
+- Pylon designs with a `design` tag: Donau 172 (with or without `one-level`), two-level 38, one-level 27, barrel 5.
+  222 are tagged `structure=lattice`, 5 tubular. 106 are anchors (`line_attachment=anchor`), 74 suspension.
+- The Donau pylon has two cross arms, the lower one wider with two conductors on each side and the upper one with
+  one on each side, and a peak for the earth wire. At 110 kV it is 30 to 45 m high, the lower arm spans about 14 m,
+  the arms are 5 to 6 m apart and the earth wire peak stands about 4 m above the top arm.
+- Suspension insulators hang vertically, about 1.5 m long at 110 kV. Anchor pylons are heavier, with a wider base
+  and horizontal insulator strings, and stand at angles and line ends.
+- The base is 4 to 6 m square on suspension pylons and up to 8 m on anchors, on four concrete footings.
+- Spans are 250 to 350 m, and a conductor sags 6 to 10 m over a span. A 110 kV conductor is about 22 mm thick, so
+  lines need a minimum screen width at distance.
+
+### Bus shelters and stops
+
+- 337 of the 1,080 bus stops have `shelter=yes`, 320 have `bench=yes` and 493 `bin=yes`.
+- The Hamburg shelter is a steel frame with glass walls on the back and the sides, a flat roof that overhangs the
+  front, a back-lit advertising panel at one end and a bench. Lengths of two and three bays, about 3 to 5 m long,
+  1.5 m deep and 2.5 m high; the exact bay width still has to be measured on photos.
+- Every stop has the round sign (Zeichen 224, a green H on yellow) on a pole with a timetable box below it.
+- Shelters stand on the pavement behind the kerb, with the open side facing the road.
+
+### Windmills, silos and water towers
+
+- The windmills of the Vierlande are brick Holländer mills with a rotating cap and four sails, the best known being
+  the Riepenburger Mühle in Kirchwerder. They are landmarks and can be modelled one by one.
+- Farm silos are steel or concrete cylinders of 4 to 8 m diameter and 10 to 25 m height, often in groups.
+- Water towers are individual buildings (Bergedorf's is brick) and are landmarks.
+
+### Petrol stations
+
+A petrol station is a site rather than a building: a canopy with a clear height of 4.5 to 5 m over two to four pump
+islands, a shop with its sign, a car wash, an air and vacuum bay, and the price pylon at the road. It is placed as a
+template on the `amenity=fuel` area, oriented to the road it is entered from.
+
+### Bridges
+
+Most of the 795 bridge ways in the extract are short crossings of the Vierlande ditches and canals, built as
+concrete slabs or brick arches with spans of 5 to 15 m. They belong to the street model rather than the kit: the
+deck follows the road's cross section, with railings or parapets, abutments at the banks, and piers on longer spans.
+
+## Where other German types go
+
+The broader list of German building types maps onto the classes as follows.
+
+- The modern detached Klinker house (1.5 storeys, dark tiles) and the 1960s to 1980s bungalow are variants of
+  class 7, and the most common of them, so class 7 needs the most variants.
+- Semi-detached and terraced brick houses are classes 5 and 6. The thatched Reetdach house and the Hallenhaus with
+  the barn door in the gable are class 11.
+- Gründerzeit and Jugendstil blocks are class 1, the 1920s red-brick blocks class 2, postwar Zeilenbau classes 3 and 4.
+- Discount supermarkets, DIY stores, garden centres, furniture stores, car dealerships, drive-thrus, business park
+  halls and logistics warehouses are variants of class 13 (`building=retail` 145 and `industrial` 303 in the
+  Bergedorf extract, `shop=supermarket` 66).
+- Machine halls, steel barns and livestock sheds (`building=farm_auxiliary` 269 and `barn` 10 in the extract) are a
+  farm variant of class 13 with corrugated or timber walls and a low gable.
+- Churches, schools, the town hall, fire stations and the station building are class 14 and partly landmarks.
+
+These belong to regions outside Hamburg and wait until the map grows there: the Plattenbau of Rostock, Schwerin and
+Neubrandenburg, the Bäderarchitektur of the Baltic resorts, the East Frisian Gulfhof, the Friesenhaus, the fieldstone
+churches of Mecklenburg and the half-timbered towns of the Lüneburg Heath. The harbour (Speicherstadt warehouses,
+Kontorhäuser, container terminal, cranes, shipyards) is in Hamburg but outside Bergedorf, and comes with the harbour
+region.
+
 ## Which kit styles cover which classes (feeds #82)
 
 The kit has four styles in `Tools/buildingkit/kit/styles.py`: `brick`, `plaster`, `block` and `farm`.
@@ -441,6 +569,7 @@ The kit has four styles in `Tools/buildingkit/kit/styles.py`: `brick`, `plaster`
 | 12 Garage and shed | none | A garage row with sectional doors, a flat roof with a metal edge, a timber shed, an allotment cabin, a carport. |
 | 13 Industrial hall | none | A sandwich panel wall with a concrete plinth, a loading door, a clerestory band, a low gable or flat roof with roof lights, an office front. |
 | 14 Public | none | Larger windows, a tower, a hip roof in copper or slate; landmarks only. |
+| 15 Greenhouse | none | Venlo glass bays, gable bays, roof spans, gutters on posts, a door bay; foil tunnels; whitewashed glass. |
 
 So the four styles serve four of the fourteen classes (1, 3, 4, 11), partly serve 2 and 7, and nine classes need a style or a module set: 5, 6, 8, 9, 10, 12, 13, 14 and the 1920s brick block. By share of buildings the
 missing ones that matter most are garages and sheds (26 %), detached house variants (16 %), the modern 1990s houses (5 %),
@@ -456,4 +585,4 @@ and the shop front (4 %).
   has 3, and `modern` holds 1970s and 1990s buildings from Lohbrügge-Nord and Neuallermöhe but no true modern
   plaster-and-glass block. A few photos in `brick_block_1920s` are from Dulsberg and Borner Stieg outside the district,
   because Commons has no usable 1920s block in Bergedorf itself.
-- Public and institutional buildings (class 14) have no photos.
+- Public and institutional buildings (class 14), greenhouses and the structures have no photos yet.
