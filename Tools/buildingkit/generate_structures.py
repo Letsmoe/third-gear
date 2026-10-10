@@ -8,7 +8,8 @@ A family module (kit/turbines.py, kit/pylons.py) provides build(), returning (pi
 of dicts that say how the sheet shows each model:
 - name, title: object prefix and the label under the model (may contain a line break).
 - parts: (piece name, location, rotation in degrees, rotation mode) relative to the model's foot.
-- half_width, top: the model's extent, for spacing the row and framing the camera.
+- half_width, top: the model's extent, for spacing the row and framing the camera; depth (optional) is its length
+  along +Y, which the turned line-up camera shows to the left.
 - extras: a geom.Mesh shown only on the sheet (conductor stubs), or None.
 - closeups: dicts with caption, target, direction (from the target toward the camera), distance and lens.
 A module may also provide preview_textures(), slot name to image, so posters and signs show on the sheet.
@@ -25,10 +26,10 @@ import bpy  # noqa: E402
 import numpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
-from kit import blender_io, pylons, shelters, turbines  # noqa: E402
+from kit import blender_io, greenhouses, pylons, shelters, turbines  # noqa: E402
 from kit.geom import Mesh  # noqa: E402
 
-FAMILIES = {"turbines": turbines, "pylons": pylons, "shelters": shelters}
+FAMILIES = {"turbines": turbines, "pylons": pylons, "shelters": shelters, "greenhouses": greenhouses}
 SMALL_FAMILY_HEIGHT = 12.0  # below this the scale reference is a person instead of a house
 CLOSEUP_TILE = (1300, 900)
 
@@ -127,7 +128,8 @@ def build_lineup(pieces, models, label_size):
         build_scale_house(collection, reference_x)
         blender_io.add_label("house\n10 m", (reference_x, -2.0, -label_size * 2.2), size=label_size)
         right = reference_x + 14.0
-    left = positions[0] - models[0]["half_width"] - (1.5 if small else 8.0)
+    deepest = max(model.get("depth", 0.0) for model in models)
+    left = positions[0] - models[0]["half_width"] - (1.5 if small else 8.0) - 0.3 * deepest
     return objects, positions, left, right
 
 
@@ -162,7 +164,11 @@ def render_closeup(closeup, model_index, x, objects, output_path):
     direction = Vector(closeup["direction"]).normalized()
     camera = blender_io.add_camera(tuple(target + direction * closeup["distance"]), tuple(target),
                                    lens=closeup["lens"], clip_end=3000.0)
-    caption = blender_io.add_label(closeup["caption"], (0.0, -0.27, -1.0), size=0.035, rotation=(0.0, 0.0, 0.0))
+    # The caption sits at the bottom of the frame at one unit in front of the camera, whose half height there is
+    # 18 / lens (a 36 mm sensor) times the tile's aspect.
+    half_height = 18.0 / closeup["lens"] * CLOSEUP_TILE[1] / CLOSEUP_TILE[0]
+    caption = blender_io.add_label(closeup["caption"], (0.0, -0.85 * half_height, -1.0), size=0.11 * half_height,
+                                   rotation=(0.0, 0.0, 0.0))
     caption.parent = camera
     blender_io.render_to(output_path, *CLOSEUP_TILE)
     bpy.data.objects.remove(caption)
@@ -173,11 +179,15 @@ def stitch_grid(tile_paths, columns, output_path):
     """Combines equally sized PNG tiles into one image, row by row from the top left."""
     tile_width, tile_height = CLOSEUP_TILE
     rows = math.ceil(len(tile_paths) / columns)
-    sheet = numpy.full((rows * tile_height, columns * tile_width, 4), 1.0, dtype=numpy.float32)
+    sheet = None
     for index, path in enumerate(tile_paths):
         image = bpy.data.images.load(path)
         pixels = numpy.empty(tile_width * tile_height * 4, dtype=numpy.float32)
         image.pixels.foreach_get(pixels)
+        if sheet is None:
+            # Empty cells take the background colour of the first tile's corner.
+            sheet = numpy.empty((rows * tile_height, columns * tile_width, 4), dtype=numpy.float32)
+            sheet[:] = pixels[:4]
         row = rows - 1 - index // columns  # Blender images start at the bottom row
         column = index % columns
         sheet[row * tile_height:(row + 1) * tile_height, column * tile_width:(column + 1) * tile_width] = (
