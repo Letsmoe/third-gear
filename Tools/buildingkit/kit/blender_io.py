@@ -31,6 +31,8 @@ PREVIEW_COLOURS = {
     "Timetable": (0.95, 0.95, 0.92, 1.0),
     "StopSignFace": (0.97, 0.97, 0.95, 1.0),
     "BinSticker": (0.97, 0.97, 0.97, 1.0),
+    "Litter": (0.86, 0.82, 0.72, 1.0),
+    "BinBag": (0.03, 0.03, 0.035, 1.0),
 }
 
 # Slot name -> image file; when set, the preview material shows the image through the piece's UVs (posters, signs).

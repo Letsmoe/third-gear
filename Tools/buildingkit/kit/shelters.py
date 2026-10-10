@@ -12,7 +12,7 @@ import math
 import os
 from collections import OrderedDict
 
-from .geom import Mesh
+from .geom import Mesh, smooth_noise
 
 BAY_WIDTH = 1.5
 GLASS_DEPTH = 1.5
@@ -318,22 +318,151 @@ def rounded_outline(half_width, half_depth, radius, centre_y, corner_segments=4)
 
 
 BIN_WIDTH, BIN_DEPTH, BIN_BOTTOM, BIN_TOP = 0.44, 0.3, 0.32, 1.06
-STICKER = (0.38, 0.16)
+BIN_CORNER_RADIUS = 0.07
+BIN_EDGE_RADIUS = 0.035
+BIN_WALL = 0.02
+# The inner container stays clear of the rounded corners of the shell.
+BIN_INNER_HALF_WIDTH = BIN_WIDTH / 2.0 - 0.06
+BIN_OPENING_HALF_WIDTH = 0.12
+BIN_OPENING_BOTTOM, BIN_OPENING_TOP = BIN_TOP - 0.21, BIN_TOP - 0.065
+# Fits the flat front between the rounded corners, in the 760 by 320 aspect of the sticker images.
+STICKER = (0.3, 0.126)
+
+
+def bin_profile(edge_steps=4):
+    """(z, inset) of the bin body's horizontal rings from the foot to the lid: quarter rounds at the bottom and top
+    edges, and rings at the opening's sill and lintel so the opening can be cut along them."""
+    profile = []
+    for step in range(edge_steps + 1):
+        angle = 0.5 * math.pi * step / edge_steps
+        profile.append((BIN_BOTTOM + BIN_EDGE_RADIUS * (1 - math.cos(angle)), BIN_EDGE_RADIUS * (1 - math.sin(angle))))
+    profile += [(BIN_OPENING_BOTTOM, 0.0), (BIN_OPENING_TOP, 0.0)]
+    for step in range(edge_steps + 1):
+        angle = 0.5 * math.pi * step / edge_steps
+        profile.append((BIN_TOP - BIN_EDGE_RADIUS + BIN_EDGE_RADIUS * math.sin(angle),
+                        BIN_EDGE_RADIUS * (1 - math.cos(angle))))
+    return profile
+
+
+def bin_ring(z, inset, centre_y):
+    """One ring of the bin body: the rounded outline shrunk by inset, with two extra points on the front edge where
+    the opening's jambs are. The segment between them is the last one."""
+    half_width, half_depth = BIN_WIDTH / 2.0 - inset, BIN_DEPTH / 2.0 - inset
+    outline = rounded_outline(half_width, half_depth, BIN_CORNER_RADIUS - inset, centre_y)
+    front_y = centre_y - half_depth
+    outline += [(-BIN_OPENING_HALF_WIDTH, front_y), (BIN_OPENING_HALF_WIDTH, front_y)]
+    return [(x, y, z) for x, y in outline]
+
+
+def add_bin_body(mesh, centre_y):
+    """The bin's red shell as one smooth loft with rounded foot and lid edges, leaving out the throw-in opening."""
+    profile = bin_profile()
+    rings = [bin_ring(z, inset, centre_y) for z, inset in profile]
+    opening_segment = len(rings[0]) - 2
+    for index in range(len(rings) - 1):
+        lower, upper = rings[index], rings[index + 1]
+        in_opening = abs(profile[index][0] - BIN_OPENING_BOTTOM) < 1e-9
+        for point_index in range(len(lower)):
+            if in_opening and point_index == opening_segment:
+                continue
+            following = (point_index + 1) % len(lower)
+            quad = [lower[point_index], lower[following], upper[following], upper[point_index]]
+            middle_x = sum(point[0] for point in quad) / 4.0
+            middle_y = sum(point[1] for point in quad) / 4.0
+            mesh.add_face(quad, "PaintRed", smooth=True, desired_normal=(middle_x, middle_y - centre_y, 0.0))
+    mesh.add_face(rings[0], "PaintRed", desired_normal=(0.0, 0.0, -1.0))
+    mesh.add_face(rings[-1], "PaintRed", desired_normal=(0.0, 0.0, 1.0))
+
+
+def add_bin_opening(mesh, front_y, back_y):
+    """The wall thickness around the throw-in opening, and the dark inside of the bin behind it."""
+    half_width = BIN_OPENING_HALF_WIDTH
+    inner_y = front_y + BIN_WALL
+    bottom, top = BIN_OPENING_BOTTOM, BIN_OPENING_TOP
+    mesh.add_face([(-half_width, front_y, bottom), (half_width, front_y, bottom), (half_width, inner_y, bottom),
+                   (-half_width, inner_y, bottom)], "PaintRed", desired_normal=(0.0, 0.0, 1.0))
+    mesh.add_face([(-half_width, front_y, top), (half_width, front_y, top), (half_width, inner_y, top),
+                   (-half_width, inner_y, top)], "PaintRed", desired_normal=(0.0, 0.0, -1.0))
+    for side in (-1.0, 1.0):
+        x = side * half_width
+        mesh.add_face([(x, front_y, bottom), (x, inner_y, bottom), (x, inner_y, top), (x, front_y, top)], "PaintRed",
+                      desired_normal=(-side, 0.0, 0.0))
+    # The galvanised inner container, faces turned inward; the rubbish covers its floor.
+    inner_half_width = BIN_INNER_HALF_WIDTH
+    floor, ceiling = BIN_OPENING_BOTTOM - 0.15, BIN_TOP - BIN_WALL
+    mesh.box(-inner_half_width, inner_half_width, inner_y, back_y - BIN_WALL, floor, ceiling, "Metal", skip="FD")
+    for face in mesh.faces[-4:]:
+        face["points"].reverse()
+        face["uvs"].reverse()
+    around_opening = [(-inner_half_width, -half_width, floor, ceiling), (half_width, inner_half_width, floor, ceiling),
+                      (-half_width, half_width, floor, bottom), (-half_width, half_width, top, ceiling)]
+    for left, right, lower, upper in around_opening:
+        mesh.add_face([(left, inner_y, lower), (right, inner_y, lower), (right, inner_y, upper), (left, inner_y, upper)],
+                      "Metal", desired_normal=(0.0, 1.0, 0.0))
+
+
+def rubbish_height(x, y, front_y):
+    """Height of the heap in the bag: just under the sill, piled up behind the opening where things land."""
+    behind_opening = math.exp(-((x / 0.14) ** 2) - (((y - front_y - 0.1) / 0.1) ** 2))
+    return BIN_OPENING_BOTTOM - 0.05 + 0.04 * behind_opening + 0.012 * smooth_noise(x, y, 7, 18.0)
+
+
+def crumpled_ball(radius, seed):
+    """A crumpled paper ball: a coarse sphere with every point pushed in or out by noise."""
+    ball = Mesh()
+    steps = 6
+    profile = [(-radius * math.cos(math.pi * step / steps), radius * math.sin(math.pi * step / steps))
+               for step in range(steps + 1)]
+    ball.lathe(profile, "Litter", segments=9)
+
+    def crumple(point):
+        """Scales a point along its direction from the centre by a noise factor."""
+        factor = 1.0 + 0.28 * smooth_noise(point[0] + 0.7 * point[2], point[1] - 0.4 * point[2], seed, 1.6 / radius)
+        return (point[0] * factor, point[1] * factor, point[2] * factor)
+
+    return ball.transformed(crumple)
+
+
+def lying(item, around_z_degrees, x, y, z):
+    """Lays an item built along +Y on its side, turned about Z, with its middle at (x, y, z)."""
+    return item.rotated_z(around_z_degrees).translated(x, y, z)
+
+
+def add_rubbish(mesh, front_y, back_y):
+    """Stand-in rubbish behind the opening: the black bag's surface, paper balls, a coffee cup, a can and a bottle."""
+    inner_half_width = BIN_INNER_HALF_WIDTH
+    inner_front, inner_back = front_y + BIN_WALL, back_y - BIN_WALL
+    mesh.heightfield(-inner_half_width, inner_half_width, inner_front, inner_back, 8, 6,
+                     lambda x, y: rubbish_height(x, y, front_y), "BinBag")
+
+    def on_heap(x, y, lift):
+        """Height at which an item resting on the heap has its middle."""
+        return rubbish_height(x, y, front_y) + lift
+
+    mesh.add(crumpled_ball(0.035, 1), -0.07, front_y + 0.08, on_heap(-0.07, front_y + 0.08, 0.025))
+    mesh.add(crumpled_ball(0.028, 2), 0.09, front_y + 0.13, on_heap(0.09, front_y + 0.13, 0.02))
+    cup = Mesh()
+    cup.lathe([(-0.045, 0.028), (0.045, 0.04), (0.05, 0.042)], "Litter", segments=12)
+    mesh.add(lying(cup, 70.0, 0.02, front_y + 0.12, on_heap(0.02, front_y + 0.12, 0.03)))
+    can = Mesh()
+    can.lathe([(-0.058, 0.026), (-0.054, 0.033), (0.05, 0.033), (0.058, 0.027)], "Metal", segments=12)
+    mesh.add(lying(can, -25.0, -0.1, front_y + 0.18, on_heap(-0.1, front_y + 0.18, 0.025)))
+    bottle = Mesh()
+    bottle.lathe([(-0.11, 0.0), (-0.11, 0.032), (0.03, 0.032), (0.07, 0.014), (0.1, 0.013), (0.1, 0.0)], "Glass",
+                 segments=12)
+    mesh.add(lying(bottle, 15.0, 0.08, front_y + 0.21, on_heap(0.08, front_y + 0.21, 0.025)))
 
 
 def add_street_bin(mesh):
-    """Hamburg's red street bin on the front of the mast: a box with rounded upright edges, the dark throw-in opening
-    across the top of its front, and the joke sticker (BinSticker) below it."""
+    """Hamburg's red street bin on the front of the mast: a shell with rounded edges, a throw-in opening across the
+    top of its front with the rubbish visible inside, and the joke sticker (BinSticker) below it."""
     front_y = -MAST_RADIUS - 0.01 - BIN_DEPTH
-    centre_y = front_y + BIN_DEPTH / 2.0
-    outline = rounded_outline(BIN_WIDTH / 2.0, BIN_DEPTH / 2.0, 0.07, centre_y)
-    mesh.prism(outline, "xy", BIN_BOTTOM, BIN_TOP, "PaintRed", smooth_sides=True)
-    opening_bottom = BIN_TOP - 0.2
-    mesh.add_face([(-0.15, front_y - 0.001, opening_bottom), (0.15, front_y - 0.001, opening_bottom),
-                   (0.15, front_y - 0.001, BIN_TOP - 0.04), (-0.15, front_y - 0.001, BIN_TOP - 0.04)],
-                  "PowderCoat", desired_normal=(0.0, -1.0, 0.0))
+    back_y = front_y + BIN_DEPTH
+    add_bin_body(mesh, front_y + BIN_DEPTH / 2.0)
+    add_bin_opening(mesh, front_y, back_y)
+    add_rubbish(mesh, front_y, back_y)
     sticker_width, sticker_height = STICKER
-    sticker_top = opening_bottom - 0.05
+    sticker_top = BIN_OPENING_BOTTOM - 0.05
     sticker = [(-sticker_width / 2.0, front_y - 0.002, sticker_top - sticker_height),
                (sticker_width / 2.0, front_y - 0.002, sticker_top - sticker_height),
                (sticker_width / 2.0, front_y - 0.002, sticker_top), (-sticker_width / 2.0, front_y - 0.002, sticker_top)]
@@ -394,7 +523,9 @@ DETAIL_CLOSEUPS = {
     "StopSign": [{"caption": "Stop panel", "target": (-0.27, 0.0, 3.2), "direction": (-0.15, -1.0, -0.2),
                   "distance": 2.0, "lens": 35.0},
                  {"caption": "Timetable and bin", "target": (0.0, -0.2, 1.2), "direction": (-0.35, -1.0, 0.1),
-                  "distance": 2.3, "lens": 35.0}],
+                  "distance": 2.3, "lens": 35.0},
+                 {"caption": "Into the bin", "target": (0.0, -0.22, 0.86), "direction": (-0.35, -1.0, 0.6),
+                  "distance": 1.25, "lens": 45.0}],
 }
 
 

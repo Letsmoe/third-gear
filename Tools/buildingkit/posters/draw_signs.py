@@ -129,7 +129,7 @@ def draw_sticker(path, joke):
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle((12, 40, width - 12, height - 12), radius=26, fill=(255, 255, 255))
     draw.polygon([(width * 0.62, 44), (width * 0.66, 0), (width * 0.72, 44)], fill=(255, 255, 255))
-    joke_font = font(64)
+    joke_font = font(100)
     left, upper, right, lower = draw.multiline_textbbox((0, 0), joke, font=joke_font, align="center")
     bubble_middle = (40 + height - 12) / 2
     centred_text(draw, width / 2, bubble_middle - (lower - upper) / 2, joke, joke_font, INK)
