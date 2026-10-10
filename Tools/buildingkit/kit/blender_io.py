@@ -44,6 +44,9 @@ PREVIEW_COLOURS = {
     "CanopyLight": (1.0, 0.98, 0.92, 1.0),
     "SafetyYellow": (0.95, 0.70, 0.02, 1.0),
     "WashBrush": (0.10, 0.35, 0.80, 1.0),
+    "Asphalt": (0.12, 0.12, 0.13, 1.0),
+    "Ground": (0.30, 0.38, 0.22, 1.0),
+    "Water": (0.10, 0.25, 0.32, 1.0),
 }
 TRANSPARENT = ("Glass", "GreenhouseGlass", "Foil")
 

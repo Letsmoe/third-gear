@@ -129,6 +129,15 @@ instances, not pieces: every brand surface has its own slot (`BrandPaint`, `Bran
 `variant` swaps in the previews named `<slot>@<brand>`); `posters/draw_brands.py` draws their logos, price boards,
 pump faces and wash signs.
 
+### Bridges
+
+`kit/bridges.py` (#106) generates the common bridge types to fit a clear span and a road cross-section: the slab
+bridge on two abutments with parallel wing walls, the beam bridge with a box girder on round piers, the steel
+footbridge and the Vierlande timber footbridge. A bridge runs along +Y with the road surface at z = 0; its full length
+includes the wing walls, so it is what the OSM bridge way should measure. `deck_section()` gives the polygons the
+runtime sweeps along a curved way; railings, abutments and piers are placed along it. The sheet shows samples with
+their ground, water and approach roads (`Asphalt`, `Ground` and `Water` are sheet-only slots).
+
 ### Greenhouses
 
 `kit/greenhouses.py` (#103) is a footprint style, not a node structure: the pieces are meant to be placed along a
