@@ -36,8 +36,19 @@ PREVIEW_COLOURS = {
     "GreenhouseGlass": (0.80, 0.88, 0.88, 0.30),
     "Foil": (0.92, 0.93, 0.90, 0.55),
     "Aluminium": (0.72, 0.74, 0.76, 1.0),
+    "BrandPaint": (0.10, 0.25, 0.60, 1.0),
+    "BrandLogo": (0.90, 0.90, 0.95, 1.0),
+    "PriceBoard": (0.10, 0.10, 0.12, 1.0),
+    "PumpFace": (0.85, 0.86, 0.87, 1.0),
+    "WashSign": (0.90, 0.90, 0.95, 1.0),
+    "CanopyLight": (1.0, 0.98, 0.92, 1.0),
+    "SafetyYellow": (0.95, 0.70, 0.02, 1.0),
+    "WashBrush": (0.10, 0.35, 0.80, 1.0),
 }
 TRANSPARENT = ("Glass", "GreenhouseGlass", "Foil")
+
+# Back-lit faces: they glow in their own colour or image.
+LIT = ("AdPanel", "BrandLogo", "PriceBoard", "PumpFace", "CanopyLight")
 
 # Slot name -> image file; when set, the preview material shows the image through the piece's UVs (posters, signs).
 PREVIEW_TEXTURES = {}
@@ -52,13 +63,15 @@ def reset_scene():
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
 
-def get_material(name):
-    """Returns the named preview material, creating it on first use."""
-    material = bpy.data.materials.get(name)
+def get_material(full_name):
+    """Returns the named preview material, creating it on first use. A name like "BrandPaint@hopp" is the slot's
+    preview for one variant: its colour and image come from the full name, everything else from the slot."""
+    material = bpy.data.materials.get(full_name)
     if material is not None:
         return material
-    material = bpy.data.materials.new(name)
-    colour = PREVIEW_COLOURS[name]
+    material = bpy.data.materials.new(full_name)
+    name = full_name.split("@")[0]
+    colour = PREVIEW_COLOURS.get(full_name, PREVIEW_COLOURS[name])
     material.diffuse_color = colour
     material.use_nodes = True
     shader = material.node_tree.nodes["Principled BSDF"]
@@ -70,9 +83,10 @@ def get_material(name):
         material.surface_render_method = "BLENDED"
     if name == "PaintGreen":
         add_band_ramp(material, shader)
-    if name in PREVIEW_TEXTURES and os.path.exists(PREVIEW_TEXTURES[name]):
-        add_preview_texture(material, shader, PREVIEW_TEXTURES[name], emissive=name == "AdPanel")
-    if name == "AdPanel":
+    image = PREVIEW_TEXTURES.get(full_name, PREVIEW_TEXTURES.get(name))
+    if image is not None and os.path.exists(image):
+        add_preview_texture(material, shader, image, emissive=name in LIT)
+    if name in LIT:
         shader.inputs["Emission Color"].default_value = colour
         shader.inputs["Emission Strength"].default_value = 0.6
     if name == "Beacon":

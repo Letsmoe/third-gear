@@ -118,6 +118,17 @@ brands, German text) and fits them to the CityLight size with `posters/fit_poste
 the stop panel, a timetable and the bin stickers with PIL, since their text has to be exact. Everything lands in
 `<data root>/building_kit/posters/`, and the contact sheet shows it through `preview_textures()`.
 
+### Petrol stations
+
+`kit/petrol.py` (#105) has the pieces of a filling station: `Canopy_2`, `Canopy_3` and `Canopy_4` (roof over two to
+four pump islands, 4.8 m clear, ribbed soffit, raised logo boxes, a clad column on each island), `PumpIsland` (two
+dispensers with hoses, guards, bin), `PricePylon` (price board on two legs), `Shop`, `CarWash` and `AirVacuum`.
+`station_layout()` and `station_parts()` are the placement rule on a plot with the road at -Y. Brands are material
+instances, not pieces: every brand surface has its own slot (`BrandPaint`, `BrandLogo`, `PriceBoard`, `PumpFace`,
+`WashSign`). The sheet shows the three made-up brands NORDTANK, hopp! and Vierländer Öl through variants (a model's
+`variant` swaps in the previews named `<slot>@<brand>`); `posters/draw_brands.py` draws their logos, price boards,
+pump faces and wash signs.
+
 ### Greenhouses
 
 `kit/greenhouses.py` (#103) is a footprint style, not a node structure: the pieces are meant to be placed along a
