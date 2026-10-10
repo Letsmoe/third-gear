@@ -11,7 +11,9 @@ import random
 MATERIALS = ("Brick", "Plaster", "Timber", "Frame", "Glass", "Sill", "RoofTile", "Thatch", "Metal", "Concrete", "Paint",
              "PaintRed", "PaintGreen", "Beacon", "Lattice", "Insulator",
              "PowderCoat", "AdPanel", "Timetable", "StopSignFace", "BinSticker", "Litter", "BinBag",
-             "GreenhouseGlass", "Foil", "Aluminium")
+             "GreenhouseGlass", "Foil", "Aluminium",
+             "BrandPaint", "BrandLogo", "PriceBoard", "PumpFace", "WashSign", "CanopyLight", "SafetyYellow",
+             "WashBrush")
 
 
 def vec_sub(first, second):

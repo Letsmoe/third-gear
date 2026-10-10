@@ -12,7 +12,9 @@ of dicts that say how the sheet shows each model:
   along +Y, which the turned line-up camera shows to the left.
 - extras: a geom.Mesh shown only on the sheet (conductor stubs), or None.
 - closeups: dicts with caption, target, direction (from the target toward the camera), distance and lens.
-A module may also provide preview_textures(), slot name to image, so posters and signs show on the sheet.
+A module may also provide preview_textures(), slot name to image, so posters and signs show on the sheet, and
+preview_colours(). A model may name a variant ("hopp"): its slots then use the previews named "<slot>@<variant>" where
+they exist, so one exported piece shows in each brand.
 """
 
 import json
@@ -26,10 +28,11 @@ import bpy  # noqa: E402
 import numpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
-from kit import blender_io, greenhouses, pylons, shelters, turbines  # noqa: E402
+from kit import blender_io, greenhouses, petrol, pylons, shelters, turbines  # noqa: E402
 from kit.geom import Mesh  # noqa: E402
 
-FAMILIES = {"turbines": turbines, "pylons": pylons, "shelters": shelters, "greenhouses": greenhouses}
+FAMILIES = {"turbines": turbines, "pylons": pylons, "shelters": shelters, "greenhouses": greenhouses,
+            "petrol": petrol}
 SMALL_FAMILY_HEIGHT = 12.0  # below this the scale reference is a person instead of a house
 CLOSEUP_TILE = (1300, 900)
 
@@ -70,11 +73,37 @@ def lineup_positions(models):
     return positions
 
 
+def with_variant(kit_mesh, variant):
+    """A copy of a piece whose slots that have a preview for the variant ("BrandPaint@hopp") use it."""
+    previews = set(blender_io.PREVIEW_COLOURS) | set(blender_io.PREVIEW_TEXTURES)
+    result = kit_mesh.copy()
+    for face in result.faces:
+        variant_name = "%s@%s" % (face["material"], variant)
+        if variant_name in previews:
+            face["material"] = variant_name
+    return result
+
+
+def build_variant_mesh_data(pieces, models):
+    """Blender meshes for every piece in every variant a model asks for (None is the piece as exported)."""
+    mesh_data = {}
+    for model in models:
+        variant = model.get("variant")
+        for piece_name, _location, _rotation, _mode in model["parts"]:
+            if (piece_name, variant) in mesh_data:
+                continue
+            kit_mesh = pieces[piece_name]
+            if variant is not None:
+                kit_mesh = with_variant(kit_mesh, variant)
+            mesh_data[(piece_name, variant)] = blender_io.build_mesh_data(piece_name, kit_mesh)
+    return mesh_data
+
+
 def place_model(collection, model, mesh_data, x):
     """Adds the parts of one model at x; returns its objects."""
     objects = []
     for piece_name, location, rotation, mode in model["parts"]:
-        obj = bpy.data.objects.new(piece_name, mesh_data[piece_name])
+        obj = bpy.data.objects.new(piece_name, mesh_data[(piece_name, model.get("variant"))])
         obj.location = (x + location[0], location[1], location[2])
         obj.rotation_mode = mode
         obj.rotation_euler = tuple(math.radians(angle) for angle in rotation)
@@ -111,7 +140,7 @@ def build_lineup(pieces, models, label_size):
     blender_io.reset_scene()
     blender_io.setup_world(sun_strength=3.0, neutral=True)
     collection = bpy.context.scene.collection
-    mesh_data = {name: blender_io.build_mesh_data(name, kit_mesh) for name, kit_mesh in pieces.items()}
+    mesh_data = build_variant_mesh_data(pieces, models)
     positions = lineup_positions(models)
     objects = []
     for model, x in zip(models, positions):
@@ -208,6 +237,8 @@ def build_family(family, output_dir):
     blender_io.PREVIEW_TEXTURES.clear()
     if hasattr(module, "preview_textures"):
         blender_io.PREVIEW_TEXTURES.update(module.preview_textures())
+    if hasattr(module, "preview_colours"):
+        blender_io.PREVIEW_COLOURS.update(module.preview_colours())
     export_pieces(family, pieces, output_dir)
     label_size = max(model["top"] for model in models) * 0.035
     objects, positions, left, right = build_lineup(pieces, models, label_size)
