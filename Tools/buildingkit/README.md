@@ -97,6 +97,27 @@ insulator on suspension pylons, and at the end of the horizontal insulator on ea
 anchor pylons. The slots are `Lattice` for the steel angles, `Insulator` for the silicone sheds, `Metal` for fittings
 and `Concrete` for the foundations. The conductor stubs on the sheet are only a preview.
 
+### Bus stops
+
+`kit/shelters.py` (#102) has Hamburg's JCDecaux glass shelter in two and three bays (`Glass_2Bay`, `Glass_3Bay`:
+slim black posts, a framed glass end, frameless back glass with clamps, the red dot band and the information case,
+a CityLight advertising case at the left end, a thin glass roof that overhangs the kerb and rises toward it, a black
+steel bench), the rural `Timber` shelter (boarded back and ends, pent roof) and the red `StopSign` mast as photographed
+at Roßweg (the white stop panel beside its top, a red timetable case, and Hamburg's red street bin with its sticker).
+A shelter's origin is the middle of its open front edge, which faces -Y toward the road; the mast's is its foot, and it
+faces -Y too. The shelter follows a photo of the Rathausmarkt stop; the 1.5 m bay and the heights are estimates from
+it. `PowderCoat` is the black steel.
+
+### Posters and printed faces
+
+The shelters and the mast carry printed faces with 0 to 1 UVs in their own slots: `AdPanel` (CityLight poster,
+1160 by 1710 mm, both faces of the advertising case), `Timetable` (A-format, in the shelter's information case and the
+mast's case), `StopSignFace` (the stop panel beside the mast top) and `BinSticker` (the joke on the street bin).
+`posters/generate_ads.sh [name ...]` makes the adverts with Codex's image tool from `posters/prompts.py` (fictional
+brands, German text) and fits them to the CityLight size with `posters/fit_poster.py`; `posters/draw_signs.py` draws
+the stop panel, a timetable and the bin stickers with PIL, since their text has to be exact. Everything lands in
+`<data root>/building_kit/posters/`, and the contact sheet shows it through `preview_textures()`.
+
 ## Props from Hunyuan 3D
 
 `props/run_props.sh` runs the whole chain. ComfyUI is started from a private venv in

@@ -11,6 +11,7 @@ of dicts that say how the sheet shows each model:
 - half_width, top: the model's extent, for spacing the row and framing the camera.
 - extras: a geom.Mesh shown only on the sheet (conductor stubs), or None.
 - closeups: dicts with caption, target, direction (from the target toward the camera), distance and lens.
+A module may also provide preview_textures(), slot name to image, so posters and signs show on the sheet.
 """
 
 import json
@@ -24,11 +25,11 @@ import bpy  # noqa: E402
 import numpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
-from kit import blender_io, pylons, turbines  # noqa: E402
+from kit import blender_io, pylons, shelters, turbines  # noqa: E402
 from kit.geom import Mesh  # noqa: E402
 
-FAMILIES = {"turbines": turbines, "pylons": pylons}
-LINEUP_GAP = 15.0  # metres between neighbouring models
+FAMILIES = {"turbines": turbines, "pylons": pylons, "shelters": shelters}
+SMALL_FAMILY_HEIGHT = 12.0  # below this the scale reference is a person instead of a house
 CLOSEUP_TILE = (1300, 900)
 
 
@@ -57,12 +58,13 @@ def piece_stats(pieces):
 
 
 def lineup_positions(models):
-    """X position of every model, side by side with LINEUP_GAP between them."""
+    """X position of every model, side by side with a gap that grows with the family's height (1 to 15 m)."""
+    gap = min(max(0.4 * max(model["top"] for model in models), 1.0), 15.0)
     positions = []
     x = 0.0
     for index, model in enumerate(models):
         if index > 0:
-            x += models[index - 1]["half_width"] + model["half_width"] + LINEUP_GAP
+            x += models[index - 1]["half_width"] + model["half_width"] + gap
         positions.append(x)
     return positions
 
@@ -81,6 +83,17 @@ def place_model(collection, model, mesh_data, x):
         objects.append(blender_io.add_piece_object(collection, model["name"] + "_Preview", model["extras"],
                                                    location=(x, 0.0, 0.0)))
     return objects
+
+
+def build_scale_person(collection, x):
+    """A 1.8 m standing figure (legs, body, head) to show the scale of small structures."""
+    person = Mesh()
+    for leg_x in (-0.1, 0.1):
+        person.cylinder(leg_x, 0.0, 0.0, 0.85, 0.07, "Concrete", segments=10)
+    person.cylinder(0.0, 0.0, 0.85, 1.5, 0.19, "Concrete", segments=14, radius_top=0.21)
+    person.cylinder(0.0, 0.0, 1.5, 1.58, 0.06, "Concrete", segments=10)
+    person.cylinder(0.0, 0.0, 1.58, 1.8, 0.11, "Concrete", segments=14)
+    blender_io.add_piece_object(collection, "ScalePerson", person, location=(x, 0.0, 0.0))
 
 
 def build_scale_house(collection, x):
@@ -103,11 +116,18 @@ def build_lineup(pieces, models, label_size):
     for model, x in zip(models, positions):
         objects.append(place_model(collection, model, mesh_data, x))
         blender_io.add_label(model["title"], (x, -2.0, -label_size * 2.2), size=label_size)
-    house_x = positions[-1] + models[-1]["half_width"] + 12.0
-    build_scale_house(collection, house_x)
-    blender_io.add_label("house\n10 m", (house_x, -2.0, -label_size * 2.2), size=label_size)
-    left = positions[0] - models[0]["half_width"] - 8.0
-    right = house_x + 14.0
+    small = max(model["top"] for model in models) < SMALL_FAMILY_HEIGHT
+    if small:
+        reference_x = positions[-1] + models[-1]["half_width"] + 1.5
+        build_scale_person(collection, reference_x)
+        blender_io.add_label("person\n1.8 m", (reference_x, -2.0, -label_size * 2.2), size=label_size)
+        right = reference_x + 1.5
+    else:
+        reference_x = positions[-1] + models[-1]["half_width"] + 12.0
+        build_scale_house(collection, reference_x)
+        blender_io.add_label("house\n10 m", (reference_x, -2.0, -label_size * 2.2), size=label_size)
+        right = reference_x + 14.0
+    left = positions[0] - models[0]["half_width"] - (1.5 if small else 8.0)
     return objects, positions, left, right
 
 
@@ -129,7 +149,7 @@ def render_lineup(models, left, right, label_size, output_path):
 def hide_lineup_extras():
     """Hides the scale house and the line-up labels, which would show in the background of the close-ups."""
     for obj in bpy.data.objects:
-        if obj.name == "ScaleHouse" or obj.name.startswith("label_"):
+        if obj.name in ("ScaleHouse", "ScalePerson") or obj.name.startswith("label_"):
             obj.hide_render = True
 
 
@@ -175,6 +195,9 @@ def build_family(family, output_dir):
     module = FAMILIES[family]
     pieces, spec = module.build()
     models = module.assemblies()
+    blender_io.PREVIEW_TEXTURES.clear()
+    if hasattr(module, "preview_textures"):
+        blender_io.PREVIEW_TEXTURES.update(module.preview_textures())
     export_pieces(family, pieces, output_dir)
     label_size = max(model["top"] for model in models) * 0.035
     objects, positions, left, right = build_lineup(pieces, models, label_size)
