@@ -28,8 +28,13 @@ PREVIEW_COLOURS = {
     "Insulator": (0.55, 0.57, 0.60, 1.0),
     "PowderCoat": (0.10, 0.11, 0.12, 1.0),
     "AdPanel": (0.85, 0.80, 0.65, 1.0),
-    "SignFace": (0.95, 0.80, 0.10, 1.0),
+    "Timetable": (0.95, 0.95, 0.92, 1.0),
+    "StopSignFace": (0.97, 0.97, 0.95, 1.0),
+    "BinSticker": (0.97, 0.97, 0.97, 1.0),
 }
+
+# Slot name -> image file; when set, the preview material shows the image through the piece's UVs (posters, signs).
+PREVIEW_TEXTURES = {}
 
 # Enercon's tower foot: five green bands from dark at the ground to pale, 3 m each (V of the metre UVs is the height).
 GREEN_BANDS = [(0.03, 0.17, 0.07), (0.07, 0.27, 0.11), (0.15, 0.40, 0.17), (0.30, 0.53, 0.26), (0.50, 0.66, 0.40)]
@@ -59,6 +64,8 @@ def get_material(name):
         material.surface_render_method = "BLENDED"
     if name == "PaintGreen":
         add_band_ramp(material, shader)
+    if name in PREVIEW_TEXTURES and os.path.exists(PREVIEW_TEXTURES[name]):
+        add_preview_texture(material, shader, PREVIEW_TEXTURES[name], emissive=name == "AdPanel")
     if name == "AdPanel":
         shader.inputs["Emission Color"].default_value = colour
         shader.inputs["Emission Strength"].default_value = 0.6
@@ -69,6 +76,16 @@ def get_material(name):
         shader.inputs["Metallic"].default_value = 0.6
         shader.inputs["Roughness"].default_value = 0.4
     return material
+
+
+def add_preview_texture(material, shader, path, emissive):
+    """Feeds an image through the UVs into the base colour (and the emission, for back-lit posters)."""
+    nodes = material.node_tree.nodes
+    image_node = nodes.new("ShaderNodeTexImage")
+    image_node.image = bpy.data.images.load(path, check_existing=True)
+    material.node_tree.links.new(image_node.outputs["Color"], shader.inputs["Base Color"])
+    if emissive:
+        material.node_tree.links.new(image_node.outputs["Color"], shader.inputs["Emission Color"])
 
 
 def add_band_ramp(material, shader):

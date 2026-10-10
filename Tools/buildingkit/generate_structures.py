@@ -11,6 +11,7 @@ of dicts that say how the sheet shows each model:
 - half_width, top: the model's extent, for spacing the row and framing the camera.
 - extras: a geom.Mesh shown only on the sheet (conductor stubs), or None.
 - closeups: dicts with caption, target, direction (from the target toward the camera), distance and lens.
+A module may also provide preview_textures(), slot name to image, so posters and signs show on the sheet.
 """
 
 import json
@@ -194,6 +195,9 @@ def build_family(family, output_dir):
     module = FAMILIES[family]
     pieces, spec = module.build()
     models = module.assemblies()
+    blender_io.PREVIEW_TEXTURES.clear()
+    if hasattr(module, "preview_textures"):
+        blender_io.PREVIEW_TEXTURES.update(module.preview_textures())
     export_pieces(family, pieces, output_dir)
     label_size = max(model["top"] for model in models) * 0.035
     objects, positions, left, right = build_lineup(pieces, models, label_size)

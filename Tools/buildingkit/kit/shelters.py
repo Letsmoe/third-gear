@@ -1,5 +1,5 @@
 """Bus stops (#102): Hamburg's JCDecaux glass shelter in two lengths, the rural timber shelter, the red HVV stop
-mast and its bin.
+mast with its timetable case and street bin.
 
 Frame: metres, Z up. A shelter's origin is the middle of its open front edge on the pavement; the open side faces -Y,
 toward the road, and the back wall stands at +Y. The sign's origin is the foot of its pole, the sign faces -Y.
@@ -8,6 +8,8 @@ The glass shelter follows a photo of the Rathausmarkt stop; its bay width (1.5 m
 not measured.
 """
 
+import math
+import os
 from collections import OrderedDict
 
 from .geom import Mesh
@@ -86,19 +88,28 @@ def add_glass_end(mesh, x):
         mesh.box(x - 0.015, x + 0.015, y - 0.015, y + 0.015, 0.0, bottom - frame, "PowderCoat")
 
 
+POSTER_WIDTH, POSTER_HEIGHT = 1.16, 1.71  # visible area of a CityLight poster
+FRONT_UVS = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]  # for corners listed left, right, top right, top left
+MIRRORED_UVS = [(1.0, 0.0), (0.0, 0.0), (0.0, 1.0), (1.0, 1.0)]
+
+
 def add_advert_case(mesh, x):
-    """The back-lit advertising case that closes one end: a black steel case with a poster on both faces, standing
-    on two feet."""
+    """The back-lit advertising case that closes one end: a black steel case with a CityLight poster on both faces,
+    standing on two feet against the back post. Each poster has 0 to 1 UVs, upright as seen from its side."""
     case_depth = 0.14
+    frame = 0.06
     low_x, high_x = x - case_depth / 2.0, x + case_depth / 2.0
-    y0, y1 = -0.05, GLASS_DEPTH - POST_SIZE
-    bottom, top = 0.3, 2.3
+    y1 = GLASS_DEPTH - POST_SIZE
+    y0 = y1 - POSTER_WIDTH - 2 * frame
+    bottom = 0.3
+    top = bottom + POSTER_HEIGHT + 2 * frame
     mesh.box(low_x, high_x, y0, y1, bottom, top, "PowderCoat")
-    inset = 0.06
     for face_x, normal in ((low_x - 0.003, -1.0), (high_x + 0.003, 1.0)):
-        poster = [(face_x, y0 + inset, bottom + inset), (face_x, y1 - inset, bottom + inset),
-                  (face_x, y1 - inset, top - inset), (face_x, y0 + inset, top - inset)]
-        mesh.add_face(poster, "AdPanel", desired_normal=(normal, 0.0, 0.0))
+        poster = [(face_x, y0 + frame, bottom + frame), (face_x, y1 - frame, bottom + frame),
+                  (face_x, y1 - frame, top - frame), (face_x, y0 + frame, top - frame)]
+        # Seen from -X, right is -Y, so the poster's U runs against Y there.
+        uvs = MIRRORED_UVS if normal < 0 else FRONT_UVS
+        mesh.add_face(poster, "AdPanel", desired_normal=(normal, 0.0, 0.0), uvs=uvs)
     for foot_y in (y0 + 0.15, y1 - 0.25):
         mesh.box(low_x + 0.03, high_x - 0.03, foot_y, foot_y + 0.1, 0.0, bottom, "PowderCoat")
 
@@ -142,16 +153,20 @@ def add_steel_bench(mesh, half_length):
 
 
 def add_info_case(mesh, half_length):
-    """The information case with the network map and timetables, fixed to the back glass at the glass end."""
-    width, height = 0.85, 1.15
+    """The information case with the timetable poster (A-format, 0 to 1 UVs), fixed to the back glass at the glass
+    end."""
+    poster_width, poster_height = 0.8, 1.13
+    frame = 0.04
     right = half_length - 0.12
-    left = right - width
-    bottom = 1.0
+    left = right - poster_width - 2 * frame
+    bottom = 0.95
+    top = bottom + poster_height + 2 * frame
     back_y = GLASS_DEPTH - POST_SIZE / 2.0 - GLASS_THICKNESS / 2.0
-    mesh.box(left, right, back_y - 0.06, back_y, bottom, bottom + height, "PowderCoat")
-    face = [(left + 0.04, back_y - 0.061, bottom + 0.04), (right - 0.04, back_y - 0.061, bottom + 0.04),
-            (right - 0.04, back_y - 0.061, bottom + height - 0.04), (left + 0.04, back_y - 0.061, bottom + height - 0.04)]
-    mesh.add_face(face, "SignFace", desired_normal=(0.0, -1.0, 0.0))
+    mesh.box(left, right, back_y - 0.06, back_y, bottom, top, "PowderCoat")
+    face_y = back_y - 0.061
+    face = [(left + frame, face_y, bottom + frame), (right - frame, face_y, bottom + frame),
+            (right - frame, face_y, top - frame), (left + frame, face_y, top - frame)]
+    mesh.add_face(face, "Timetable", desired_normal=(0.0, -1.0, 0.0), uvs=FRONT_UVS)
 
 
 def build_glass_shelter(bay_count):
@@ -250,45 +265,92 @@ def build_timber_shelter():
     return mesh
 
 
-# ================================================================================================= stop sign
-MAST_HEIGHT = 3.5
-SIGN_SIZE = 0.45
+# ================================================================================================= stop mast
+MAST_HEIGHT = 3.6
+MAST_RADIUS = 0.045
+SIGN_PANEL = (0.44, 0.78)  # width and height of the white stop panel beside the mast top
 
 
-def sign_plate(mesh, x0, x1, z0, z1, y_front=-0.08, thickness=0.015):
-    """A flat plate facing -Y whose front carries a printed face (SignFace) inside a thin metal edge."""
-    mesh.box(x0, x1, y_front, y_front + thickness, z0, z1, "Metal")
-    face = [(x0 + 0.01, y_front - 0.0005, z0 + 0.01), (x1 - 0.01, y_front - 0.0005, z0 + 0.01),
-            (x1 - 0.01, y_front - 0.0005, z1 - 0.01), (x0 + 0.01, y_front - 0.0005, z1 - 0.01)]
-    mesh.add_face(face, "SignFace", desired_normal=(0.0, -1.0, 0.0))
+def add_sign_panel(mesh):
+    """The white stop panel fixed beside the top of the mast: Zeichen 224, the stop name, the HVV mark and the line
+    strip are all printed on it (StopSignFace), on both sides, upright from each side."""
+    width, height = SIGN_PANEL
+    right = -MAST_RADIUS - 0.005
+    left = right - width
+    top = MAST_HEIGHT - 0.02
+    bottom = top - height
+    mesh.box(left, right, -0.012, 0.012, bottom, top, "Metal")
+    front = [(left + 0.008, -0.0125, bottom + 0.008), (right - 0.008, -0.0125, bottom + 0.008),
+             (right - 0.008, -0.0125, top - 0.008), (left + 0.008, -0.0125, top - 0.008)]
+    mesh.add_face(front, "StopSignFace", desired_normal=(0.0, -1.0, 0.0), uvs=FRONT_UVS)
+    back = [(x, 0.0125, z) for x, _y, z in front]
+    mesh.add_face(back, "StopSignFace", desired_normal=(0.0, 1.0, 0.0), uvs=MIRRORED_UVS)
+    for z in (top - 0.1, bottom + 0.1):
+        mesh.box(right - 0.02, MAST_RADIUS + 0.01, -0.03, 0.03, z - 0.03, z + 0.03, "Metal")
+
+
+def add_timetable_case(mesh):
+    """The small red timetable case on the front of the mast at reading height, with an A-format timetable."""
+    poster_width, poster_height = 0.29, 0.41
+    frame = 0.025
+    left, right = -poster_width / 2.0 - frame, poster_width / 2.0 + frame
+    bottom = 1.35
+    top = bottom + poster_height + 2 * frame
+    front_y = -MAST_RADIUS - 0.05
+    mesh.box(left, right, front_y, -MAST_RADIUS + 0.005, bottom, top, "PaintRed")
+    face = [(left + frame, front_y - 0.001, bottom + frame), (right - frame, front_y - 0.001, bottom + frame),
+            (right - frame, front_y - 0.001, top - frame), (left + frame, front_y - 0.001, top - frame)]
+    mesh.add_face(face, "Timetable", desired_normal=(0.0, -1.0, 0.0), uvs=FRONT_UVS)
+
+
+def rounded_outline(half_width, half_depth, radius, centre_y, corner_segments=4):
+    """Counter-clockwise (x, y) outline of a rectangle with rounded corners, centred on (0, centre_y)."""
+    corners = [(half_width - radius, centre_y - half_depth + radius, -90.0),
+               (half_width - radius, centre_y + half_depth - radius, 0.0),
+               (-half_width + radius, centre_y + half_depth - radius, 90.0),
+               (-half_width + radius, centre_y - half_depth + radius, 180.0)]
+    outline = []
+    for corner_x, corner_y, start in corners:
+        for step in range(corner_segments + 1):
+            angle = math.radians(start + 90.0 * step / corner_segments)
+            outline.append((corner_x + radius * math.cos(angle), corner_y + radius * math.sin(angle)))
+    return outline
+
+
+BIN_WIDTH, BIN_DEPTH, BIN_BOTTOM, BIN_TOP = 0.44, 0.3, 0.32, 1.06
+STICKER = (0.38, 0.16)
+
+
+def add_street_bin(mesh):
+    """Hamburg's red street bin on the front of the mast: a box with rounded upright edges, the dark throw-in opening
+    across the top of its front, and the joke sticker (BinSticker) below it."""
+    front_y = -MAST_RADIUS - 0.01 - BIN_DEPTH
+    centre_y = front_y + BIN_DEPTH / 2.0
+    outline = rounded_outline(BIN_WIDTH / 2.0, BIN_DEPTH / 2.0, 0.07, centre_y)
+    mesh.prism(outline, "xy", BIN_BOTTOM, BIN_TOP, "PaintRed", smooth_sides=True)
+    opening_bottom = BIN_TOP - 0.2
+    mesh.add_face([(-0.15, front_y - 0.001, opening_bottom), (0.15, front_y - 0.001, opening_bottom),
+                   (0.15, front_y - 0.001, BIN_TOP - 0.04), (-0.15, front_y - 0.001, BIN_TOP - 0.04)],
+                  "PowderCoat", desired_normal=(0.0, -1.0, 0.0))
+    sticker_width, sticker_height = STICKER
+    sticker_top = opening_bottom - 0.05
+    sticker = [(-sticker_width / 2.0, front_y - 0.002, sticker_top - sticker_height),
+               (sticker_width / 2.0, front_y - 0.002, sticker_top - sticker_height),
+               (sticker_width / 2.0, front_y - 0.002, sticker_top), (-sticker_width / 2.0, front_y - 0.002, sticker_top)]
+    mesh.add_face(sticker, "BinSticker", desired_normal=(0.0, -1.0, 0.0), uvs=FRONT_UVS)
+    for z in (BIN_BOTTOM + 0.15, BIN_TOP - 0.15):
+        mesh.box(-0.06, 0.06, -MAST_RADIUS - 0.012, -MAST_RADIUS + 0.01, z - 0.03, z + 0.03, "Metal")
 
 
 def build_stop_sign():
-    """The red HVV stop mast: the square H sign (Zeichen 224) at the top, the stop name plate and a stack of line
-    plates under it, on brackets. It faces -Y; the runtime turns it toward the oncoming traffic."""
+    """The red HVV stop mast as photographed at Roßweg: the white stop panel beside its top, the red timetable case at
+    reading height and the street bin below. It faces -Y; the runtime turns it toward the oncoming traffic."""
     mesh = Mesh()
-    mesh.cylinder(0.0, 0.0, 0.0, MAST_HEIGHT, 0.05, "PaintRed", segments=16)
-    mesh.cylinder(0.0, 0.0, MAST_HEIGHT, MAST_HEIGHT + 0.02, 0.052, "Metal", segments=16)
-    sign_top = MAST_HEIGHT - 0.05
-    sign_plate(mesh, -SIGN_SIZE / 2.0, SIGN_SIZE / 2.0, sign_top - SIGN_SIZE, sign_top)
-    name_top = sign_top - SIGN_SIZE - 0.03
-    sign_plate(mesh, -0.3, 0.3, name_top - 0.13, name_top)
-    line_top = name_top - 0.16
-    for line in range(3):
-        top = line_top - line * 0.105
-        sign_plate(mesh, -0.3, 0.3, top - 0.095, top)
-    for z in (sign_top - 0.1, sign_top - SIGN_SIZE + 0.1, name_top - 0.06, line_top - 0.15):
-        mesh.box(-0.06, 0.06, -0.065, -0.04, z - 0.025, z + 0.025, "Metal")
-    return mesh
-
-
-def build_stop_bin():
-    """The red HVV litter bin on its own short post, which stands next to the mast."""
-    mesh = Mesh()
-    mesh.cylinder(0.0, 0.0, 0.0, 0.75, 0.035, "PaintRed", segments=12)
-    mesh.box(-0.18, 0.18, -0.2, 0.08, 0.45, 1.05, "PaintRed")
-    mesh.box(-0.16, 0.16, -0.202, -0.2, 0.92, 0.99, "SignFace")
-    mesh.box(-0.12, 0.12, -0.205, -0.2, 0.8, 0.86, "PowderCoat")
+    mesh.cylinder(0.0, 0.0, 0.0, MAST_HEIGHT, MAST_RADIUS, "PaintRed", segments=16)
+    mesh.cylinder(0.0, 0.0, MAST_HEIGHT, MAST_HEIGHT + 0.02, MAST_RADIUS + 0.003, "PaintRed", segments=16)
+    add_sign_panel(mesh)
+    add_timetable_case(mesh)
+    add_street_bin(mesh)
     return mesh
 
 
@@ -300,7 +362,6 @@ def build():
     pieces["Glass_3Bay"] = build_glass_shelter(3)
     pieces["Timber"] = build_timber_shelter()
     pieces["StopSign"] = build_stop_sign()
-    pieces["StopBin"] = build_stop_bin()
     spec = {}
     for name, mesh in pieces.items():
         lower, upper = mesh.bounds()
@@ -309,18 +370,49 @@ def build():
     return pieces, spec
 
 
+def preview_textures():
+    """Images for the contact sheet's preview materials, from <data root>/building_kit/posters (posters/README)."""
+    posters = os.path.join(os.environ.get("THIRD_GEAR_DATA", "/mnt/storage/third-gear"), "building_kit", "posters")
+    return {
+        "AdPanel": os.path.join(posters, "ad_bus_drivers.png"),
+        "Timetable": os.path.join(posters, "timetable.png"),
+        "StopSignFace": os.path.join(posters, "stop_panel.png"),
+        "BinSticker": os.path.join(posters, "bin_sticker_0.png"),
+    }
+
+
 TITLES = {"Glass_2Bay": "Glass shelter, 2 bays", "Glass_3Bay": "Glass shelter, 3 bays",
-          "Timber": "Timber shelter", "StopSign": "Stop mast", "StopBin": "HVV bin"}
+          "Timber": "Timber shelter", "StopSign": "Stop mast"}
+
+
+# Extra close-ups of the printed faces, per piece.
+DETAIL_CLOSEUPS = {
+    "Glass_2Bay": [{"caption": "Advertising case", "target": (-1.6, 0.75, 1.25), "direction": (-1.0, -0.3, 0.05),
+                    "distance": 3.4, "lens": 35.0},
+                   {"caption": "Information case", "target": (0.95, 1.3, 1.5), "direction": (-0.2, -1.0, 0.0),
+                    "distance": 2.2, "lens": 35.0}],
+    "StopSign": [{"caption": "Stop panel", "target": (-0.27, 0.0, 3.2), "direction": (-0.15, -1.0, -0.2),
+                  "distance": 2.0, "lens": 35.0},
+                 {"caption": "Timetable and bin", "target": (0.0, -0.2, 1.2), "direction": (-0.35, -1.0, 0.1),
+                  "distance": 2.3, "lens": 35.0}],
+}
 
 
 def assemblies():
-    """Each piece on its own with a close-up from the road side, front left."""
+    """Each piece on its own with a close-up from the road side, front left, plus close-ups of the printed faces."""
     pieces, _spec = build()
     result = []
     for name, mesh in pieces.items():
         lower, upper = mesh.bounds()
         half_width = max(abs(lower[0]), abs(upper[0]))
         top = upper[2]
+        overview = {
+            "caption": TITLES[name],
+            "target": (0.0, (lower[1] + upper[1]) / 2.0, top * 0.5),
+            "direction": (-0.55, -1.0, 0.3),
+            "distance": max(half_width * 2.0, top) * 1.75,
+            "lens": 35.0,
+        }
         result.append({
             "name": name,
             "title": TITLES[name],
@@ -328,12 +420,6 @@ def assemblies():
             "half_width": half_width,
             "top": top,
             "extras": None,
-            "closeups": [{
-                "caption": TITLES[name],
-                "target": (0.0, (lower[1] + upper[1]) / 2.0, top * 0.5),
-                "direction": (-0.55, -1.0, 0.3),
-                "distance": max(half_width * 2.0, top) * 1.75,
-                "lens": 35.0,
-            }],
+            "closeups": [overview] + DETAIL_CLOSEUPS.get(name, []),
         })
     return result
