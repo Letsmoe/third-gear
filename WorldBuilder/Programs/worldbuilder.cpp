@@ -3,6 +3,9 @@
  *
  *   worldbuilder build <region> [--output-name <folder>] [--threads <count>] [--data-root <path>]
  *       Builds the region's world tiles into <data root>/world/<region or folder>/, as build_world.py.
+ *   worldbuilder road-model <region> [same options as build]
+ *       Writes the region's road model with today's road heights for comparison to road_model.json there, for the
+ *       street viewer.
  *   worldbuilder read-osm <file.osm.pbf> [west south east north]
  *       Reads the OSM features the world uses, optionally only those with a node inside the box (degrees), and
  *       prints how many of each kind there are and how long it took.
@@ -16,6 +19,7 @@
 
 #include "OsmReader.h"
 #include "Projection.h"
+#include "RoadModelPreview.h"
 #include "WorldBuild.h"
 
 namespace
@@ -25,6 +29,7 @@ using namespace WorldBuilder;
 int PrintUsage()
 {
 	std::fprintf(stderr, "usage: worldbuilder build <region> [--output-name <folder>] [--threads <count>] [--data-root <path>]\n"
+						 "       worldbuilder road-model <region> [same options as build]\n"
 						 "       worldbuilder read-osm <file.osm.pbf> [west south east north]\n"
 						 "       worldbuilder project <longitude> <latitude>\n");
 	return 2;
@@ -63,19 +68,20 @@ int ReadOsmCommand(int ArgumentCount, char** Arguments)
 	return 0;
 }
 
-int BuildCommand(int ArgumentCount, char** Arguments)
+/** The region and options of a build or road-model command, or false after printing what is wrong. */
+bool ParseRegionCommand(int ArgumentCount, char** Arguments, const FRegion*& Region, FBuildOptions& Options)
 {
 	if (ArgumentCount < 3)
 	{
-		return PrintUsage();
+		PrintUsage();
+		return false;
 	}
-	const FRegion* Region = FindRegion(Arguments[2]);
+	Region = FindRegion(Arguments[2]);
 	if (Region == nullptr)
 	{
 		std::fprintf(stderr, "unknown region %s\n", Arguments[2]);
-		return 2;
+		return false;
 	}
-	FBuildOptions Options;
 	for (int Index = 3; Index + 1 < ArgumentCount; Index += 2)
 	{
 		const std::string Option = Arguments[Index];
@@ -93,10 +99,34 @@ int BuildCommand(int ArgumentCount, char** Arguments)
 		}
 		else
 		{
-			return PrintUsage();
+			PrintUsage();
+			return false;
 		}
 	}
+	return true;
+}
+
+int BuildCommand(int ArgumentCount, char** Arguments)
+{
+	const FRegion* Region = nullptr;
+	FBuildOptions Options;
+	if (!ParseRegionCommand(ArgumentCount, Arguments, Region, Options))
+	{
+		return 2;
+	}
 	BuildRegion(*Region, Options);
+	return 0;
+}
+
+int RoadModelCommand(int ArgumentCount, char** Arguments)
+{
+	const FRegion* Region = nullptr;
+	FBuildOptions Options;
+	if (!ParseRegionCommand(ArgumentCount, Arguments, Region, Options))
+	{
+		return 2;
+	}
+	WriteRoadModelPreview(*Region, Options);
 	return 0;
 }
 
@@ -125,6 +155,10 @@ int main(int ArgumentCount, char** Arguments)
 	if (Command == "build")
 	{
 		return BuildCommand(ArgumentCount, Arguments);
+	}
+	if (Command == "road-model")
+	{
+		return RoadModelCommand(ArgumentCount, Arguments);
 	}
 	if (Command == "read-osm")
 	{

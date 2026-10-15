@@ -26,7 +26,7 @@ import build_area  # noqa: E402
 import build_world  # noqa: E402
 import data_root  # noqa: E402
 import game_streets  # noqa: E402
-from osmimport import dem, furniture, geo, hh_survey, roads, street_layers, street_scene  # noqa: E402
+from osmimport import dem, furniture, geo, hh_survey, road_model_layers, roads, street_layers, street_scene  # noqa: E402
 from osmimport.streets import (assumptions, corrections, cross_section, dual_carriageways, gores,  # noqa: E402
                                junctions, layout, lines, network, polyline, road_lines, splits,
                                tags as street_tags)
@@ -143,6 +143,8 @@ class StreetViewerHandler(http.server.BaseHTTPRequestHandler):
             self.respond_layers(urllib.parse.parse_qs(url.query))
         elif url.path == "/game.json":
             self.respond_game(urllib.parse.parse_qs(url.query))
+        elif url.path == "/roadmodel.json":
+            self.respond_road_model(urllib.parse.parse_qs(url.query))
         elif url.path == "/3d":
             with open(SCENE_PAGE_PATH, "rb") as page:
                 self.respond(200, "text/html; charset=utf-8", page.read())
@@ -184,6 +186,17 @@ class StreetViewerHandler(http.server.BaseHTTPRequestHandler):
             if not body["too_wide"]:
                 streets, body["generated_tiles"] = self.game_cache.streets_in(box)
                 body["layers"] = module.to_geojson(game_streets.map_layers(streets), WHOLE_EXTRACT)
+        except Exception:
+            self.respond(500, "text/plain; charset=utf-8", traceback.format_exc().encode())
+            return
+        self.respond(200, "application/json", json.dumps(body).encode())
+
+    def respond_road_model(self, query: dict):
+        """The road model a region's `worldbuilder road-model` wrote (region=…, default bergedorf_test), or the error."""
+        try:
+            module = importlib.reload(road_model_layers)
+            region = query.get("region", ["bergedorf_test"])[0]
+            body = module.build(region, data_root.world_dir(), WHOLE_EXTRACT)
         except Exception:
             self.respond(500, "text/plain; charset=utf-8", traceback.format_exc().encode())
             return

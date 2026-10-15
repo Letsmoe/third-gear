@@ -60,6 +60,10 @@ const LINE_STYLES = {
   survey_shared:    { color: "#7b1fa2", weight: 1, fillColor: "#ab47bc", fillOpacity: 0.2 },
   survey_kerb:      { color: "#ffffff", weight: 2 },
   building:         { color: "#222", weight: 1, fillOpacity: 0.45 },
+  road_model_tight:    { color: "#ff1744", weight: 4 },
+  road_model_bend:     { color: "#ff9100", weight: 4 },
+  road_model_curve:    { color: "#ffea00", weight: 4 },
+  road_model_straight: { color: "#00e676", weight: 4 },
 };
 const POINT_STYLES = {
   traffic_signals: { color: "#000", fillColor: "#ff2020", radius: 6 },
@@ -87,6 +91,10 @@ const LEGEND = [
   ["line", "crossing_way", "crossing"],
   ["line", "railway", "railway"],
   ["line", "waterway", "water"],
+  ["line", "road_model_tight", "road model: radius under 15 m"],
+  ["line", "road_model_bend", "road model: 15 to 50 m"],
+  ["line", "road_model_curve", "road model: 50 to 200 m"],
+  ["line", "road_model_straight", "road model: over 200 m"],
   ["point", "traffic_signals", "traffic signals"],
   ["point", "give_way", "give way"],
   ["point", "crossing", "crossing node"],
@@ -167,7 +175,8 @@ function popupHtml(properties) {
 }
 
 // Stacking: buildings at the bottom, then the game's road surface, the OSM lines (overlay pane, 400), the markings.
-const PANES = { "Buildings": 330, "Game road surface": 350, "Survey: street areas": 360, "Game markings": 420 };
+const PANES = { "Buildings": 330, "Game road surface": 350, "Survey: street areas": 360, "Game markings": 420,
+                "Road model": 430 };
 const paneRenderers = {};
 for (const [name, zIndex] of Object.entries(PANES)) {
   map.createPane(name).style.zIndex = zIndex;
@@ -225,6 +234,100 @@ function showBuildingLegend(classes) {
 }
 
 const GAME_LAYERS = ["Game road surface", "Game markings", "Game furniture"];
+const roadModelRegion = new URLSearchParams(location.search).get("roadmodel") || "bergedorf_test";
+let roadModelProfiles = [];
+
+// One series of a profile plot as an SVG polyline; x and y map metres to pixels.
+function svgSeries(along, values, x, y, colour, width) {
+  const points = values.map((value, index) => `${x(along[index]).toFixed(1)},${y(value).toFixed(1)}`).join(" ");
+  return `<polyline points="${points}" fill="none" stroke="${colour}" stroke-width="${width}"/>`;
+}
+
+// The sample of a profile nearest a clicked point.
+function nearestSample(profile, latlng) {
+  let best = 0, bestDistance = Infinity;
+  const scale = Math.cos(latlng.lat * Math.PI / 180);
+  profile.lonlat.forEach(([lon, lat], index) => {
+    const distance = ((lon - latlng.lng) * scale) ** 2 + (lat - latlng.lat) ** 2;
+    if (distance < bestDistance) { bestDistance = distance; best = index; }
+  });
+  return best;
+}
+
+// Height plot (ground grey, today's road orange, designed road blue) and grade plot of a chain, with nodes as ticks
+// and the clicked sample as a red line.
+function profileSvg(profile, marked) {
+  const { along, ground, today, height } = profile;
+  const width = 600, heightPx = 200, gradePx = 70, left = 44, right = 8, top = 8, gap = 18;
+  const all = ground.concat(today, height);
+  const zMin = Math.min(...all) - 0.2, zMax = Math.max(...all) + 0.2;
+  const length = Math.max(along[along.length - 1], 1);
+  const x = s => left + (s / length) * (width - left - right);
+  const y = z => top + (zMax - z) / (zMax - zMin) * heightPx;
+  // Grades over ±3 samples: the heights are written in millimetres, which makes metre steps jagged.
+  const reach = 3;
+  const grades = height.map((z, i) => {
+    const first = Math.max(i - reach, 0), last = Math.min(i + reach, height.length - 1);
+    return 100 * (height[last] - height[first]) / Math.max(along[last] - along[first], 0.05);
+  });
+  const gradeMax = Math.max(2, ...grades.map(Math.abs));
+  const gradeTop = top + heightPx + gap;
+  const gy = g => gradeTop + (gradeMax - g) / (2 * gradeMax) * gradePx;
+  const parts = [`<svg width="${width}" height="${gradeTop + gradePx + 18}" style="font: 10px sans-serif; background: #fff">`];
+  // Stretches under a bridge, whose ground the fit ignores, as a blue band.
+  profile.under_bridge.forEach((under, index) => {
+    if (!under || index + 1 >= along.length) return;
+    parts.push(`<rect x="${x(along[index])}" y="${top}" width="${Math.max(x(along[index + 1]) - x(along[index]), 0.5)}" height="${heightPx}" fill="#dbe9ff"/>`);
+  });
+  for (const node of profile.nodes) {
+    parts.push(`<line x1="${x(along[node])}" x2="${x(along[node])}" y1="${top}" y2="${gradeTop + gradePx}" stroke="#ddd"/>`);
+  }
+  parts.push(`<line x1="${x(along[marked])}" x2="${x(along[marked])}" y1="${top}" y2="${gradeTop + gradePx}" stroke="#e00"/>`);
+  parts.push(svgSeries(along, ground, x, y, "#888", 1.5), svgSeries(along, today, x, y, "#ff8c00", 1.5),
+             svgSeries(along, height, x, y, "#1565c0", 2));
+  parts.push(`<line x1="${left}" x2="${width - right}" y1="${gy(0)}" y2="${gy(0)}" stroke="#bbb"/>`);
+  parts.push(svgSeries(along, grades, x, gy, "#1565c0", 1));
+  parts.push(`<text x="2" y="${top + 8}">${zMax.toFixed(1)} m</text><text x="2" y="${top + heightPx}">${zMin.toFixed(1)} m</text>`);
+  parts.push(`<text x="2" y="${gradeTop + 8}">+${gradeMax.toFixed(1)} %</text><text x="2" y="${gradeTop + gradePx}">-${gradeMax.toFixed(1)} %</text>`);
+  parts.push(`<text x="${left}" y="${gradeTop + gradePx + 14}">0 m</text><text x="${width - right - 40}" y="${gradeTop + gradePx + 14}">${length.toFixed(0)} m</text>`);
+  const at = `at ${along[marked].toFixed(0)} m: ground ${ground[marked].toFixed(2)}, today ${today[marked].toFixed(2)}, road ${height[marked].toFixed(2)}`;
+  parts.push(`<text x="${left + 60}" y="${gradeTop + gradePx + 14}">${at}</text></svg>`);
+  return parts.join("");
+}
+
+async function loadRoadModel() {
+  const status = document.getElementById("gameStatus");
+  let response;
+  try {
+    response = await fetch(`/roadmodel.json?region=${roadModelRegion}`, { cache: "no-store" });
+  } catch (error) {
+    return;
+  }
+  if (!response.ok) {
+    status.textContent = "road model failed:\n" + await response.text();
+    return;
+  }
+  const data = await response.json();
+  roadModelProfiles = data.profiles;
+  const group = groupFor("Road model");
+  group.clearLayers();
+  for (const [name, collection] of Object.entries(data.layers)) {
+    const layer = makeLayer(collection, name);
+    layer.eachLayer(piece => {
+      piece.unbindPopup();
+      piece.on("click", event => {
+        const properties = piece.feature.properties;
+        const profile = roadModelProfiles[properties.chain];
+        const content = `${popupHtml(properties)}${profileSvg(profile, nearestSample(profile, event.latlng))}
+          <div style="font: 11px sans-serif"><span style="color:#888">■ ground</span>
+          <span style="color:#ff8c00">■ road today</span> <span style="color:#1565c0">■ road model</span>
+          <span style="color:#9bbcf0">■ under a bridge</span></div>`;
+        L.popup({ maxWidth: 640 }).setLatLng(event.latlng).setContent(content).openOn(map);
+      });
+    });
+    group.addLayer(layer);
+  }
+}
 let pendingGame = null;
 
 async function loadGameLayers(bbox) {
@@ -278,7 +381,8 @@ async function loadLayers() {
   showOutlines(data.outlines);
   showBuildingLegend(data.building_classes);
   for (const [name, group] of Object.entries(groups)) {
-    if (!GAME_LAYERS.includes(name)) group.clearLayers();
+    // The game layers and the road model have loaders of their own.
+    if (!GAME_LAYERS.includes(name) && name !== "Road model") group.clearLayers();
   }
   if (data.too_wide) {
     status.textContent = "zoom in to see the streets";
@@ -315,10 +419,11 @@ if (startBbox) {
   map.setView([53.4880, 10.2120], 17);
 }
 map.on("moveend", loadLayers);
-document.getElementById("reload").onclick = loadLayers;
+document.getElementById("reload").onclick = () => { loadLayers(); loadRoadModel(); };
 document.getElementById("scene3d").onclick = () => { location.href = `/3d?bbox=${map.getBounds().toBBoxString()}`; };
-document.addEventListener("keydown", event => { if (event.key === "r" && !event.ctrlKey) loadLayers(); });
+document.addEventListener("keydown", event => { if (event.key === "r" && !event.ctrlKey) { loadLayers(); loadRoadModel(); } });
 loadLayers();
+loadRoadModel();
 </script>
 </body>
 </html>

@@ -6,10 +6,10 @@
 # The libraries have no Unreal dependency, so the game can later compile the same sources into a plugin.
 #
 # Layout: Source/<Part>/ holds one library each (Core: OSM, projection, terrain, rasters, geometry and the tile format;
-# Streets: the street model; Buildings: building typing and roofs; Traffic: signals, signs, lamps, zebras and parked
-# cars; World: the build of a region's tiles from all of them). Programs/<name>.cpp each become an executable:
-# worldbuilder links everything, Streets*.cpp, Buildings*.cpp and Traffic*.cpp only what their part needs, so the
-# parts build independently.
+# Streets: the street model; Roads: the road model in 3D on top of it; Buildings: building typing and roofs; Traffic:
+# signals, signs, lamps, zebras and parked cars; World: the build of a region's tiles from all of them).
+# Programs/<name>.cpp each become an executable: worldbuilder links everything, Streets*.cpp, Buildings*.cpp and
+# Traffic*.cpp only what their part needs, so the parts build independently.
 cmake_minimum_required(VERSION 3.24)
 project(WorldBuilder LANGUAGES CXX)
 
@@ -36,7 +36,13 @@ FetchContent_Declare(clipper2
 	GIT_TAG Clipper2_1.5.4
 	GIT_SHALLOW TRUE
 	SOURCE_SUBDIR _none)
-FetchContent_MakeAvailable(protozero libosmium clipper2)
+# Eigen (MPL 2): the sparse least squares solves of the road model.
+FetchContent_Declare(eigen
+	GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+	GIT_TAG 3.4.0
+	GIT_SHALLOW TRUE
+	SOURCE_SUBDIR _none)
+FetchContent_MakeAvailable(protozero libosmium clipper2 eigen)
 
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
@@ -72,9 +78,12 @@ endfunction()
 world_builder_library(WorldBuilderCore Core Clipper2 ZLIB::ZLIB Threads::Threads)
 target_include_directories(WorldBuilderCore SYSTEM PRIVATE ${protozero_SOURCE_DIR}/include ${libosmium_SOURCE_DIR}/include)
 world_builder_library(WorldBuilderStreets Streets WorldBuilderCore)
+world_builder_library(WorldBuilderRoads Roads WorldBuilderCore WorldBuilderStreets)
+target_include_directories(WorldBuilderRoads SYSTEM PRIVATE ${eigen_SOURCE_DIR})
 world_builder_library(WorldBuilderBuildings Buildings WorldBuilderCore)
 world_builder_library(WorldBuilderTraffic Traffic WorldBuilderCore WorldBuilderStreets)
-world_builder_library(WorldBuilderWorld World WorldBuilderCore WorldBuilderStreets WorldBuilderBuildings WorldBuilderTraffic)
+world_builder_library(WorldBuilderWorld World WorldBuilderCore WorldBuilderStreets WorldBuilderRoads WorldBuilderBuildings
+					  WorldBuilderTraffic)
 target_compile_definitions(WorldBuilderWorld PRIVATE WORLD_BUILDER_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 file(GLOB Programs CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Programs/*.cpp)
