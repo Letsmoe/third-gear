@@ -53,7 +53,7 @@ void AppendLine(FStreetPolyline& Chain, const FStreetPolyline& Line)
 
 /**
  * The chain's OSM line, and its samples about a metre apart, sampled piece by piece so that every node is a sample
- * (their indices go to NodeSamples).
+ * (their indices go to NodeSamples), with the half width of the piece each sample lies on.
  */
 void SampleChain(const FSegmentNetwork& Network, FRoadChainModel& Model, FStreetPolyline& Samples)
 {
@@ -63,6 +63,7 @@ void SampleChain(const FSegmentNetwork& Network, FRoadChainModel& Model, FStreet
 		const FStreetPolyline Line = PieceLine(Network, Piece);
 		AppendLine(Model.Original, Line);
 		AppendLine(Samples, Polyline::Resample(Line, SampleSpacing));
+		Model.HalfWidths.resize(Samples.size(), 0.5 * Network.Segments[Piece.Segment].Section.Width());
 		Model.NodeSamples.push_back(static_cast<int>(Samples.size()) - 1);
 	}
 }

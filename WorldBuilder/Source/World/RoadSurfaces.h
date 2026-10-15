@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -47,14 +49,18 @@ struct FWindowRoads
 	FPolygons Pavement;
 };
 
+/** The road model's height at a point, or nothing where no road of it reaches (FRoadHeights::At). */
+using FDesignedHeight = std::function<std::optional<double>(double X, double Y)>;
+
 class FRoadSurfaces
 {
 public:
 	/**
-	 * Builds the surfaces of the street model. Bridge ramps need the road height at their ends, from the terrain
-	 * around them; Buildings is the footprints pavements stay clear of.
+	 * Builds the surfaces of the street model. Bridge ramps need the road height at their ends: the designed height,
+	 * or where there is none, from the terrain around them. Buildings is the footprints pavements stay clear of.
 	 */
-	FRoadSurfaces(const FStreetModel& Model, const FTerrainGrid& Terrain, const FPolygonSet& Buildings, unsigned Threads);
+	FRoadSurfaces(const FStreetModel& Model, const FTerrainGrid& Terrain, const FPolygonSet& Buildings,
+				  const FDesignedHeight& Designed, unsigned Threads);
 
 	/** The ground road surface as pieces answered as their union (Python's net.ground). */
 	const FPolygonSet& Ground() const { return GroundPieces; }
@@ -93,6 +99,10 @@ private:
 /** The road height field of roads.py at one point, from the terrain and the road surface around it. */
 double RoadHeightAt(const FTerrainGrid& Terrain, const FPolygonSet& Ground, double X, double Y);
 
+/** The designed road height at a point, or RoadHeightAt where the road model has none. */
+double RoadHeightAt(const FDesignedHeight& Designed, const FTerrainGrid& Terrain, const FPolygonSet& Ground, double X,
+					double Y);
+
 /** world.json's start pose: a spot on a decent road near the origin, half a lane right of the centre, facing along it. */
 struct FStartPose
 {
@@ -102,5 +112,6 @@ struct FStartPose
 	double Yaw = 0.0;
 	std::string Road;
 };
-FStartPose FindStart(const FStreetModel& Model, const FTerrainGrid& Terrain, const FPolygonSet& Ground);
+FStartPose FindStart(const FStreetModel& Model, const FTerrainGrid& Terrain, const FPolygonSet& Ground,
+					 const FDesignedHeight& Designed);
 }

@@ -31,6 +31,9 @@
 #include "TrafficJson.h"
 #include "Zebras.h"
 #include "RoadSurfaces.h"
+#include "BridgeCover.h"
+#include "RoadHeights.h"
+#include "RoadModel.h"
 #include "Roads.h"
 #include "Terrain.h"
 #include "TileWriter.h"
@@ -182,6 +185,8 @@ struct FRegionInputs
 	const FPolygonSet* Buildings = nullptr;
 	const FVegetationSources* Vegetation = nullptr;
 	const FRoadSurfaces* Roads = nullptr;
+	/** The road model's heights, which the road height grid of every tile takes. */
+	const FRoadHeights* RoadHeights = nullptr;
 	std::vector<FBar> Bars;
 	FSpatialIndex BarIndex;
 	/** The places the lanes need a road height, and the heights the tiles fill in (each index by one tile). */
@@ -419,7 +424,7 @@ void BuildTile(const FTileBounds& Tile, size_t TileIndex, const FRegionInputs& I
 	Inputs.Paths->InWindow(Window, Combined({&RoadGround, &Pavement, &Buildings}), WaterArea, Paved, Unpaved);
 	Clock.Next(StagePaths);
 
-	const FHeightGrid RoadHeight = RoadHeightField(Terrain, RoadGround);
+	const FHeightGrid RoadHeight = DesignedRoadHeightField(Terrain, RoadGround, *Inputs.RoadHeights);
 	const FHeightGrid Ground = ConformTerrain(Terrain, RoadHeight, RoadGround, Pavement, Water);
 	Clock.Next(StageConform);
 	FTileWriter Writer(Box);
@@ -603,7 +608,8 @@ std::vector<FTileContents> SortIntoTiles(const FRegion& Region, const FFurniture
  * tile (bridge ends past the region's edge) are computed here.
  */
 void PrepareLaneHeights(FRegionInputs& Inputs, const FRegion& Region, const FLaneGraph& Lanes,
-						const FTerrainGrid& Terrain, const FRoadSurfaces& Roads, std::vector<double>& Heights)
+						const FTerrainGrid& Terrain, const FRoadSurfaces& Roads, const FDesignedHeight& Designed,
+						std::vector<double>& Heights)
 {
 	Inputs.LaneQueries = LaneHeightQueries(Lanes);
 	Heights.assign(Inputs.LaneQueries.size(), 0.0);
@@ -614,7 +620,7 @@ void PrepareLaneHeights(FRegionInputs& Inputs, const FRegion& Region, const FLan
 		const int Index = TileIndexOf(Region, Point.X, Point.Y);
 		if (Index < 0)
 		{
-			Heights[Query] = RoadHeightAt(Terrain, Roads.Ground(), Point.X, Point.Y);
+			Heights[Query] = RoadHeightAt(Designed, Terrain, Roads.Ground(), Point.X, Point.Y);
 			continue;
 		}
 		Inputs.Contents[Index].LanePoints.push_back(Query);
@@ -736,7 +742,13 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	const FStreetModel Streets = StreetsTask.get();
 	Log("street model: " + std::to_string(Streets.Lines.Layouts.size()) + " segments, "
 		+ std::to_string(Streets.Markings.size()) + " painted lines");
-	FRoadSurfaces Roads(Streets, Terrain, Buildings, Threads);
+	const FRoadModel RoadModel = BuildRoadModel(*Streets.Lines.Network, [&](double X, double Y) { return Terrain.Sample(X, Y); },
+												BridgeCoverOf(Osm, Streets.Widths));
+	const FRoadHeights RoadHeights(RoadModel);
+	Inputs.RoadHeights = &RoadHeights;
+	const FDesignedHeight Designed = [&](double X, double Y) { return RoadHeights.At(X, Y); };
+	Log("road model: " + std::to_string(RoadModel.Chains.size()) + " chains");
+	FRoadSurfaces Roads(Streets, Terrain, Buildings, Designed, Threads);
 	Inputs.Roads = &Roads;
 	const FKitSpecs KitSpecs((DataRoot / "building_kit").string());
 	FPolygons Landmarks = LandmarkFootprints(KitSpecs);
@@ -765,7 +777,7 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	WriteTrafficJson((OutputDirectory / "traffic.json").string(), Furniture.Network);
 	FLaneGraph Lanes = BuildLaneGraph(Streets, Graph, Furniture, Inputs.Extent);
 	std::vector<double> LaneHeights;
-	PrepareLaneHeights(Inputs, Region, Lanes, Terrain, Roads, LaneHeights);
+	PrepareLaneHeights(Inputs, Region, Lanes, Terrain, Roads, Designed, LaneHeights);
 	Log("lanes: " + std::to_string(Lanes.Lanes.size()) + ", " + std::to_string(Lanes.GoodCount) + " in the connected network");
 	Log("furniture: " + std::to_string(Furniture.Network.Junctions.size()) + " signal junctions, "
 		+ std::to_string(Furniture.Heads.size()) + " signal poles, " + std::to_string(Furniture.Signs.size()) + " signs, "
@@ -791,7 +803,7 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	Log("wrote lanes.json");
 	WriteFarStructures(Region, Geodata / "osm" / (Region.OsmExtract + ".osm.pbf"), KitSpecs, Terrain,
 					   OutputDirectory / "structures.tgtile");
-	WriteWorldJson(Region, Tiles, FindStart(Streets, Terrain, Roads.Ground()), OutputDirectory / "world.json");
+	WriteWorldJson(Region, Tiles, FindStart(Streets, Terrain, Roads.Ground(), Designed), OutputDirectory / "world.json");
 	Log("wrote " + std::to_string(Tiles.size()) + " tiles to " + OutputDirectory.string() + " on "
 		+ std::to_string(Threads) + " threads");
 }

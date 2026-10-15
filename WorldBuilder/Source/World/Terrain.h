@@ -4,6 +4,7 @@
 
 #include "HeightGrid.h"
 #include "Raster.h"
+#include "RoadHeights.h"
 
 /**
  * The terrain under and around roads, as Tools/osmimport/osmimport/terrain.py's conform and roads.py's
@@ -26,6 +27,13 @@ struct FWaterBody
  * from the road by the nearest value. Where the window has no road at all, the terrain itself.
  */
 FHeightGrid RoadHeightField(const FHeightGrid& Terrain, const FPolygons& RoadGround);
+
+/**
+ * The road surface height from the road model (issue #113): its designed height inside the road outline, the
+ * smoothed terrain of RoadHeightField where no road of the model reaches, extended outward from the road by the
+ * nearest value.
+ */
+FHeightGrid DesignedRoadHeightField(const FHeightGrid& Terrain, const FPolygons& RoadGround, const FRoadHeights& Roads);
 
 /**
  * The terrain pressed under roads and raised under pavements, blended back to the natural ground over a few metres;

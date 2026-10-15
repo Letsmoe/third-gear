@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
+#include "OsmData.h"
 #include "Polyline.h"
 
 /**
@@ -43,4 +45,7 @@ private:
 
 	std::vector<FBridge> Bridges;
 };
+
+/** Every road, rail and foot bridge in the OSM data; RoadWidths gives road bridges their kerb to kerb width by way id. */
+FBridgeCover BridgeCoverOf(const FOsmData& Osm, const std::unordered_map<int64_t, double>& RoadWidths);
 }

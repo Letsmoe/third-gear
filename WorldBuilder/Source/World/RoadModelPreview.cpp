@@ -7,7 +7,6 @@
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
-#include <unordered_map>
 
 #include "Centreline.h"
 #include "HeightGrid.h"
@@ -30,58 +29,6 @@ constexpr double ChainMargin = 20.0;
 constexpr int RadiusReach = 3;
 /** Radii above this are written as this, which keeps the file free of infinities. */
 constexpr double StraightRadius = 9999.0;
-/**
- * How far beyond a bridge deck's edge the survey is still disturbed by its abutments and embankments: about one cell
- * of the 5 m terrain grid and the slope of the embankment.
- */
-constexpr double BridgeSurveyMargin = 6.0;
-/** Deck widths when OSM gives none: a railway track with its walkway, and a footbridge. */
-constexpr double RailBridgeWidth = 5.0;
-constexpr double FootBridgeWidth = 3.0;
-constexpr double RoadBridgeWidth = 8.0;
-
-/** True for a way on a bridge (any bridge= value but no). */
-bool IsBridge(const FOsmWay& Way)
-{
-	const std::string* Bridge = FindTag(Way.Tags, "bridge");
-	return Bridge != nullptr && *Bridge != "no";
-}
-
-/** Adds the bridges among Ways with the given deck width (or their own from Widths) to Lines. */
-void AddBridgeLines(const std::vector<FOsmWay>& Ways, double DefaultWidth, const std::unordered_map<int64_t, double>& Widths,
-					std::vector<FBridgeLine>& Lines)
-{
-	for (const FOsmWay& Way : Ways)
-	{
-		if (!IsBridge(Way) || Way.Points.size() < 2)
-		{
-			continue;
-		}
-		const auto Width = Widths.find(Way.Id);
-		const double DeckWidth = Width == Widths.end() ? DefaultWidth : Width->second;
-		FBridgeLine Line;
-		for (const FWorldPoint& Point : Way.Points)
-		{
-			Line.Line.push_back({Point.X, Point.Y});
-		}
-		Line.Reach = 0.5 * DeckWidth + BridgeSurveyMargin;
-		Line.StartNode = Way.NodeIds.front();
-		Line.EndNode = Way.NodeIds.back();
-		Lines.push_back(std::move(Line));
-	}
-}
-
-/** Every road, rail and foot bridge in the OSM data. */
-FBridgeCover BridgesOf(const FOsmData& Osm, const FStreetModel& Streets)
-{
-	std::vector<FBridgeLine> Lines;
-	const std::unordered_map<int64_t, double> NoWidths;
-	AddBridgeLines(Osm.Roads, RoadBridgeWidth, Streets.Widths, Lines);
-	AddBridgeLines(Osm.Railways, RailBridgeWidth, NoWidths, Lines);
-	AddBridgeLines(Osm.Footways, FootBridgeWidth, NoWidths, Lines);
-	return FBridgeCover(std::move(Lines));
-}
-
 /** True when any point of the chain lies within ChainMargin of the region. */
 bool TouchesRegion(const FRoadChainModel& Chain, const FRegion& Region)
 {
@@ -225,7 +172,7 @@ void WriteRoadModelPreview(const FRegion& Region, const FBuildOptions& Options)
 
 	const auto ModelStart = std::chrono::steady_clock::now();
 	const FRoadModel Model = BuildRoadModel(*Streets.Lines.Network, [&](double X, double Y) { return Terrain.Sample(X, Y); },
-											BridgesOf(Osm, Streets));
+											BridgeCoverOf(Osm, Streets.Widths));
 	std::printf("road model: %zu chains, %d steps at the grade limit (%.2f s)\n", Model.Chains.size(), Model.GradeLimited,
 				SecondsSince(ModelStart));
 
@@ -238,7 +185,9 @@ void WriteRoadModelPreview(const FRegion& Region, const FBuildOptions& Options)
 		}
 	}
 	const FPolygonSet NoBuildings;
-	const FRoadSurfaces Roads(Streets, Terrain, NoBuildings, Threads);
+	// Today's road heights for the comparison: no designed heights, so the surfaces take the smoothed terrain.
+	const FDesignedHeight Undesigned = [](double, double) { return std::optional<double>(); };
+	const FRoadSurfaces Roads(Streets, Terrain, NoBuildings, Undesigned, Threads);
 	const std::vector<std::vector<double>> Today = TodayHeights(Written, Terrain, Roads.Ground(), Threads);
 
 	const std::filesystem::path Path = OutputDirectory / "road_model.json";

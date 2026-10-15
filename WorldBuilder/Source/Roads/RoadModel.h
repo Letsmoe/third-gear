@@ -34,6 +34,8 @@ struct FRoadChainModel
 	std::vector<double> Along;
 	/** Designed road height at every point. */
 	std::vector<double> Heights;
+	/** Half the kerb to kerb width at every point, from the segment it lies on. */
+	std::vector<double> HalfWidths;
 	/** Ground height under every point. */
 	std::vector<double> Ground;
 	/** True for every point a bridge crosses over, whose ground the heights ignore. */

@@ -300,8 +300,18 @@ double RoadHeightAt(const FTerrainGrid& Terrain, const FPolygonSet& Ground, doub
 	return RoadHeightField(Local, Ground.InWindow(Window)).Sample(X, Y);
 }
 
+double RoadHeightAt(const FDesignedHeight& Designed, const FTerrainGrid& Terrain, const FPolygonSet& Ground, double X,
+					double Y)
+{
+	if (const std::optional<double> Height = Designed(X, Y))
+	{
+		return *Height;
+	}
+	return RoadHeightAt(Terrain, Ground, X, Y);
+}
+
 FRoadSurfaces::FRoadSurfaces(const FStreetModel& Model, const FTerrainGrid& Terrain, const FPolygonSet& Buildings,
-							 unsigned Threads)
+							 const FDesignedHeight& Designed, unsigned Threads)
 	: BuildingPieces(&Buildings)
 {
 	// Each way's carriageway from its segments (built side by side), sorted into the material sets.
@@ -389,8 +399,8 @@ FRoadSurfaces::FRoadSurfaces(const FStreetModel& Model, const FTerrainGrid& Terr
 	}
 	ParallelFor(Bridges.size(), Threads, [&](size_t Index) {
 		FBridgeDeck& Deck = Bridges[Index];
-		Deck.StartHeight = RoadHeightAt(Terrain, GroundPieces, Deck.Start.X, Deck.Start.Y);
-		Deck.EndHeight = RoadHeightAt(Terrain, GroundPieces, Deck.End.X, Deck.End.Y);
+		Deck.StartHeight = RoadHeightAt(Designed, Terrain, GroundPieces, Deck.Start.X, Deck.Start.Y);
+		Deck.EndHeight = RoadHeightAt(Designed, Terrain, GroundPieces, Deck.End.X, Deck.End.Y);
 	});
 	for (size_t Index = 0; Index < Bridges.size(); ++Index)
 	{
@@ -540,7 +550,8 @@ FWorldPoint PointAlong(const FPolyline& Line, double Distance)
 }
 }
 
-FStartPose FindStart(const FStreetModel& Model, const FTerrainGrid& Terrain, const FPolygonSet& Ground)
+FStartPose FindStart(const FStreetModel& Model, const FTerrainGrid& Terrain, const FPolygonSet& Ground,
+					 const FDesignedHeight& Designed)
 {
 	static const std::set<std::string> StartClasses = {"residential", "tertiary", "secondary", "unclassified"};
 	const FStreetWay* Best = nullptr;
@@ -564,7 +575,7 @@ FStartPose FindStart(const FStreetModel& Model, const FTerrainGrid& Terrain, con
 	FStartPose Pose;
 	if (Best == nullptr)
 	{
-		Pose.Z = RoadHeightAt(Terrain, Ground, 0.0, 0.0);
+		Pose.Z = RoadHeightAt(Designed, Terrain, Ground, 0.0, 0.0);
 		return Pose;
 	}
 	const FPolyline Line = ToWorld(Best->Points);
@@ -578,7 +589,7 @@ FStartPose FindStart(const FStreetModel& Model, const FTerrainGrid& Terrain, con
 	const double Offset = Model.Widths.at(Best->Id) / 4.0;
 	Pose.X = Here.X - DeltaY / Length * Offset;
 	Pose.Y = Here.Y + DeltaX / Length * Offset;
-	Pose.Z = RoadHeightAt(Terrain, Ground, Pose.X, Pose.Y);
+	Pose.Z = RoadHeightAt(Designed, Terrain, Ground, Pose.X, Pose.Y);
 	Pose.Yaw = std::atan2(DeltaY, DeltaX) * 180.0 / 3.14159265358979323846;
 	Pose.Road = OsmTags::ValueOrEmpty(Best->Tags, "name");
 	return Pose;

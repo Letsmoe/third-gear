@@ -107,6 +107,39 @@ FHeightGrid RoadHeightField(const FHeightGrid& Terrain, const FPolygons& RoadGro
 	return WithHeights(Terrain, Extended);
 }
 
+FHeightGrid DesignedRoadHeightField(const FHeightGrid& Terrain, const FPolygons& RoadGround, const FRoadHeights& Roads)
+{
+	const FMask Mask = RasterizePolygons(FrameOf(Terrain), RoadGround, false);
+	if (std::find(Mask.begin(), Mask.end(), 1) == Mask.end())
+	{
+		return Terrain;
+	}
+	const FHeightGrid Smoothed = RoadHeightField(Terrain, RoadGround);
+	const size_t CellCount = Mask.size();
+	std::vector<double> OnRoad(CellCount, 0.0);
+	for (int Row = 0; Row < Terrain.Rows; ++Row)
+	{
+		for (int Column = 0; Column < Terrain.Columns; ++Column)
+		{
+			const size_t Index = static_cast<size_t>(Row) * Terrain.Columns + Column;
+			if (!Mask[Index])
+			{
+				continue;
+			}
+			const double X = Terrain.X0 + (Column + 0.5) * Terrain.CellSize;
+			const double Y = Terrain.Y0 + (Row + 0.5) * Terrain.CellSize;
+			OnRoad[Index] = Roads.At(X, Y).value_or(Smoothed.Heights[Index]);
+		}
+	}
+	const FDistanceField Nearest = DistanceToFeatures(Mask, Terrain.Columns, Terrain.Rows, Terrain.CellSize);
+	std::vector<double> Extended(CellCount);
+	for (size_t Index = 0; Index < CellCount; ++Index)
+	{
+		Extended[Index] = OnRoad[Nearest.Nearest[Index]];
+	}
+	return WithHeights(Terrain, Extended);
+}
+
 FHeightGrid ConformTerrain(const FHeightGrid& Terrain, const FHeightGrid& RoadHeight, const FPolygons& RoadGround,
 						   const FPolygons& Pavement, const std::vector<FWaterBody>& Water)
 {
