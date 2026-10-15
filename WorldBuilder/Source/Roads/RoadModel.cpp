@@ -20,17 +20,6 @@ constexpr double SampleSpacing = 1.0;
  */
 constexpr double UnderBridgeTrust = 1e-4;
 
-/** A piece's points in the chain's direction. */
-FStreetPolyline PieceLine(const FSegmentNetwork& Network, const FChainPiece& Piece)
-{
-	const FStreetPolyline& Line = Network.Segments[Piece.Segment].Xy;
-	if (Piece.bReversed)
-	{
-		return Polyline::Reversed(Line);
-	}
-	return Line;
-}
-
 /**
  * The cross fall traits of a piece's road: its straight fall from the one-way tags, and whether it banks (a road class
  * built for speed, outside town).
@@ -52,66 +41,30 @@ FCrossFallTraits PieceTraits(const FSegmentNetwork& Network, const FChainPiece& 
 	return Traits;
 }
 
-/** The segment of the chain that is longest, whose road class the chain takes. */
-const FSegment& LongestSegment(const FSegmentNetwork& Network, const FRoadChain& Chain)
-{
-	const FSegment* Longest = &Network.Segments[Chain.Pieces.front().Segment];
-	for (const FChainPiece& Piece : Chain.Pieces)
-	{
-		const FSegment& Segment = Network.Segments[Piece.Segment];
-		if (Segment.Length > Longest->Length)
-		{
-			Longest = &Segment;
-		}
-	}
-	return *Longest;
-}
-
-/** Appends Line to Chain without repeating the point they share. */
-void AppendLine(FStreetPolyline& Chain, const FStreetPolyline& Line)
-{
-	const size_t Skip = Chain.empty() ? 0 : 1;
-	Chain.insert(Chain.end(), Line.begin() + static_cast<std::ptrdiff_t>(std::min(Skip, Line.size())), Line.end());
-}
-
 /**
- * The chain's OSM line, and its samples about a metre apart, sampled piece by piece so that every node is a sample
- * (their indices go to NodeSamples), with the half width and cross fall traits of the piece each sample lies on.
+ * The chain's OSM line and its samples (every node is one, their indices go to NodeSamples), with the half width and
+ * cross fall traits of the piece each sample lies on.
  */
-void SampleChain(const FSegmentNetwork& Network, const std::unordered_map<int64_t, bool>& Urban, FRoadChainModel& Model,
-				 FStreetPolyline& Samples, std::vector<FCrossFallTraits>& Traits)
+void SampleChainPlan(const FSegmentNetwork& Network, const std::unordered_map<int64_t, bool>& Urban,
+					 FRoadChainModel& Model, FStreetPolyline& Samples, std::vector<FCrossFallTraits>& Traits)
 {
-	Model.NodeSamples.push_back(0);
-	for (const FChainPiece& Piece : Model.Chain.Pieces)
+	FChainSamples Sampled = SampleChain(Network, Model.Chain, SampleSpacing);
+	Model.Original = std::move(Sampled.Original);
+	Model.NodeSamples = std::move(Sampled.NodeSamples);
+	Samples = std::move(Sampled.Samples);
+	for (size_t Index = 0; Index < Model.Chain.Pieces.size(); ++Index)
 	{
-		const FStreetPolyline Line = PieceLine(Network, Piece);
-		AppendLine(Model.Original, Line);
-		AppendLine(Samples, Polyline::Resample(Line, SampleSpacing));
-		Model.HalfWidths.resize(Samples.size(), 0.5 * Network.Segments[Piece.Segment].Section.Width());
-		Traits.resize(Samples.size(), PieceTraits(Network, Piece, Urban));
-		Model.NodeSamples.push_back(static_cast<int>(Samples.size()) - 1);
+		const FChainPiece& Piece = Model.Chain.Pieces[Index];
+		const size_t End = static_cast<size_t>(Model.NodeSamples[Index + 1]) + 1;
+		Model.HalfWidths.resize(End, 0.5 * Network.Segments[Piece.Segment].Section.Width());
+		Traits.resize(End, PieceTraits(Network, Piece, Urban));
 	}
-}
-
-/** The samples that must not move: the chain's ends and every junction it runs through. */
-std::vector<int> PinnedSamples(const FSegmentNetwork& Network, const FRoadChainModel& Model)
-{
-	std::vector<int> Pinned;
-	const size_t Last = Model.Chain.Nodes.size() - 1;
-	for (size_t Index = 0; Index <= Last; ++Index)
-	{
-		const bool bEnd = Index == 0 || Index == Last;
-		if (bEnd || Network.NodeKind(Model.Chain.Nodes[Index]) == ENodeKind::Junction)
-		{
-			Pinned.push_back(Model.NodeSamples[Index]);
-		}
-	}
-	return Pinned;
 }
 
 /** One chain's smooth centreline and cross fall, the ground under it and where bridges cross it. */
 FRoadChainModel BuildChainPlan(const FSegmentNetwork& Network, const FRoadChain& Chain, const FGroundSampler& Ground,
-							   const FBridgeCover& Bridges, const std::unordered_map<int64_t, bool>& Urban)
+							   const FBridgeCover& Bridges, const std::unordered_map<int64_t, bool>& Urban,
+							   ECentrelines Centrelines)
 {
 	FRoadChainModel Model;
 	Model.Chain = Chain;
@@ -121,11 +74,19 @@ FRoadChainModel BuildChainPlan(const FSegmentNetwork& Network, const FRoadChain&
 	Model.Design = RoadDesignFor(Model.RoadClass);
 	FStreetPolyline Samples;
 	std::vector<FCrossFallTraits> Traits;
-	SampleChain(Network, Urban, Model, Samples, Traits);
-	const FCentrelineFit Fit = FitCentreline(Samples, Model.Original, PinnedSamples(Network, Model),
-											 Model.Design.PlanSmoothing, Model.Design.MaxDeviation);
-	Model.Points = Fit.Points;
-	Model.MaxDeviation = Fit.MaxDeviation;
+	SampleChainPlan(Network, Urban, Model, Samples, Traits);
+	if (Centrelines == ECentrelines::Fit)
+	{
+		const FCentrelineFit Fit = FitCentreline(Samples, Model.Original,
+												 PinnedSamples(Network, Chain, Model.NodeSamples),
+												 Model.Design.PlanSmoothing, Model.Design.MaxDeviation);
+		Model.Points = Fit.Points;
+		Model.MaxDeviation = Fit.MaxDeviation;
+	}
+	else
+	{
+		Model.Points = Samples;
+	}
 	Model.Along = Polyline::Arclength(Model.Points);
 	Model.Falls = CrossFalls(Model.Points, Traits);
 	for (const FStreetPoint& Point : Model.Points)
@@ -288,12 +249,12 @@ std::vector<FProfileTie> JunctionTies(const std::vector<FRoadChainModel>& Chains
 }
 
 FRoadModel BuildRoadModel(const FSegmentNetwork& Network, const FGroundSampler& Ground, const FBridgeCover& Bridges,
-						  const std::unordered_map<int64_t, bool>& Urban)
+						  const std::unordered_map<int64_t, bool>& Urban, ECentrelines Centrelines)
 {
 	FRoadModel Model;
 	for (const FRoadChain& Chain : BuildRoadChains(Network))
 	{
-		Model.Chains.push_back(BuildChainPlan(Network, Chain, Ground, Bridges, Urban));
+		Model.Chains.push_back(BuildChainPlan(Network, Chain, Ground, Bridges, Urban, Centrelines));
 	}
 	AssignJunctionPriorities(Network, Model.Chains);
 	int UnknownCount = 0;

@@ -179,6 +179,13 @@ std::vector<int64_t> ChainNodes(const FSegmentNetwork& Network, const std::vecto
 	Nodes.push_back(Network.NodeOf(FarEnd(Pieces.back())));
 	return Nodes;
 }
+
+/** Appends Line to Chain without repeating the point they share. */
+void AppendLine(FStreetPolyline& Chain, const FStreetPolyline& Line)
+{
+	const size_t Skip = Chain.empty() ? 0 : 1;
+	Chain.insert(Chain.end(), Line.begin() + static_cast<std::ptrdiff_t>(std::min(Skip, Line.size())), Line.end());
+}
 }
 
 std::vector<FRoadChain> BuildRoadChains(const FSegmentNetwork& Network)
@@ -205,5 +212,59 @@ std::vector<FRoadChain> BuildRoadChains(const FSegmentNetwork& Network)
 		Chains.push_back(std::move(Chain));
 	}
 	return Chains;
+}
+
+FStreetPolyline PieceLine(const FSegmentNetwork& Network, const FChainPiece& Piece)
+{
+	const FStreetPolyline& Line = Network.Segments[Piece.Segment].Xy;
+	if (Piece.bReversed)
+	{
+		return Polyline::Reversed(Line);
+	}
+	return Line;
+}
+
+FChainSamples SampleChain(const FSegmentNetwork& Network, const FRoadChain& Chain, double Spacing)
+{
+	FChainSamples Result;
+	Result.NodeSamples.push_back(0);
+	for (const FChainPiece& Piece : Chain.Pieces)
+	{
+		const FStreetPolyline Line = PieceLine(Network, Piece);
+		AppendLine(Result.Original, Line);
+		AppendLine(Result.Samples, Polyline::Resample(Line, Spacing));
+		Result.NodeSamples.push_back(static_cast<int>(Result.Samples.size()) - 1);
+	}
+	return Result;
+}
+
+std::vector<int> PinnedSamples(const FSegmentNetwork& Network, const FRoadChain& Chain,
+							   const std::vector<int>& NodeSamples)
+{
+	std::vector<int> Pinned;
+	const size_t Last = Chain.Nodes.size() - 1;
+	for (size_t Index = 0; Index <= Last; ++Index)
+	{
+		const bool bEnd = Index == 0 || Index == Last;
+		if (bEnd || Network.NodeKind(Chain.Nodes[Index]) == ENodeKind::Junction)
+		{
+			Pinned.push_back(NodeSamples[Index]);
+		}
+	}
+	return Pinned;
+}
+
+const FSegment& LongestSegment(const FSegmentNetwork& Network, const FRoadChain& Chain)
+{
+	const FSegment* Longest = &Network.Segments[Chain.Pieces.front().Segment];
+	for (const FChainPiece& Piece : Chain.Pieces)
+	{
+		const FSegment& Segment = Network.Segments[Piece.Segment];
+		if (Segment.Length > Longest->Length)
+		{
+			Longest = &Segment;
+		}
+	}
+	return *Longest;
 }
 }

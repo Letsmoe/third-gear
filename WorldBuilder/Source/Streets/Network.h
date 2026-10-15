@@ -55,6 +55,8 @@ struct FSegment
 	FStreetPolyline Xy;
 	int64_t StartNode = 0;
 	int64_t EndNode = 0;
+	/** The index of StartNode in the way's nodes; the segment's points are the way's from there on. */
+	int FirstIndex = 0;
 	FCrossSection Section;
 	/** The length of Xy. */
 	double Length = 0.0;

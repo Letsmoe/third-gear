@@ -60,10 +60,19 @@ struct FRoadModel
 	int GradeLimited = 0;
 };
 
+/** Where the road model's centrelines come from. */
+enum class ECentrelines
+{
+	/** Fitted to the network's lines, which are OSM's. */
+	Fit,
+	/** The network's lines as they are, when its ways were already redrawn along fitted centrelines (SmoothWays). */
+	AsGiven,
+};
+
 /**
  * Builds the road model of a segment network over the given ground, ignoring the ground under the bridges. Urban says
  * by way id which roads lie in town, where curves aren't banked.
  */
 FRoadModel BuildRoadModel(const FSegmentNetwork& Network, const FGroundSampler& Ground, const FBridgeCover& Bridges,
-						  const std::unordered_map<int64_t, bool>& Urban);
+						  const std::unordered_map<int64_t, bool>& Urban, ECentrelines Centrelines = ECentrelines::Fit);
 }

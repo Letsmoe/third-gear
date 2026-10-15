@@ -34,6 +34,7 @@
 #include "BridgeCover.h"
 #include "RoadHeights.h"
 #include "RoadModel.h"
+#include "SmoothWays.h"
 #include "Roads.h"
 #include "Terrain.h"
 #include "TileWriter.h"
@@ -726,7 +727,7 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	// The sources only need the OSM data, so they are prepared side by side; the road surfaces wait for the streets.
 	const FBox TerrainExtent{Region.XMin - TerrainMargin, Region.YMin - TerrainMargin, Region.XMax + TerrainMargin,
 							 Region.YMax + TerrainMargin};
-	auto StreetsTask = std::async(std::launch::async, [&] { return BuildStreetModel(Osm); });
+	auto StreetsTask = std::async(std::launch::async, [&] { return BuildStreetModel(Osm, SmoothWays); });
 	auto BuildingsTask = std::async(std::launch::async, [&] { return BuildingFootprints(Osm.Buildings); });
 	auto WaterTask = std::async(std::launch::async, [&] { return BuildWaterBodies(Osm, Terrain, TerrainExtent); });
 	auto CoverTask = std::async(std::launch::async, [&] { return FLandCover(Osm.Areas); });
@@ -743,7 +744,8 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	Log("street model: " + std::to_string(Streets.Lines.Layouts.size()) + " segments, "
 		+ std::to_string(Streets.Markings.size()) + " painted lines");
 	const FRoadModel RoadModel = BuildRoadModel(*Streets.Lines.Network, [&](double X, double Y) { return Terrain.Sample(X, Y); },
-												BridgeCoverOf(Osm, Streets.Widths), Streets.Urban);
+												BridgeCoverOf(Osm, Streets.Widths), Streets.Urban,
+												ECentrelines::AsGiven);
 	const FRoadHeights RoadHeights(RoadModel);
 	Inputs.RoadHeights = &RoadHeights;
 	const FDesignedHeight Designed = [&](double X, double Y) { return RoadHeights.At(X, Y); };

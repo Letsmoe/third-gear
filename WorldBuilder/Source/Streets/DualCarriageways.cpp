@@ -10,6 +10,7 @@
 #include "Lines.h"
 #include "OsmTags.h"
 #include "Splits.h"
+#include "WayEdits.h"
 
 namespace WorldBuilder::DualCarriageways
 {
@@ -24,20 +25,8 @@ struct FChainLink
 
 using FChain = std::vector<FChainLink>;
 
-/** A shape point added to a way: a made-up node id and where it lies. */
-struct FAddedPoint
-{
-	int64_t NodeId = 0;
-	FStreetPoint Point;
-};
-
-/** What the redrawing changes: nodes moved to new places, and shape points added between two nodes. */
-struct FRedrawChanges
-{
-	std::unordered_map<int64_t, FStreetPoint> MovedNodes;
-	std::map<std::pair<int64_t, int64_t>, std::vector<FAddedPoint>> AddedPoints;
-	int64_t NextSyntheticId = -1000000000000000;
-};
+/** The first id of the shape points added by the redrawing. */
+constexpr int64_t FirstSyntheticId = -1000000000000000;
 
 /** The one-way segments straight on from a segment end, and the node each of them ends at. */
 std::pair<FChain, std::vector<int64_t>> Walk(const FSegmentNetwork& Network, const FSegmentEnd& Start)
@@ -231,7 +220,7 @@ double Ramp(double Distance, double RampLength)
 }
 
 /** Moves the chain's nodes to the same share of the redrawn line and adds shape points between them. */
-void PlaceNodes(const FChain& Chain, const FStreetPolyline& NewLine, FRedrawChanges& Changes)
+void PlaceNodes(const FChain& Chain, const FStreetPolyline& NewLine, FWayEdits& Changes)
 {
 	const FStreetPolyline OldLine = ChainLine(Chain);
 	const std::vector<int64_t> Nodes = ChainNodes(Chain);
@@ -248,23 +237,13 @@ void PlaceNodes(const FChain& Chain, const FStreetPolyline& NewLine, FRedrawChan
 	}
 	for (size_t Index = 0; Index + 1 < Nodes.size(); ++Index)
 	{
-		const double Start = Targets[Index];
-		const double End = Targets[Index + 1];
-		const int Count = static_cast<int>((End - Start) / PointSpacing);
-		std::vector<FAddedPoint> Points;
-		for (int Step = 1; Step <= Count; ++Step)
-		{
-			Points.push_back({Changes.NextSyntheticId--,
-							  Polyline::PointAt(NewLine, NewAlong, Start + (End - Start) * Step / (Count + 1))});
-		}
-		Changes.AddedPoints[{Nodes[Index], Nodes[Index + 1]}] = Points;
-		Changes.AddedPoints[{Nodes[Index + 1], Nodes[Index]}] = std::vector<FAddedPoint>(Points.rbegin(), Points.rend());
+		Changes.AddPoints(Nodes[Index], Nodes[Index + 1], NewLine, Targets[Index], Targets[Index + 1], PointSpacing);
 	}
 }
 
 /** Moves the nodes of both carriageways of a section onto lines parallel to their common axis. */
 void Redraw(const FSegmentNetwork& Network, const FChain& FirstChain, const FChain& SecondChain,
-			FRedrawChanges& Changes)
+			FWayEdits& Changes)
 {
 	const FStreetPolyline First = ChainLine(FirstChain);
 	const FStreetPolyline Second = ChainLine(SecondChain);
@@ -330,52 +309,13 @@ void Redraw(const FSegmentNetwork& Network, const FChain& FirstChain, const FCha
 		PlaceNodes(*Chain, NewLine, Changes);
 	}
 }
-
-/** The way with moved nodes and added shape points, or the way itself when nothing changed. */
-FStreetWay Rebuilt(const FStreetWay& Way, const FRedrawChanges& Changes)
-{
-	bool bTouched = false;
-	for (size_t Index = 0; Index < Way.NodeIds.size() && !bTouched; ++Index)
-	{
-		bTouched = Changes.MovedNodes.count(Way.NodeIds[Index]) > 0;
-		if (Index > 0)
-		{
-			bTouched = bTouched || Changes.AddedPoints.count({Way.NodeIds[Index - 1], Way.NodeIds[Index]}) > 0;
-		}
-	}
-	if (!bTouched)
-	{
-		return Way;
-	}
-	FStreetWay Result;
-	Result.Id = Way.Id;
-	Result.Tags = Way.Tags;
-	for (size_t Index = 0; Index < Way.NodeIds.size(); ++Index)
-	{
-		if (Index > 0)
-		{
-			const auto Added = Changes.AddedPoints.find({Way.NodeIds[Index - 1], Way.NodeIds[Index]});
-			if (Added != Changes.AddedPoints.end())
-			{
-				for (const FAddedPoint& Point : Added->second)
-				{
-					Result.NodeIds.push_back(Point.NodeId);
-					Result.Points.push_back(Point.Point);
-				}
-			}
-		}
-		Result.NodeIds.push_back(Way.NodeIds[Index]);
-		const auto Moved = Changes.MovedNodes.find(Way.NodeIds[Index]);
-		Result.Points.push_back(Moved != Changes.MovedNodes.end() ? Moved->second : Way.Points[Index]);
-	}
-	return Result;
-}
 }
 
 std::vector<FStreetWay> Straighten(const std::vector<FStreetWay>& Ways, const FSectionsByWay& Sections)
 {
 	const FSegmentNetwork Network(Ways, Sections);
-	FRedrawChanges Changes;
+	FWayEdits Changes;
+	Changes.NextSyntheticId = FirstSyntheticId;
 	for (int64_t Node : Network.NodeOrder)
 	{
 		if (Network.NodeKind(Node) != ENodeKind::Junction)
@@ -393,12 +333,6 @@ std::vector<FStreetWay> Straighten(const std::vector<FStreetWay>& Ways, const FS
 			Redraw(Network, Section->first, Section->second, Changes);
 		}
 	}
-	std::vector<FStreetWay> Result;
-	Result.reserve(Ways.size());
-	for (const FStreetWay& Way : Ways)
-	{
-		Result.push_back(Rebuilt(Way, Changes));
-	}
-	return Result;
+	return WithEdits(Ways, Changes);
 }
 }

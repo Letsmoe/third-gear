@@ -78,6 +78,7 @@ void FSegmentNetwork::SplitWay(const FStreetWay& Way, const FCrossSection& Secti
 			Segment.Id = static_cast<int>(Segments.size());
 			Segment.Way = &Way;
 			Segment.StartNode = Way.NodeIds[Start];
+			Segment.FirstIndex = static_cast<int>(Start);
 			Segment.EndNode = Node;
 			Segment.Section = Section;
 			Segments.push_back(std::move(Segment));

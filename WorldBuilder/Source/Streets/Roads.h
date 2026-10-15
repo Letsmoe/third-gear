@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -88,6 +89,12 @@ struct FStreetModel
 	std::vector<FMarking> Markings;
 };
 
-/** Builds the street model of the roads in the OSM data. */
-FStreetModel BuildStreetModel(const FOsmData& Data);
+/** Redraws the ground ways (by way id, their cross-sections) before the street model is built from them. */
+using FWayRedraw = std::function<std::vector<FStreetWay>(const std::vector<FStreetWay>&, const FSectionsByWay&)>;
+
+/**
+ * Builds the street model of the roads in the OSM data. Redraw, when given, reshapes the ground ways after the dual
+ * carriageways are straightened (the road model's smooth centrelines).
+ */
+FStreetModel BuildStreetModel(const FOsmData& Data, const FWayRedraw& Redraw = nullptr);
 }

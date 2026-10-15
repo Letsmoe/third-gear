@@ -30,4 +30,28 @@ struct FRoadChain
 
 /** Every segment of the network in exactly one chain. */
 std::vector<FRoadChain> BuildRoadChains(const FSegmentNetwork& Network);
+
+/** A chain's line and its samples, taken piece by piece so that every node of the chain is a sample. */
+struct FChainSamples
+{
+	/** The pieces' points joined in the chain's direction. */
+	FStreetPolyline Original;
+	/** Samples about Spacing apart along Original. */
+	FStreetPolyline Samples;
+	/** The sample at each of the chain's nodes. */
+	std::vector<int> NodeSamples;
+};
+
+/** Samples a chain's line about Spacing metres apart, every node included. */
+FChainSamples SampleChain(const FSegmentNetwork& Network, const FRoadChain& Chain, double Spacing);
+
+/** The piece's points in the chain's direction. */
+FStreetPolyline PieceLine(const FSegmentNetwork& Network, const FChainPiece& Piece);
+
+/** The samples of a chain whose position is fixed: its ends and every junction it runs through. */
+std::vector<int> PinnedSamples(const FSegmentNetwork& Network, const FRoadChain& Chain,
+							   const std::vector<int>& NodeSamples);
+
+/** The longest segment of the chain, whose road class the chain takes. */
+const FSegment& LongestSegment(const FSegmentNetwork& Network, const FRoadChain& Chain);
 }

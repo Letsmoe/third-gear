@@ -439,7 +439,7 @@ std::vector<FMarking> GoreMarkings(const std::vector<FGore>& Gores)
 	return Result;
 }
 
-FStreetModel BuildStreetModel(const FOsmData& Data)
+FStreetModel BuildStreetModel(const FOsmData& Data, const FWayRedraw& Redraw)
 {
 	FStreetModel Model;
 	const FBuildingIndex Buildings(Data.Buildings);
@@ -463,7 +463,12 @@ FStreetModel BuildStreetModel(const FOsmData& Data)
 			Model.BridgeWays.push_back(std::move(Way));
 		}
 	}
-	Model.GroundWays = std::make_shared<const std::vector<FStreetWay>>(DualCarriageways::Straighten(GroundWays, Model.Sections));
+	std::vector<FStreetWay> Straightened = DualCarriageways::Straighten(GroundWays, Model.Sections);
+	if (Redraw)
+	{
+		Straightened = Redraw(Straightened, Model.Sections);
+	}
+	Model.GroundWays = std::make_shared<const std::vector<FStreetWay>>(std::move(Straightened));
 	std::vector<FStreetPoint> SignalPoints;
 	for (const FOsmPoint& Point : Data.Points)
 	{
