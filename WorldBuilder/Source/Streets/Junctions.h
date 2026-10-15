@@ -50,6 +50,9 @@ private:
 	/** Signal points by 40 m cell, for the distance test of every junction. */
 	std::unordered_map<int64_t, std::vector<FStreetPoint>> SignalCells;
 
+	/** True when the arm is one of a pair of arms that are one road going straight through the junction. */
+	bool IsThroughArm(const FSegmentEnd& End, const std::vector<FSegmentEnd>& Ends) const;
+
 	/** The other arms whose carriageway this arm's lines must stop short of. */
 	std::vector<FSegmentEnd> ArmsThatInterrupt(const FSegmentEnd& End, const std::vector<FSegmentEnd>& Ends) const;
 

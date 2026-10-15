@@ -228,6 +228,18 @@ FStreetPoint FJunctionLines::DirectionAtMouth(const FSegmentEnd& End, double Dis
 	return Polyline::DirectionAt(Line, Along, std::min(Distance, Along.back()));
 }
 
+bool FJunctionLines::IsThroughArm(const FSegmentEnd& End, const std::vector<FSegmentEnd>& Ends) const
+{
+	for (const auto& [First, Second] : ThroughPairs(Ends))
+	{
+		if (End == First || End == Second)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 std::vector<FSegmentEnd> FJunctionLines::ArmsThatInterrupt(const FSegmentEnd& End,
 														   const std::vector<FSegmentEnd>& Ends) const
 {
@@ -243,13 +255,22 @@ std::vector<FSegmentEnd> FJunctionLines::ArmsThatInterrupt(const FSegmentEnd& En
 	{
 		return Others;
 	}
+	const bool bThrough = IsThroughArm(End, Ends);
 	std::vector<FSegmentEnd> Major;
 	for (const FSegmentEnd& Other : Others)
 	{
-		if (!IsMinor(Other))
+		if (IsMinor(Other))
 		{
-			Major.push_back(Other);
+			continue;
 		}
+		// A road joining or leaving a through road at a shallow angle, alongside this arm or ahead of it, only breaks
+		// the edge line on its side (AddMergeMouths); the through road's lane and centre lines carry on past it.
+		const double Turn = Deflection(Network, End, Other);
+		if (bThrough && (Turn >= 180.0 - Assumptions::MergeMaxAngle || Turn <= Assumptions::MergeMaxAngle))
+		{
+			continue;
+		}
+		Major.push_back(Other);
 	}
 	if (Major.size() == 1 && Deflection(Network, End, Major[0]) <= Assumptions::ThroughMaxDeflectionDegrees)
 	{

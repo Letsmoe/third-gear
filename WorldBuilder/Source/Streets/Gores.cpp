@@ -31,6 +31,28 @@ FStreetPolyline Between(const FStreetPolyline& First, const FStreetPolyline& Sec
 }
 
 /**
+ * How far from the node the gore between two inner edge lines (both from the node outward) opens: beyond the last
+ * point of the incoming carriageway's edge that the outgoing one's edge still lies left of, facing out of the node.
+ * Where OSM draws the carriageways closer together than their widths, they overlap there and nothing is hatched.
+ */
+double GoreOpening(const FStreetPolyline& IncomingEdge, const FStreetPolyline& OutgoingEdge)
+{
+	const std::vector<double> Along = Polyline::Arclength(IncomingEdge);
+	double Opening = 0.0;
+	for (size_t Index = 0; Index < IncomingEdge.size(); ++Index)
+	{
+		const FStreetPoint Right = Polyline::RightOf(Polyline::DirectionAt(IncomingEdge, Along, Along[Index]));
+		const double Across = Polyline::ProjectOnPolyline(OutgoingEdge, IncomingEdge[Index]).first;
+		const FStreetPoint Facing = Polyline::PointAt(OutgoingEdge, Across);
+		if (Dot(Facing - IncomingEdge[Index], Right) < 0.0)
+		{
+			Opening = Along[Index];
+		}
+	}
+	return Opening;
+}
+
+/**
  * The gore between the incoming carriageway's right side and the outgoing one's left (facing out of the node), as
  * long as the shorter of their two openings.
  */
@@ -58,6 +80,11 @@ std::optional<FGore> MakeGore(const std::vector<FSegmentLayout>& Layouts, const 
 		}
 		Kerbs.push_back(*Kerb);
 		Edges.push_back(*Edge);
+	}
+	const double Opening = GoreOpening(Edges[0], Edges[1]);
+	for (FStreetPolyline& Edge : Edges)
+	{
+		Edge = Polyline::CutPolyline(Edge, Opening, Length);
 	}
 	FGore Gore;
 	for (size_t Index = 0; Index < 2; ++Index)

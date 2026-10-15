@@ -28,6 +28,12 @@ struct FEndShape
 	FLineOffsets NodeOffsets;
 	/** The distance from the node where each line begins. */
 	FLineOffsets Cuts;
+	/**
+	 * At a split, by whole metres from the node, the share of the shift to NodeOffsets still left: it follows how far
+	 * apart the two carriageways' lines are, so their inner edges never cross. Empty elsewhere, where the shift
+	 * tapers as an S-curve over Taper.
+	 */
+	std::vector<double> NodeShare;
 };
 
 /**

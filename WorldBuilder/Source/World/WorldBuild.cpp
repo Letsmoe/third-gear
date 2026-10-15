@@ -754,7 +754,7 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	FPolygons Landmarks = LandmarkFootprints(KitSpecs);
 	const FBuildingIndex BuildingIndex(Osm.Buildings);
 	const FRoadGraph Graph(*Streets.GroundWays, Streets.Widths, BuildingIndex);
-	const FFurniture Furniture = BuildFurniture(Osm, Graph, Roads.Ground(), Buildings);
+	const FFurniture Furniture = BuildFurniture(Osm, Graph, Roads.Ground(), Buildings, &Streets.Lines);
 	const std::vector<FParkedCar> Cars = BuildParkedCars(Osm, Graph, Furniture.Zebras, Roads.Ground(), Buildings, Inputs.Extent);
 	AddBars(Inputs, Furniture, Roads);
 	FSiteCounts SiteCounts;

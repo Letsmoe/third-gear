@@ -39,6 +39,23 @@ double TaperBlend(double Fraction)
 	const double Remaining = 1.0 - std::min(std::max(Fraction, 0.0), 1.0);
 	return Remaining * Remaining * (3.0 - 2.0 * Remaining);
 }
+
+/** How much of the node's offset is left at a distance from the node, from the shape's NodeShare or its taper. */
+double NodeShareAt(const FEndShape& Shape, double DistanceFromNode)
+{
+	if (Shape.NodeShare.empty())
+	{
+		return TaperBlend(DistanceFromNode / Shape.Taper);
+	}
+	const double Clamped = std::min(std::max(DistanceFromNode, 0.0), static_cast<double>(Shape.NodeShare.size() - 1));
+	const size_t Below = static_cast<size_t>(std::floor(Clamped));
+	if (Below + 1 >= Shape.NodeShare.size())
+	{
+		return Shape.NodeShare.back();
+	}
+	const double Fraction = Clamped - static_cast<double>(Below);
+	return Shape.NodeShare[Below] * (1.0 - Fraction) + Shape.NodeShare[Below + 1] * Fraction;
+}
 }
 
 std::vector<double> FSegmentLayout::Offsets(const FLineKey& Key, const std::vector<double>& Along) const
@@ -56,7 +73,7 @@ std::vector<double> FSegmentLayout::Offsets(const FLineKey& Key, const std::vect
 		for (size_t Index = 0; Index < Along.size(); ++Index)
 		{
 			const double DistanceFromNode = bAtStart ? Along[Index] : Segment->Length - Along[Index];
-			Result[Index] += (*NodeOffset - Own) * TaperBlend(DistanceFromNode / Shape.Taper);
+			Result[Index] += (*NodeOffset - Own) * NodeShareAt(Shape, DistanceFromNode);
 		}
 	}
 	return Result;
@@ -180,21 +197,65 @@ std::optional<double> SplitMeetingOffset(const FLineKey& Key, ESide InnerSide, c
 }
 
 /**
+ * For each whole metre from a split node, the share of the carriageway's shift to its node offsets still left: 1 less
+ * the separation of the two carriageways' lines there over Apart, the separation at which their inner kerbs part,
+ * never rising. The carriageways then stay side by side until OSM's lines are that far apart and open from there, so
+ * they never overlap. Reach bounds the distance; beyond it the last share holds.
+ */
+std::vector<double> SplitNodeShare(const FSegmentNetwork& Network, const FSegmentEnd& OneWay, const FSegmentEnd& Other,
+								   double Apart, double Reach)
+{
+	const FStreetPolyline Own = Network.ArmLine(OneWay);
+	const FStreetPolyline Beside = Network.ArmLine(Other);
+	const std::vector<double> Along = Polyline::Arclength(Own);
+	std::vector<double> Share;
+	for (int Distance = 0; Distance <= static_cast<int>(Reach); ++Distance)
+	{
+		const FStreetPoint Point = Polyline::PointAt(Own, Along, static_cast<double>(Distance));
+		const double Separation = Polyline::ProjectOnPolyline(Beside, Point).second;
+		double Left = std::min(std::max(1.0 - Separation / Apart, 0.0), 1.0);
+		if (!Share.empty())
+		{
+			Left = std::min(Left, Share.back());
+		}
+		Share.push_back(Left);
+		if (Left <= 0.0)
+		{
+			break;
+		}
+	}
+	return Share;
+}
+
+/** How far the inner kerb of a carriageway (facing out of the split node) lies from its line. */
+double InnerKerbOffset(const std::vector<FSegmentLayout>& Layouts, const FSegmentEnd& OneWay, ESide InnerSide)
+{
+	return std::abs(ArmLines(Layouts[OneWay.Segment].Lines, OneWay).ValueOr({ELineKind::Kerb, InnerSide}, 0.0));
+}
+
+/**
  * Each carriageway of a dual carriageway split starts on its half of the two-way road and moves out to its own line
  * over the gore: its lanes and outer edge from the two-way road's lanes and edge on its side, its inner edge and kerb
  * from the two-way road's centre line.
  */
-void ShapeSplit(std::vector<FSegmentLayout>& Layouts, const FSplit& Split)
+void ShapeSplit(const FSegmentNetwork& Network, std::vector<FSegmentLayout>& Layouts, const FSplit& Split)
 {
 	const FLineOffsets TwoWayLines = ArmLines(Layouts[Split.TwoWay.Segment].Lines, Split.TwoWay);
 	// Facing out of the node toward the carriageways, traffic coming in keeps to the left, so the incoming
 	// carriageway's inner side is its right and the outgoing one's its left.
 	const std::pair<FSegmentEnd, ESide> Carriageways[] = {{Split.Incoming, ESide::Right}, {Split.Outgoing, ESide::Left}};
+	const double Apart = InnerKerbOffset(Layouts, Split.Incoming, ESide::Right)
+		+ InnerKerbOffset(Layouts, Split.Outgoing, ESide::Left);
 	for (const auto& [OneWay, InnerSide] : Carriageways)
 	{
 		FSegmentLayout& Layout = Layouts[OneWay.Segment];
 		FEndShape& Shape = EndShapeOf(Layout, OneWay.bAtStart);
 		Shape.Taper = std::min(Split.GoreLength, Layout.Segment->Length * Assumptions::TaperMaxSegmentShare);
+		const FSegmentEnd& Other = OneWay == Split.Incoming ? Split.Outgoing : Split.Incoming;
+		if (Apart > 0.0)
+		{
+			Shape.NodeShare = SplitNodeShare(Network, OneWay, Other, Apart, Layout.Segment->Length / 2);
+		}
 		for (const auto& [Key, Offset] : ArmLines(Layout.Lines, OneWay))
 		{
 			const std::optional<double> Meeting = SplitMeetingOffset(Key, InnerSide, TwoWayLines);
@@ -346,7 +407,7 @@ std::vector<FSegmentLayout> BuildLayouts(const FSegmentNetwork& Network, const s
 		const std::optional<FSplit> Split = FindSplit(Network, Node);
 		if (Split.has_value())
 		{
-			ShapeSplit(Layouts, *Split);
+			ShapeSplit(Network, Layouts, *Split);
 			continue;
 		}
 		for (const FSegmentEnd& End : Ends)

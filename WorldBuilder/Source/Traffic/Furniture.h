@@ -3,6 +3,7 @@
 #include "OsmData.h"
 #include "PolygonSet.h"
 #include "RoadGraph.h"
+#include "RoadLines.h"
 #include "TrafficTypes.h"
 
 /**
@@ -28,8 +29,9 @@ namespace WorldBuilder
 {
 /**
  * Derives all street furniture and the signal junctions. Data: the OSM points and footways; Graph: the ground ways of
- * the street model; RoadGround: the road surface; Buildings: the building footprints. Positions come without heights.
+ * the street model; RoadGround: the road surface; Buildings: the building footprints; Lines: the street model's lines,
+ * which the stop lines are placed on (without them they lie across the ways). Positions come without heights.
  */
 FFurniture BuildFurniture(const FOsmData& Data, const FRoadGraph& Graph, const FPolygonSet& RoadGround,
-						  const FPolygonSet& Buildings);
+						  const FPolygonSet& Buildings, const FRoadLines* Lines = nullptr);
 }

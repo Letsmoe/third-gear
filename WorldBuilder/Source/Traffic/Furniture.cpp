@@ -13,6 +13,7 @@
 #include "Assumptions.h"
 #include "OsmTags.h"
 #include "PointGrid.h"
+#include "StopLines.h"
 
 namespace WorldBuilder
 {
@@ -106,6 +107,8 @@ struct FApproach
 	FStreetPoint StopPoint;
 	FStreetPoint Direction = {1.0, 0.0};
 	int Phase = 0;
+	/** The stop line's ends (left, right of traffic) placed on the street model, when it could be. */
+	std::optional<std::array<double, 4>> PlacedLine;
 };
 
 struct FJunction
@@ -155,8 +158,8 @@ class FFurnitureBuilder
 {
 public:
 	FFurnitureBuilder(const FOsmData& InData, const FRoadGraph& InGraph, const FPolygonSet& InGround,
-					  const FPolygonSet& InBuildings)
-		: Data(InData), Graph(InGraph), Ground(InGround), Buildings(InBuildings), LampGrid(LampMinGap),
+					  const FPolygonSet& InBuildings, const FRoadLines* InLines)
+		: Data(InData), Graph(InGraph), Ground(InGround), Buildings(InBuildings), Lines(InLines), LampGrid(LampMinGap),
 		  OsmLampGrid(LampOsmMinGap)
 	{
 		BuildCyclewayStrips();
@@ -169,6 +172,8 @@ private:
 	const FRoadGraph& Graph;
 	const FPolygonSet& Ground;
 	const FPolygonSet& Buildings;
+	/** The street model's lines the stop lines are placed on, or nullptr to place them on the ways. */
+	const FRoadLines* Lines;
 	FPolygonSet CyclewayStrips;
 	std::vector<FApproach> Approaches;
 	std::vector<FJunction> Junctions;
@@ -205,8 +210,15 @@ private:
 	int MakeApproach(int Way, int Travel, double StopS, bool bExplicit, const FJunctionKey& Key);
 	void ExplicitApproaches(const std::vector<const FOsmPoint*>& SignalNodes, std::vector<int>& Explicit,
 							std::vector<int64_t>& JunctionSignals);
+	/** The first junction node along a way from a node, stepping by Step (+1 or -1), or nothing at the way's end. */
+	std::optional<int64_t> NextJunctionAlong(int Way, int Index, int Step) const;
 	std::optional<int> ArmApproach(int64_t Node, int Way, int Index, int Step);
 	void AssignPhases(const FJunction& Junction);
+	/**
+	 * Moves every junction approach's stop line onto the street model: across its own lanes, and for an approach
+	 * without a mapped signal to where the lane lines stop before the junction.
+	 */
+	void PlaceStopLines();
 	std::vector<const FOsmPoint*> SignalNodes() const;
 	void BuildJunctions();
 	static bool FollowsOnCarriageway(const FApproach& First, const FApproach& Second, double MaxAlong);
@@ -391,6 +403,19 @@ void FFurnitureBuilder::ExplicitApproaches(const std::vector<const FOsmPoint*>& 
 			Explicit.push_back(MakeApproach(Entry.Way, Travel, StopS, true, Key));
 		}
 	}
+}
+
+std::optional<int64_t> FFurnitureBuilder::NextJunctionAlong(int Way, int Index, int Step) const
+{
+	const std::vector<int64_t>& Nodes = Graph.Ways[Way].NodeIds;
+	for (int Next = Index + Step; Next >= 0 && Next < static_cast<int>(Nodes.size()); Next += Step)
+	{
+		if (Graph.IsJunction(Nodes[Next]))
+		{
+			return Nodes[Next];
+		}
+	}
+	return std::nullopt;
 }
 
 std::optional<int> FFurnitureBuilder::ArmApproach(int64_t Node, int Way, int Index, int Step)
@@ -703,8 +728,10 @@ void FFurnitureBuilder::BuildJunctions()
 						{
 							continue;
 						}
-						const bool bLinkWithinJunction =
-							Graph.IsJunction(Way.NodeIds[Neighbour]) && MemberSet.count(Way.NodeIds[Neighbour]) > 0;
+						// A way that leads to another node of this junction (the main road between a crossing and
+						// a slip road's merge) is inside it and gets no stop line of its own.
+						const std::optional<int64_t> Next = NextJunctionAlong(Entry.Way, Entry.Index, Step);
+						const bool bLinkWithinJunction = Next.has_value() && MemberSet.count(*Next) > 0;
 						if (bLinkWithinJunction || Covered.count({Way.Id, -Step}) > 0)
 						{
 							continue;
@@ -866,6 +893,10 @@ std::vector<FSignalHead> FFurnitureBuilder::HeadPoles(const FApproach& Approach,
 
 std::array<double, 4> FFurnitureBuilder::StopLine(const FApproach& Approach)
 {
+	if (Approach.PlacedLine.has_value())
+	{
+		return *Approach.PlacedLine;
+	}
 	const FStreetPoint Right = RightOf(Approach.Direction);
 	const double Half = Approach.Width / 2;
 	const double LeftExtent = Approach.bOneway ? Half : 0.0;
@@ -1394,9 +1425,34 @@ FTrafficNetwork FFurnitureBuilder::BuildNetwork()
 	return Network;
 }
 
+void FFurnitureBuilder::PlaceStopLines()
+{
+	if (Lines == nullptr)
+	{
+		return;
+	}
+	for (const FJunction& Junction : Junctions)
+	{
+		for (int Index : Junction.Approaches)
+		{
+			FApproach& Approach = Approaches[Index];
+			const std::optional<FPlacedStopLine> Placed =
+				PlaceStopLine(*Lines, Graph.Ways[Approach.Way], Approach.StopPoint, Approach.Travel, !Approach.bExplicit);
+			if (!Placed.has_value())
+			{
+				continue;
+			}
+			Approach.StopPoint = Placed->Point;
+			Approach.Direction = Placed->Direction;
+			Approach.PlacedLine = {Placed->Left.X, Placed->Left.Y, Placed->Right.X, Placed->Right.Y};
+		}
+	}
+}
+
 FFurniture FFurnitureBuilder::Build()
 {
 	BuildJunctions();
+	PlaceStopLines();
 	BuildSpeedSigns();
 	BuildPointSigns();
 	BuildLamps();
@@ -1406,9 +1462,9 @@ FFurniture FFurnitureBuilder::Build()
 }
 
 FFurniture BuildFurniture(const FOsmData& Data, const FRoadGraph& Graph, const FPolygonSet& RoadGround,
-						  const FPolygonSet& Buildings)
+						  const FPolygonSet& Buildings, const FRoadLines* Lines)
 {
-	FFurnitureBuilder Builder(Data, Graph, RoadGround, Buildings);
+	FFurnitureBuilder Builder(Data, Graph, RoadGround, Buildings, Lines);
 	return Builder.Build();
 }
 }
