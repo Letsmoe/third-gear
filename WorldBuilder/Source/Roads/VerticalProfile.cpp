@@ -15,6 +15,8 @@ namespace
 constexpr double OutlierDistance = 0.3;
 /** Weight of holding a grade at its limit, against 1 for a metre of road one metre off the ground. */
 constexpr double GradeWeight = 1e6;
+/** Weight of a tie, against 1 for a metre of road one metre off the ground. */
+constexpr double TieWeight = 1e4;
 /** Refits for the outlier weights and the grade limits to settle. */
 constexpr int Rounds = 8;
 
@@ -69,7 +71,8 @@ void AddBending(const FProfileChain& Chain, FTriplets& Entries, Eigen::VectorXd&
 		const double Span = 0.5 * (Before + After);
 		const int Unknowns[3] = {Chain.Unknowns[Index - 1], Chain.Unknowns[Index], Chain.Unknowns[Index + 1]};
 		const double Coefficients[3] = {1.0 / (Before * Span), -(1.0 / Before + 1.0 / After) / Span, 1.0 / (After * Span)};
-		AddSquare(Entries, Right, Unknowns, Coefficients, 3, 0.0, Stiffness * Span);
+		const double Local = Chain.Stiffness.empty() ? 1.0 : Chain.Stiffness[Index];
+		AddSquare(Entries, Right, Unknowns, Coefficients, 3, 0.0, Stiffness * Local * Span);
 	}
 }
 
@@ -85,6 +88,16 @@ void AddGradeLimits(const std::vector<FProfileChain>& Chains, const FGradeLimits
 		const int Unknowns[2] = {Chain.Unknowns[Index], Chain.Unknowns[Index + 1]};
 		const double Coefficients[2] = {-1.0 / Step, 1.0 / Step};
 		AddSquare(Entries, Right, Unknowns, Coefficients, 2, Grade, GradeWeight * Step);
+	}
+}
+
+/** Holds every tie. */
+void AddTies(const std::vector<FProfileTie>& Ties, FTriplets& Entries, Eigen::VectorXd& Right)
+{
+	for (const FProfileTie& Tie : Ties)
+	{
+		const double Coefficient = 1.0;
+		AddSquare(Entries, Right, &Tie.Unknown, &Coefficient, 1, Tie.Target, TieWeight);
 	}
 }
 
@@ -117,7 +130,8 @@ void FindSteepSteps(const std::vector<FProfileChain>& Chains, const Eigen::Vecto
 }
 }
 
-FProfileResult SolveProfiles(int UnknownCount, const std::vector<FProfileChain>& Chains)
+FProfileResult SolveProfiles(int UnknownCount, const std::vector<FProfileChain>& Chains,
+							 const std::vector<FProfileTie>& Ties)
 {
 	FProfileResult Result;
 	if (UnknownCount == 0)
@@ -141,6 +155,7 @@ FProfileResult SolveProfiles(int UnknownCount, const std::vector<FProfileChain>&
 			AddBending(Chains[Index], Entries, Right);
 		}
 		AddGradeLimits(Chains, Limits, Entries, Right);
+		AddTies(Ties, Entries, Right);
 		FSparse System(UnknownCount, UnknownCount);
 		System.setFromTriplets(Entries.begin(), Entries.end());
 		Eigen::SimplicialLDLT<FSparse> Solver(System);

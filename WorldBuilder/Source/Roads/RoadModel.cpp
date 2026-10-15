@@ -1,5 +1,7 @@
 #include "RoadModel.h"
 
+#include <algorithm>
+#include <cmath>
 #include <unordered_map>
 
 #include "Centreline.h"
@@ -180,6 +182,109 @@ std::vector<FProfileChain> ProfileChains(const FSegmentNetwork& Network, const s
 	}
 	return Profiles;
 }
+
+/** Bending stiffness right at a junction where a road yields, against 1 elsewhere. */
+constexpr double JunctionStiffness = 0.02;
+/** Beyond the major road's kerb, the stiffness stays low this far, then returns to 1 over JunctionStiffnessRamp. */
+constexpr double JunctionStiffnessReach = 6.0;
+constexpr double JunctionStiffnessRamp = 10.0;
+
+/** The bending stiffness factor of every sample of a chain: low near the junctions where it yields. */
+std::vector<double> StiffnessNearJunctions(const FRoadChainModel& Chain, const std::vector<FRoadChainModel>& Chains)
+{
+	std::vector<double> Stiffness(Chain.Points.size(), 1.0);
+	for (const FJunctionYield& Yield : Chain.Yields)
+	{
+		const double Calm = Chains[Yield.Major].HalfWidths[Yield.MajorNodeSample] + JunctionStiffnessReach;
+		for (size_t Index = 0; Index < Stiffness.size(); ++Index)
+		{
+			const double FromNode = std::abs(Chain.Along[Index] - Chain.Along[Yield.NodeSample]);
+			const double Ramp = std::clamp((FromNode - Calm) / JunctionStiffnessRamp, 0.0, 1.0);
+			Stiffness[Index] = std::min(Stiffness[Index], JunctionStiffness + (1.0 - JunctionStiffness) * Ramp);
+		}
+	}
+	return Stiffness;
+}
+
+/** Where a point meets a chain's centreline near one of its samples: the step it falls on and its offset. */
+struct FFoot
+{
+	int Sample = 0;
+	double Fraction = 0.0;
+	double Offset = 0.0;
+	double Distance = 1e300;
+};
+
+/** The foot of a point on the chain's centreline among the steps within Reach samples of Around. */
+FFoot FootNear(const FRoadChainModel& Chain, int Around, int Reach, const FStreetPoint& Point)
+{
+	FFoot Best;
+	const int First = std::max(Around - Reach, 0);
+	const int Last = std::min(Around + Reach, static_cast<int>(Chain.Points.size()) - 1);
+	for (int Index = First; Index < Last; ++Index)
+	{
+		const FStreetPoint& Start = Chain.Points[Index];
+		const FStreetPoint Step = Chain.Points[Index + 1] - Start;
+		const double LengthSquared = Dot(Step, Step);
+		double Fraction = 0.0;
+		if (LengthSquared > 1e-12)
+		{
+			Fraction = std::clamp(Dot(Point - Start, Step) / LengthSquared, 0.0, 1.0);
+		}
+		const FStreetPoint Foot = Start + Step * Fraction;
+		const double Distance = Norm(Point - Foot);
+		if (Distance >= Best.Distance)
+		{
+			continue;
+		}
+		const double Side = Dot(Point - Foot, Polyline::RightOf(Polyline::Unit(Step))) >= 0.0 ? 1.0 : -1.0;
+		Best = {Index, Fraction, Side * Distance, Distance};
+	}
+	return Best;
+}
+
+/**
+ * Ties that hold every yielding chain's samples inside the major road's carriageway to the major road's surface from
+ * a first fit (Heights, by unknown), so a side street's profile starts where it really meets the main road: at its
+ * surface, not at its centreline. Holding them to fixed targets leaves the main road's own fit alone.
+ */
+std::vector<FProfileTie> JunctionTies(const std::vector<FRoadChainModel>& Chains, const std::vector<FProfileChain>& Profiles,
+									  const std::vector<double>& Heights)
+{
+	std::vector<FProfileTie> Ties;
+	for (size_t ChainIndex = 0; ChainIndex < Chains.size(); ++ChainIndex)
+	{
+		const FRoadChainModel& Minor = Chains[ChainIndex];
+		for (const FJunctionYield& Yield : Minor.Yields)
+		{
+			const FRoadChainModel& Major = Chains[Yield.Major];
+			const double HalfWidth = Major.HalfWidths[Yield.MajorNodeSample];
+			const int Reach = static_cast<int>(std::ceil(HalfWidth / SampleSpacing)) + 10;
+			for (int Index = 0; Index < static_cast<int>(Minor.Points.size()); ++Index)
+			{
+				if (Index == Yield.NodeSample
+					|| std::abs(Minor.Along[Index] - Minor.Along[Yield.NodeSample]) > HalfWidth)
+				{
+					continue;
+				}
+				const FFoot Foot = FootNear(Major, Yield.MajorNodeSample, Reach, Minor.Points[Index]);
+				if (Foot.Distance > Major.HalfWidths[Foot.Sample])
+				{
+					continue;
+				}
+				const FCrossFall& FallBefore = Major.Falls[Foot.Sample];
+				const FCrossFall& FallAfter = Major.Falls[Foot.Sample + 1];
+				const FCrossFall Fall{FallBefore.Left + (FallAfter.Left - FallBefore.Left) * Foot.Fraction,
+									  FallBefore.Right + (FallAfter.Right - FallBefore.Right) * Foot.Fraction};
+				const double Before = Heights[Profiles[Yield.Major].Unknowns[Foot.Sample]];
+				const double After = Heights[Profiles[Yield.Major].Unknowns[Foot.Sample + 1]];
+				const double Centre = Before + (After - Before) * Foot.Fraction;
+				Ties.push_back({Profiles[ChainIndex].Unknowns[Index], Centre - CrossFallDrop(Fall, Foot.Offset)});
+			}
+		}
+	}
+	return Ties;
+}
 }
 
 FRoadModel BuildRoadModel(const FSegmentNetwork& Network, const FGroundSampler& Ground, const FBridgeCover& Bridges,
@@ -190,9 +295,19 @@ FRoadModel BuildRoadModel(const FSegmentNetwork& Network, const FGroundSampler& 
 	{
 		Model.Chains.push_back(BuildChainPlan(Network, Chain, Ground, Bridges, Urban));
 	}
+	AssignJunctionPriorities(Network, Model.Chains);
 	int UnknownCount = 0;
 	const std::vector<FProfileChain> Profiles = ProfileChains(Network, Model.Chains, UnknownCount);
-	const FProfileResult Result = SolveProfiles(UnknownCount, Profiles);
+	// First every road on its own ground, then again with the side streets held to the main roads' surfaces where they
+	// cross them, and free to bend more on their way out of the junction.
+	const FProfileResult Untied = SolveProfiles(UnknownCount, Profiles, {});
+	std::vector<FProfileChain> Yielding = Profiles;
+	for (size_t Index = 0; Index < Model.Chains.size(); ++Index)
+	{
+		Yielding[Index].Stiffness = StiffnessNearJunctions(Model.Chains[Index], Model.Chains);
+	}
+	const FProfileResult Result = SolveProfiles(UnknownCount, Yielding,
+												JunctionTies(Model.Chains, Profiles, Untied.Heights));
 	Model.GradeLimited = Result.GradeLimited;
 	for (size_t Index = 0; Index < Model.Chains.size(); ++Index)
 	{

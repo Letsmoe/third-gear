@@ -8,6 +8,7 @@
 
 #include "BridgeCover.h"
 #include "CrossFall.h"
+#include "JunctionPriority.h"
 #include "Network.h"
 #include "RoadChains.h"
 #include "RoadDesign.h"
@@ -46,6 +47,8 @@ struct FRoadChainModel
 	std::vector<bool> UnderBridge;
 	/** Index into Points of each node in Chain.Nodes. */
 	std::vector<int> NodeSamples;
+	/** The junctions where this chain adapts to a more important road. */
+	std::vector<FJunctionYield> Yields;
 	/** Largest distance of the centreline from the OSM line, metres. */
 	double MaxDeviation = 0.0;
 };

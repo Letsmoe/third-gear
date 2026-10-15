@@ -95,8 +95,27 @@ std::vector<double> CappedRadii(const FStreetPolyline& Points)
 	return Radii;
 }
 
+/** Writes the junctions where a chain yields: its sample there and the class, name and centre height of the major. */
+void WriteYields(std::ofstream& File, const FRoadChainModel& Chain, const FRoadModel& Model)
+{
+	File << ",\"yields\":[";
+	for (size_t Index = 0; Index < Chain.Yields.size(); ++Index)
+	{
+		const FJunctionYield& Yield = Chain.Yields[Index];
+		const FRoadChainModel& Major = Model.Chains[Yield.Major];
+		File << (Index > 0 ? "," : "") << "{\"node_sample\":" << Yield.NodeSample << ",\"class\":";
+		WriteString(File, Major.RoadClass);
+		File << ",\"name\":";
+		WriteString(File, Major.Name);
+		char Buffer[64];
+		std::snprintf(Buffer, sizeof(Buffer), ",\"height\":%.3f}", Major.Heights[Yield.MajorNodeSample]);
+		File << Buffer;
+	}
+	File << "]";
+}
+
 /** Writes one chain as a JSON object; Today holds the road heights the tiles use now. */
-void WriteChain(std::ofstream& File, const FRoadChainModel& Chain, const std::vector<double>& Today)
+void WriteChain(std::ofstream& File, const FRoadChainModel& Chain, const FRoadModel& Model, const std::vector<double>& Today)
 {
 	File << "{\"class\":";
 	WriteString(File, Chain.RoadClass);
@@ -139,6 +158,7 @@ void WriteChain(std::ofstream& File, const FRoadChainModel& Chain, const std::ve
 	WriteNumbers(File, RightFalls, 4);
 	File << ",\"radius\":";
 	WriteNumbers(File, CappedRadii(Chain.Points), 1);
+	WriteYields(File, Chain, Model);
 	File << ",\"node_samples\":[";
 	for (size_t Index = 0; Index < Chain.NodeSamples.size(); ++Index)
 	{
@@ -213,7 +233,7 @@ void WriteRoadModelPreview(const FRegion& Region, const FBuildOptions& Options)
 	for (size_t Index = 0; Index < Written.size(); ++Index)
 	{
 		File << (Index > 0 ? ",\n" : "\n");
-		WriteChain(File, *Written[Index], Today[Index]);
+		WriteChain(File, *Written[Index], Model, Today[Index]);
 	}
 	File << "]}\n";
 	std::printf("wrote %zu chains to %s (%.1f s)\n", Written.size(), Path.string().c_str(), SecondsSince(Start));

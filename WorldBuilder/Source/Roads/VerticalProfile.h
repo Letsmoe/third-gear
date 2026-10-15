@@ -21,7 +21,20 @@ struct FProfileChain
 	std::vector<double> Spacing;
 	/** Length over which the change of grade is smoothed, metres. */
 	double Smoothing = 10.0;
+	/**
+	 * A factor on the bending stiffness at every sample, 1 normally; lower near a junction where the road yields, so
+	 * its profile can bend from the main road's surface to its own grade as quickly as real junction approaches do.
+	 * Empty means 1 everywhere.
+	 */
+	std::vector<double> Stiffness;
 	double MaxGrade = 0.12;
+};
+
+/** A height held to a target: a side street's sample inside the main road, held to the main road's surface there. */
+struct FProfileTie
+{
+	int Unknown = 0;
+	double Target = 0.0;
 };
 
 struct FProfileResult
@@ -33,9 +46,10 @@ struct FProfileResult
 };
 
 /**
- * Fits the heights: close to the ground, with the change of grade small over each chain's smoothing length and no
- * grade steeper than its limit. Ground that sticks out from the fit by more than a few decimetres counts less and less
- * (a Huber fit), so a stray survey point or a parked lorry in the data bends no road.
+ * Fits the heights: close to the ground, with the change of grade small over each chain's smoothing length, no grade
+ * steeper than its limit, and every tie held. Ground that sticks out from the fit by more than a few decimetres counts
+ * less and less (a Huber fit), so a stray survey point or a parked lorry in the data bends no road.
  */
-FProfileResult SolveProfiles(int UnknownCount, const std::vector<FProfileChain>& Chains);
+FProfileResult SolveProfiles(int UnknownCount, const std::vector<FProfileChain>& Chains,
+							 const std::vector<FProfileTie>& Ties);
 }

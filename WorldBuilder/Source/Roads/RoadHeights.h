@@ -16,9 +16,10 @@ public:
 	explicit FRoadHeights(const FRoadModel& Model);
 
 	/**
-	 * The road surface height at a point, cross fall included: from the nearest centreline of every chain whose road
-	 * reaches it, blended by how far the point lies outside each road's half width. Nothing when no road comes within
-	 * its half width and Reach.
+	 * The road surface height at a point, cross fall included. Inside a carriageway it is that road's surface, or
+	 * where carriageways overlap at a junction, the surface of the road the others yield to. Outside every carriageway
+	 * the kerb heights of the roads around are blended by distance. Nothing when no road comes within its half width
+	 * and Reach.
 	 */
 	std::optional<double> At(double X, double Y) const;
 
@@ -34,18 +35,36 @@ private:
 		int Last = 0;
 	};
 
-	/**
-	 * The nearest point of a run's centreline: its distance, the road's half width there, and the surface height with
-	 * the cross fall at the point, or at the kerb when the point lies beyond it.
-	 */
+	/** The foot of a point on a chain's centreline, with the road's shape there. */
 	struct FNearest
 	{
+		int Chain = -1;
 		double Distance = 1e300;
-		double Height = 0.0;
+		/** Distance of the foot along the centreline. */
+		double Along = 0.0;
+		/** The point's offset from the centreline, positive to the right. */
+		double Offset = 0.0;
+		double Centre = 0.0;
 		double HalfWidth = 0.0;
+		FCrossFall Fall;
 	};
 
 	FNearest NearestOnRun(const FRun& Run, double X, double Y) const;
+
+	/** The nearest foot on every chain whose runs are indexed around the point. */
+	std::vector<FNearest> NearestByChain(double X, double Y) const;
+
+	/** The nearest foot on one chain, or one with Chain -1 when the chain doesn't come near. */
+	FNearest NearestOnChain(int Chain, double X, double Y) const;
+
+	/**
+	 * A chain's surface at the point, held at the kerb height beyond its kerb, and near a junction where it yields
+	 * blended from the major road's kerb height to its own over AdaptLength.
+	 */
+	double SurfaceAt(const FNearest& Nearest, double X, double Y) const;
+
+	/** True when the first chain yields to the second at one of its junctions. */
+	bool YieldsTo(int Minor, int Major) const;
 
 	const FRoadModel* Model = nullptr;
 	std::vector<FRun> Runs;
