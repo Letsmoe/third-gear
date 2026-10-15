@@ -21,6 +21,8 @@ struct FRoadDesign
 	double ProfileSmoothing = 10.0;
 	/** Steepest grade, rise over run. */
 	double MaxGrade = 0.12;
+	/** True for roads built for speed, whose curves are banked outside town; streets, service roads and tracks aren't. */
+	bool bBanksInCurves = false;
 };
 
 /** The design values of a highway= class; unknown classes get those of a residential street. */

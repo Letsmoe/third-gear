@@ -126,6 +126,17 @@ void WriteChain(std::ofstream& File, const FRoadChainModel& Chain, const std::ve
 		File << (Index > 0 ? "," : "") << (Chain.UnderBridge[Index] ? 1 : 0);
 	}
 	File << "]";
+	std::vector<double> LeftFalls;
+	std::vector<double> RightFalls;
+	for (const FCrossFall& Fall : Chain.Falls)
+	{
+		LeftFalls.push_back(Fall.Left);
+		RightFalls.push_back(Fall.Right);
+	}
+	File << ",\"left_fall\":";
+	WriteNumbers(File, LeftFalls, 4);
+	File << ",\"right_fall\":";
+	WriteNumbers(File, RightFalls, 4);
 	File << ",\"radius\":";
 	WriteNumbers(File, CappedRadii(Chain.Points), 1);
 	File << ",\"node_samples\":[";
@@ -172,7 +183,7 @@ void WriteRoadModelPreview(const FRegion& Region, const FBuildOptions& Options)
 
 	const auto ModelStart = std::chrono::steady_clock::now();
 	const FRoadModel Model = BuildRoadModel(*Streets.Lines.Network, [&](double X, double Y) { return Terrain.Sample(X, Y); },
-											BridgeCoverOf(Osm, Streets.Widths));
+											BridgeCoverOf(Osm, Streets.Widths), Streets.Urban);
 	std::printf("road model: %zu chains, %d steps at the grade limit (%.2f s)\n", Model.Chains.size(), Model.GradeLimited,
 				SecondsSince(ModelStart));
 

@@ -16,8 +16,9 @@ public:
 	explicit FRoadHeights(const FRoadModel& Model);
 
 	/**
-	 * The road height at a point: from the nearest centreline of every chain whose road reaches it, blended by how far
-	 * the point lies outside each road's half width. Nothing when no road comes within its half width and Reach.
+	 * The road surface height at a point, cross fall included: from the nearest centreline of every chain whose road
+	 * reaches it, blended by how far the point lies outside each road's half width. Nothing when no road comes within
+	 * its half width and Reach.
 	 */
 	std::optional<double> At(double X, double Y) const;
 
@@ -33,7 +34,10 @@ private:
 		int Last = 0;
 	};
 
-	/** The nearest point of a run's centreline: its distance, height and the road's half width there. */
+	/**
+	 * The nearest point of a run's centreline: its distance, the road's half width there, and the surface height with
+	 * the cross fall at the point, or at the kerb when the point lies beyond it.
+	 */
 	struct FNearest
 	{
 		double Distance = 1e300;

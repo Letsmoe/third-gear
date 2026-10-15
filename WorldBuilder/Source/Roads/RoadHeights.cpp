@@ -63,14 +63,23 @@ FRoadHeights::FNearest FRoadHeights::NearestOnRun(const FRun& Run, double X, dou
 		{
 			Along = std::clamp(Dot(Point - Start, Step) / LengthSquared, 0.0, 1.0);
 		}
-		const double Distance = Norm(Point - (Start + Step * Along));
+		const FStreetPoint Foot = Start + Step * Along;
+		const double Distance = Norm(Point - Foot);
 		if (Distance >= Nearest.Distance)
 		{
 			continue;
 		}
 		Nearest.Distance = Distance;
-		Nearest.Height = Chain.Heights[Index] * (1.0 - Along) + Chain.Heights[Index + 1] * Along;
 		Nearest.HalfWidth = Chain.HalfWidths[Index] * (1.0 - Along) + Chain.HalfWidths[Index + 1] * Along;
+		const FCrossFall& First = Chain.Falls[Index];
+		const FCrossFall& Second = Chain.Falls[Index + 1];
+		const FCrossFall Fall{First.Left * (1.0 - Along) + Second.Left * Along,
+							  First.Right * (1.0 - Along) + Second.Right * Along};
+		// Beyond the kerb the road keeps its edge height, which the pavement and the kerb stand on.
+		const double Side = Dot(Point - Foot, Polyline::RightOf(Polyline::Unit(Step))) >= 0.0 ? 1.0 : -1.0;
+		const double Offset = Side * std::min(Distance, Nearest.HalfWidth);
+		const double Centre = Chain.Heights[Index] * (1.0 - Along) + Chain.Heights[Index + 1] * Along;
+		Nearest.Height = Centre - CrossFallDrop(Fall, Offset);
 	}
 	return Nearest;
 }

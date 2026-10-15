@@ -3,9 +3,11 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "BridgeCover.h"
+#include "CrossFall.h"
 #include "Network.h"
 #include "RoadChains.h"
 #include "RoadDesign.h"
@@ -36,6 +38,8 @@ struct FRoadChainModel
 	std::vector<double> Heights;
 	/** Half the kerb to kerb width at every point, from the segment it lies on. */
 	std::vector<double> HalfWidths;
+	/** The cross fall at every point. */
+	std::vector<FCrossFall> Falls;
 	/** Ground height under every point. */
 	std::vector<double> Ground;
 	/** True for every point a bridge crosses over, whose ground the heights ignore. */
@@ -53,6 +57,10 @@ struct FRoadModel
 	int GradeLimited = 0;
 };
 
-/** Builds the road model of a segment network over the given ground, ignoring the ground under the bridges. */
-FRoadModel BuildRoadModel(const FSegmentNetwork& Network, const FGroundSampler& Ground, const FBridgeCover& Bridges);
+/**
+ * Builds the road model of a segment network over the given ground, ignoring the ground under the bridges. Urban says
+ * by way id which roads lie in town, where curves aren't banked.
+ */
+FRoadModel BuildRoadModel(const FSegmentNetwork& Network, const FGroundSampler& Ground, const FBridgeCover& Bridges,
+						  const std::unordered_map<int64_t, bool>& Urban);
 }

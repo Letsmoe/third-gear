@@ -743,7 +743,7 @@ void BuildRegion(const FRegion& Region, const FBuildOptions& Options)
 	Log("street model: " + std::to_string(Streets.Lines.Layouts.size()) + " segments, "
 		+ std::to_string(Streets.Markings.size()) + " painted lines");
 	const FRoadModel RoadModel = BuildRoadModel(*Streets.Lines.Network, [&](double X, double Y) { return Terrain.Sample(X, Y); },
-												BridgeCoverOf(Osm, Streets.Widths));
+												BridgeCoverOf(Osm, Streets.Widths), Streets.Urban);
 	const FRoadHeights RoadHeights(RoadModel);
 	Inputs.RoadHeights = &RoadHeights;
 	const FDesignedHeight Designed = [&](double X, double Y) { return RoadHeights.At(X, Y); };

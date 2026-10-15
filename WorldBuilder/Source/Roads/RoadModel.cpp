@@ -29,6 +29,27 @@ FStreetPolyline PieceLine(const FSegmentNetwork& Network, const FChainPiece& Pie
 	return Line;
 }
 
+/**
+ * The cross fall traits of a piece's road: its straight fall from the one-way tags, and whether it banks (a road class
+ * built for speed, outside town).
+ */
+FCrossFallTraits PieceTraits(const FSegmentNetwork& Network, const FChainPiece& Piece,
+							 const std::unordered_map<int64_t, bool>& Urban)
+{
+	const FStreetWay& Way = *Network.Segments[Piece.Segment].Way;
+	FCrossFallTraits Traits;
+	const auto Found = Urban.find(Way.Id);
+	const bool bInTown = Found != Urban.end() && Found->second;
+	Traits.bBanksInCurves = !bInTown && RoadDesignFor(OsmTags::ValueOrEmpty(Way.Tags, "highway")).bBanksInCurves;
+	if (OsmTags::IsOneway(Way.Tags))
+	{
+		// Traffic runs along the chain unless the piece or the one-way runs against it, but not both.
+		const bool bAlongChain = Piece.bReversed == OsmTags::IsReversedOneway(Way.Tags);
+		Traits.StraightBank = bAlongChain ? CrownFall : -CrownFall;
+	}
+	return Traits;
+}
+
 /** The segment of the chain that is longest, whose road class the chain takes. */
 const FSegment& LongestSegment(const FSegmentNetwork& Network, const FRoadChain& Chain)
 {
@@ -53,9 +74,10 @@ void AppendLine(FStreetPolyline& Chain, const FStreetPolyline& Line)
 
 /**
  * The chain's OSM line, and its samples about a metre apart, sampled piece by piece so that every node is a sample
- * (their indices go to NodeSamples), with the half width of the piece each sample lies on.
+ * (their indices go to NodeSamples), with the half width and cross fall traits of the piece each sample lies on.
  */
-void SampleChain(const FSegmentNetwork& Network, FRoadChainModel& Model, FStreetPolyline& Samples)
+void SampleChain(const FSegmentNetwork& Network, const std::unordered_map<int64_t, bool>& Urban, FRoadChainModel& Model,
+				 FStreetPolyline& Samples, std::vector<FCrossFallTraits>& Traits)
 {
 	Model.NodeSamples.push_back(0);
 	for (const FChainPiece& Piece : Model.Chain.Pieces)
@@ -64,6 +86,7 @@ void SampleChain(const FSegmentNetwork& Network, FRoadChainModel& Model, FStreet
 		AppendLine(Model.Original, Line);
 		AppendLine(Samples, Polyline::Resample(Line, SampleSpacing));
 		Model.HalfWidths.resize(Samples.size(), 0.5 * Network.Segments[Piece.Segment].Section.Width());
+		Traits.resize(Samples.size(), PieceTraits(Network, Piece, Urban));
 		Model.NodeSamples.push_back(static_cast<int>(Samples.size()) - 1);
 	}
 }
@@ -84,9 +107,9 @@ std::vector<int> PinnedSamples(const FSegmentNetwork& Network, const FRoadChainM
 	return Pinned;
 }
 
-/** One chain's smooth centreline, the ground under it and where bridges cross it. */
+/** One chain's smooth centreline and cross fall, the ground under it and where bridges cross it. */
 FRoadChainModel BuildChainPlan(const FSegmentNetwork& Network, const FRoadChain& Chain, const FGroundSampler& Ground,
-							   const FBridgeCover& Bridges)
+							   const FBridgeCover& Bridges, const std::unordered_map<int64_t, bool>& Urban)
 {
 	FRoadChainModel Model;
 	Model.Chain = Chain;
@@ -95,12 +118,14 @@ FRoadChainModel BuildChainPlan(const FSegmentNetwork& Network, const FRoadChain&
 	Model.Name = OsmTags::ValueOrEmpty(Longest.Way->Tags, "name");
 	Model.Design = RoadDesignFor(Model.RoadClass);
 	FStreetPolyline Samples;
-	SampleChain(Network, Model, Samples);
+	std::vector<FCrossFallTraits> Traits;
+	SampleChain(Network, Urban, Model, Samples, Traits);
 	const FCentrelineFit Fit = FitCentreline(Samples, Model.Original, PinnedSamples(Network, Model),
 											 Model.Design.PlanSmoothing, Model.Design.MaxDeviation);
 	Model.Points = Fit.Points;
 	Model.MaxDeviation = Fit.MaxDeviation;
 	Model.Along = Polyline::Arclength(Model.Points);
+	Model.Falls = CrossFalls(Model.Points, Traits);
 	for (const FStreetPoint& Point : Model.Points)
 	{
 		Model.Ground.push_back(Ground(Point.X, Point.Y));
@@ -157,12 +182,13 @@ std::vector<FProfileChain> ProfileChains(const FSegmentNetwork& Network, const s
 }
 }
 
-FRoadModel BuildRoadModel(const FSegmentNetwork& Network, const FGroundSampler& Ground, const FBridgeCover& Bridges)
+FRoadModel BuildRoadModel(const FSegmentNetwork& Network, const FGroundSampler& Ground, const FBridgeCover& Bridges,
+						  const std::unordered_map<int64_t, bool>& Urban)
 {
 	FRoadModel Model;
 	for (const FRoadChain& Chain : BuildRoadChains(Network))
 	{
-		Model.Chains.push_back(BuildChainPlan(Network, Chain, Ground, Bridges));
+		Model.Chains.push_back(BuildChainPlan(Network, Chain, Ground, Bridges, Urban));
 	}
 	int UnknownCount = 0;
 	const std::vector<FProfileChain> Profiles = ProfileChains(Network, Model.Chains, UnknownCount);
