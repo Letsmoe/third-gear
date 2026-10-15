@@ -28,7 +28,8 @@ constexpr float KerbTopLift = 0.002f;
 constexpr float KerbGutterWidth = 0.30f;
 constexpr float GutterLift = 0.008f;
 constexpr float MarkingLift = 0.01f;
-constexpr float MarkingSampleStep = 2.f;
+/** One sample per metre of road height grid, so a marking follows the crown and banking of the surface under it. */
+constexpr float MarkingSampleStep = 1.f;
 constexpr float BuildingFoundationDepth = 0.6f;
 constexpr float RoofPitchDegrees = 40.f;
 constexpr float RoofMaxRise = 6.f;
@@ -46,6 +47,12 @@ struct FDetailSettings
 	float SurfaceGrid;
 	/** Longest outline edge before it is split, so surfaces follow the ground. */
 	float SurfaceEdge;
+	/**
+	 * SurfaceGrid and SurfaceEdge for the road surfaces. Near the camera they match the road height grid, so the
+	 * surface carries the crown and banking of the road model exactly and the markings on it don't sink in.
+	 */
+	float RoadSurfaceGrid;
+	float RoadSurfaceEdge;
 	/** Surfaces sit this much higher, so the coarser terrain doesn't poke through. */
 	float SurfaceLift;
 	/** How far the terrain skirts reach down along tile edges, hiding cracks to coarser neighbours. */
@@ -58,11 +65,11 @@ FDetailSettings SettingsFor(EWorldTileDetail Detail)
 {
 	switch (Detail)
 	{
-	case EWorldTileDetail::Near: return {1.f, 2.f, 2.f, 0.f, 0.5f, 4};
-	case EWorldTileDetail::Middle: return {4.f, 8.f, 8.f, 0.15f, 2.f, 2};
-	case EWorldTileDetail::Far: return {8.f, 0.f, 16.f, 0.3f, 4.f, 1};
+	case EWorldTileDetail::Near: return {1.f, 2.f, 2.f, 1.f, 1.f, 0.f, 0.5f, 4};
+	case EWorldTileDetail::Middle: return {4.f, 8.f, 8.f, 8.f, 8.f, 0.15f, 2.f, 2};
+	case EWorldTileDetail::Far: return {8.f, 0.f, 16.f, 0.f, 16.f, 0.3f, 4.f, 1};
 	}
-	return {1.f, 2.f, 2.f, 0.f, 0.5f, 4};
+	return {1.f, 2.f, 2.f, 1.f, 1.f, 0.f, 0.5f, 4};
 }
 
 FVector3f ToCm(float LocalX, float LocalY, float Z)
@@ -281,7 +288,11 @@ void BuildSurface(const FWorldTileData& Tile, const FWorldSurface& Surface, cons
 {
 	TArray<FVector2d> Vertices;
 	TArray<FIndex3i> Triangles;
-	TriangulatePolygon(Surface.Polygon, Settings.SurfaceEdge, Settings.SurfaceGrid, Vertices, Triangles);
+	const bool bRoad = Tile.Names.IsValidIndex(Surface.Material)
+		&& Tile.Names[Surface.Material].StartsWith(TEXT("Road_"));
+	const float Edge = bRoad ? Settings.RoadSurfaceEdge : Settings.SurfaceEdge;
+	const float Spacing = bRoad ? Settings.RoadSurfaceGrid : Settings.SurfaceGrid;
+	TriangulatePolygon(Surface.Polygon, Edge, Spacing, Vertices, Triangles);
 	const int32 First = Builder.NumVertices();
 	for (const FVector2d& Vertex : Vertices)
 	{
