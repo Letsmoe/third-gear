@@ -1,0 +1,32 @@
+# Run with `go-task <name>`; `go-task --list` shows the tasks.
+version: '3'
+
+vars:
+  # Engine checkout; override with `UE=/other/path go-task build`.
+  UE:
+    sh: echo "${UE:-/mnt/storage/UnrealEngine/5.8.1}"
+
+tasks:
+  build:
+    desc: Build the editor target (close the editor first, there is no Live Coding on Linux)
+    cmds:
+      - >-
+        Scripts/lock.sh build {{.UE}}/Engine/Build/BatchFiles/Linux/Build.sh
+        DrivingGameEditor Linux Development
+        -project={{.ROOT_DIR}}/DrivingGame.uproject -waitmutex
+
+  run:
+    desc: Run the game in a desktop window; extra arguments after `--`, map via MAP=<name>
+    cmds:
+      - Scripts/run_desktop.sh {{.CLI_ARGS}}
+
+  vr:
+    desc: Run the game in VR (start SteamVR first); `-- 85 -NoMenu` is screen percentage, then extra arguments
+    cmds:
+      - Scripts/run_vr.sh {{.CLI_ARGS}}
+
+  worldbuilder:
+    desc: Build the standalone WorldBuilder tool
+    cmds:
+      - cmake -S WorldBuilder -B WorldBuilder/Build -G Ninja
+      - cmake --build WorldBuilder/Build
