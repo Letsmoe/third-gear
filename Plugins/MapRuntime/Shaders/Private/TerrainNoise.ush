@@ -17,18 +17,65 @@ float DgValueNoise(float2 q)
 	return lerp(lerp(DgHash(i), DgHash(i + float2(1, 0)), f.x), lerp(DgHash(i + float2(0, 1)), DgHash(i + 1), f.x), f.y);
 }
 
+// Blends two samples of one texture so that the result keeps the texture's contrast: a plain lerp of two uncorrelated
+// samples flattens the detail by up to 30 % halfway through. Mean is the texture's average value (its smallest mip).
+#define DG_BLEND_KEEP_CONTRAST(A, B, MEAN, T) ((MEAN) + (lerp(A, B, T) - (MEAN)) * rsqrt((1.0 - (T)) * (1.0 - (T)) + (T) * (T)))
+
 // One terrain layer, sampled at two scales/rotations (mixed by detailMix to hide tiling) and accumulated with weight W
-// into col/nrm/rough (colour multiplied by TINT). Expects p (UV in metres), rot and detailMix in scope; C/N/R are Custom-node texture inputs.
+// into col/nrm/rough (colour multiplied by TINT). Expects p (UV in metres), rot and detailMix in scope; C/N/R are Custom-node
+// texture inputs. The second sample is 1.9 times larger and rotated, so the two repeat periods never line up; the
+// blend keeps the texture's contrast and the second normal is turned back into the first one's frame.
 #define DG_LAYER(C, N, R, T, TINT, W) \
 	if (W > 0.001) \
 	{ \
 		float2 ua = p / T; \
-		float2 ub = mul(rot, p) / (T * 3.7); \
+		float2 ub = mul(rot, p) / (T * 1.9); \
+		float3 mean_c = Texture2DSampleLevel(C, C##Sampler, float2(0.5, 0.5), 16).rgb; \
+		float mean_r = Texture2DSampleLevel(R, R##Sampler, float2(0.5, 0.5), 16).r; \
+		float norm = rsqrt((1.0 - detailMix) * (1.0 - detailMix) + detailMix * detailMix); \
 		float3 ca = Texture2DSample(C, C##Sampler, ua).rgb; \
 		float3 cb = Texture2DSample(C, C##Sampler, ub).rgb; \
 		float2 na = Texture2DSample(N, N##Sampler, ua).xy * 2 - 1; \
-		float2 nb = Texture2DSample(N, N##Sampler, ub).xy * 2 - 1; \
-		col += lerp(ca, cb * dot(ca, 0.333) / max(dot(cb, 0.333), 1e-3), detailMix * 0.6) * TINT * W; \
-		nrm += float3(lerp(na, nb, detailMix * 0.5), 0) * W; \
-		rough += Texture2DSample(R, R##Sampler, ua).r * W; \
+		float2 nb = mul(Texture2DSample(N, N##Sampler, ub).xy * 2 - 1, rot); \
+		float ra = Texture2DSample(R, R##Sampler, ua).r; \
+		float rb = Texture2DSample(R, R##Sampler, ub).r; \
+		col += max(DG_BLEND_KEEP_CONTRAST(ca, cb, mean_c, detailMix), 0) * TINT * W; \
+		nrm += float3(lerp(na, nb, detailMix) * norm, 0) * W; \
+		rough += saturate(DG_BLEND_KEEP_CONTRAST(ra, rb, mean_r, detailMix)) * W; \
 	}
+
+// Integer hash of a grid cell in [0, 1): the same cell always gives the same number, so a surface can vary per slab or per
+// stone without the variation repeating with the texture tile.
+float DgCellHash(int2 cell)
+{
+	uint2 key = uint2(cell + 65536);
+	uint hash = key.x * 73856093u ^ key.y * 19349663u;
+	hash = (hash ^ (hash >> 13)) * 1274126177u;
+	hash ^= hash >> 16;
+	return float(hash & 65535u) / 65535.0;
+}
+
+// Smooth value noise in [0, 1] over 3D space, one feature per unit. Used with world positions so that variation is
+// continuous across mesh seams and walls and never repeats from one object to the next.
+float DgValueNoise3(float3 q)
+{
+	float3 i = floor(q);
+	float3 f = frac(q);
+	f = f * f * (3 - 2 * f);
+	float2 layer = float2(31.7, 17.3);
+	float2 a = i.xy + layer * i.z;
+	float2 b = i.xy + layer * (i.z + 1);
+	float low = lerp(lerp(DgHash(a), DgHash(a + float2(1, 0)), f.x), lerp(DgHash(a + float2(0, 1)), DgHash(a + 1), f.x), f.y);
+	float high = lerp(lerp(DgHash(b), DgHash(b + float2(1, 0)), f.x), lerp(DgHash(b + float2(0, 1)), DgHash(b + 1), f.x), f.y);
+	return lerp(low, high, f.z);
+}
+
+// Large-scale variation of a surface from its world position in metres: x scales the brightness, y the roughness.
+// Three octaves (37, 9 and 2.3 m) for the tone so that neither a tile repeat nor a long road reads as one flat value.
+float2 DgSurfaceMacro(float3 worldMetres, float toneAmount, float roughnessAmount)
+{
+	float tone = DgValueNoise3(worldMetres / 37.0) * 0.5 + DgValueNoise3(worldMetres / 9.0 + 7.3) * 0.3
+		+ DgValueNoise3(worldMetres / 2.3 + 3.1) * 0.2;
+	float roughness = DgValueNoise3(worldMetres / 5.3 + 19.7);
+	return float2(1.0 + toneAmount * (tone - 0.5) * 3.0, 1.0 + roughnessAmount * (roughness - 0.5) * 3.0);
+}

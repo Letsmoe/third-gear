@@ -16,22 +16,28 @@ POM_FUNCTION = "/Engine/Functions/Engine_MaterialFunctions01/Texturing/ParallaxO
 # Albedo calibration: the tint multiplies the scan's colour, so tint = wanted reflectance / the scan's mean reflectance
 # (Asphalt015 0.175, concrete_pavement_02 0.207, PavingStones092 0.28, brick_wall_10 0.046). Wanted: worn asphalt 0.12 to
 # 0.18, concrete slabs 0.25 to 0.35, red brick paving about 0.25, dark red-brown clinker 0.13 to 0.19.
-# section -> (texture folder/set, tile size m, overrides)
+# section -> (texture folder/set, tile size m, overrides). Variation overrides (see SURFACE_HLSL): "rotate" is how far a
+# rotated, larger second sample replaces the first in patches (organic textures only, it would double-print a pattern of
+# bricks or slabs), "macro" is (brightness, roughness) variation from world position, "cells" is (slabs per tile, tone
+# spread) for a tile that holds a regular grid of slabs, "cavity" darkens ambient light in the low parts of the height map
+# for sets that have no AO map.
 SECTIONS = {
-    "Road_Asphalt": ("Asphalt/Asphalt015", 2.5, {"tint": (0.85, 0.85), "roughness_scale": 1.4, "cracks": 0.5}),
-    "Road_Cobble": ("Cobble/cobblestone_floor_08", 2.0, {"parallax": 0.03}),
-    "Road_Pavers": ("Pavers/PavingStones092", 2.0, {"tint": (0.9, 0.9), "parallax": 0.015}),
-    "Pavement": ("Pavers/concrete_pavement_02", 2.5, {"tint": (1.35, 1.35), "parallax": 0.012}),
-    "Path_Paved": ("Pavers/brick_pavement_03", 2.0, {"parallax": 0.015}),
-    "Path_Gravel": ("Ground/gravel_ground_01", 3.0, {}),
-    "Kerb": ("Pavers/granite_tile_04", 1.0, {}),
-    "Bridge_Concrete": ("Concrete/concrete_wall_001", 3.0, {}),
+    "Road_Asphalt": ("Asphalt/Asphalt015", 2.5, {"tint": (0.85, 0.85), "roughness_scale": 1.4, "cracks": 0.5,
+                                                 "rotate": 0.7, "macro": (0.25, 0.2), "cavity": 0.5}),
+    "Road_Cobble": ("Cobble/cobblestone_floor_08", 2.0, {"parallax": 0.03, "macro": (0.15, 0.15)}),
+    "Road_Pavers": ("Pavers/PavingStones092", 2.0, {"tint": (0.9, 0.9), "parallax": 0.015, "macro": (0.15, 0.15)}),
+    "Pavement": ("Pavers/concrete_pavement_02", 2.5, {"tint": (1.35, 1.35), "parallax": 0.012, "macro": (0.1, 0.15),
+                                                      "cells": (6, 0.12)}),
+    "Path_Paved": ("Pavers/brick_pavement_03", 2.0, {"parallax": 0.015, "macro": (0.12, 0.15)}),
+    "Path_Gravel": ("Ground/gravel_ground_01", 3.0, {"rotate": 0.7, "macro": (0.2, 0.15)}),
+    "Kerb": ("Pavers/granite_tile_04", 1.0, {"macro": (0.08, 0.1)}),
+    "Bridge_Concrete": ("Concrete/concrete_wall_001", 3.0, {"rotate": 0.6, "macro": (0.15, 0.15)}),
     "Facade_Brick": ("Brick/brick_wall_10", 2.2, {"windows": True, "tint": (2.8, 4.0), "parallax": 0.012}),
     "Facade_Plaster": ("Plaster/plastered_wall", 2.0, {"windows": True, "tint": (0.85, 1.1)}),
     "Facade_Concrete": ("Concrete/concrete_wall_004", 3.0, {"windows": True, "tint": (0.8, 1.1)}),
     "Facade_Metal": ("Metal/corrugated_iron", 2.0, {"tint": (0.7, 1.2)}),
     "Roof_Tiles": ("Roof/clay_roof_tiles_03", 2.5, {"tint": (0.75, 1.1), "parallax": 0.03}),
-    "Roof_Flat": ("Asphalt/Asphalt031", 3.0, {"tint": (0.45, 0.6)}),
+    "Roof_Flat": ("Asphalt/Asphalt031", 3.0, {"tint": (0.45, 0.6), "rotate": 0.7, "macro": (0.2, 0.15)}),
 }
 
 WINDOW_HLSL = """
@@ -145,13 +151,14 @@ TERRAIN_LAYERS = {
 }
 
 # Blends four ground layers by vertex colour (R meadow, G field, B forest, none = lawn). Each layer is sampled at two
-# scales/rotations mixed by low-frequency noise (breaks visible tiling) and gets a large-scale brightness variation.
+# scales/rotations mixed by low-frequency noise (breaks visible tiling, see DG_LAYER) and gets a large-scale brightness
+# variation in two octaves.
 TERRAIN_HLSL = """
 float2 p = UV;
 float n1 = DgValueNoise(p / 23.0);
 float n2 = DgValueNoise(p / 61.0 + 17.3);
-float macro = lerp(0.86, 1.12, DgValueNoise(p / 140.0 + 3.1));
-float detailMix = smoothstep(0.35, 0.65, n1);
+float macro = lerp(0.86, 1.12, DgValueNoise(p / 140.0 + 3.1)) * lerp(0.94, 1.06, DgValueNoise(p / 17.0 + 8.7));
+float detailMix = smoothstep(0.35, 0.65, n1) * 0.8;
 float2x2 rot = float2x2(0.809, -0.588, 0.588, 0.809);
 float3 w = saturate(VC.rgb + (n2 - 0.5) * 0.5 * saturate(VC.rgb * (1 - VC.rgb) * 4));
 float wl = saturate(1 - w.r - w.g - w.b);
@@ -168,6 +175,53 @@ Roughness = rough;
 return col * macro;
 """
 TERRAIN_INCLUDE = "/Plugin/MapRuntime/Private/TerrainNoise.ush"  # DgValueNoise, DG_LAYER
+
+# The samples of one surface, with the variation that hides its repeat (DgSurfaceMacro, DG_BLEND_KEEP_CONTRAST and
+# DgCellHash in TerrainNoise.ush). Returns the tangent-space normal; Colour, Roughness and Occlusion are extra outputs.
+SURFACE_HLSL = """
+float3 wp = WorldPos * 0.01;
+float3 ca = Texture2DSample(ColourMap, ColourMapSampler, UV).rgb;
+float2 na = Texture2DSample(NormalMap, NormalMapSampler, UV).xy * 2 - 1;
+float ra = Texture2DSample(RoughnessMap, RoughnessMapSampler, UV).r;
+float3 colour = ca;
+float2 xy = na;
+float roughness = ra;
+if (RotateMix > 0)
+{
+	// A rotated second sample at a slightly different scale takes over in patches: the two repeat periods never line up,
+	// and a similar scale keeps the grain size (a larger one smears it).
+	float2x2 rot = float2x2(0.809, -0.588, 0.588, 0.809);
+	float2 uv_b = mul(rot, UV) * 1.13;
+	float blend = RotateMix * smoothstep(0.3, 0.7, DgValueNoise3(wp / 17.0 + 5.0));
+	float3 mean_c = Texture2DSampleLevel(ColourMap, ColourMapSampler, float2(0.5, 0.5), 16).rgb;
+	float mean_r = Texture2DSampleLevel(RoughnessMap, RoughnessMapSampler, float2(0.5, 0.5), 16).r;
+	float3 cb = Texture2DSample(ColourMap, ColourMapSampler, uv_b).rgb;
+	float2 nb = mul(Texture2DSample(NormalMap, NormalMapSampler, uv_b).xy * 2 - 1, rot);
+	float rb = Texture2DSample(RoughnessMap, RoughnessMapSampler, uv_b).r;
+	colour = max(DG_BLEND_KEEP_CONTRAST(ca, cb, mean_c, blend), 0);
+	xy = lerp(na, nb, blend) * rsqrt((1.0 - blend) * (1.0 - blend) + blend * blend);
+	roughness = saturate(DG_BLEND_KEEP_CONTRAST(ra, rb, mean_r, blend));
+}
+float2 macro = DgSurfaceMacro(wp, MacroTone, MacroRoughness);
+float cell_tone = 1.0;
+if (CellCount > 0)
+{
+	cell_tone = 1.0 + CellTone * (DgCellHash(int2(floor(UV * CellCount))) - 0.5) * 2.0;
+}
+float cavity = 1.0;
+if (HeightCavity > 0)
+{
+	float mean_h = Texture2DSampleLevel(HeightMap, HeightMapSampler, float2(0.5, 0.5), 16).r;
+	float h = Texture2DSample(HeightMap, HeightMapSampler, UV).r;
+	cavity = lerp(1.0 - HeightCavity, 1.0, smoothstep(0.0, 1.0, saturate(h / max(mean_h, 0.05))));
+}
+Colour = colour * macro.x * cell_tone;
+Roughness = saturate(roughness * macro.y);
+Occlusion = Texture2DSample(OcclusionMap, OcclusionMapSampler, UV).r * cavity;
+return float3(xy, sqrt(saturate(1 - dot(xy, xy))));
+"""
+SURFACE_VARIATION_PARAMETERS = {"RotateMix": 0.0, "MacroTone": 0.0, "MacroRoughness": 0.0, "CellCount": 0.0, "CellTone": 0.12,
+                                "HeightCavity": 0.0}
 
 # Road defects (issue 71): cracks, sealed cracks and patches from the generated atlas, scattered by cell hash so they
 # never repeat (Plugins/MapRuntime/Shaders/Private/RoadCracks.ush). Wear sets how many cells hold a defect.
@@ -242,10 +296,11 @@ def tex_param(material, name, texture, sampler, uv, x, y):
     return e
 
 
-def parallax_uv(material, uv, default_height):
+def parallax_uv(material, uv, default_height, with_height=False):
     """Returns the UVs the colour, normal, roughness and AO maps are sampled with: the plain tiled UVs, or with the
     Parallax static switch on, UVs displaced by the Height map (screen-space parallax occlusion mapping, no geometry).
-    HeightRatio is the depth as a fraction of one tile; set per instance together with the Height texture."""
+    HeightRatio is the depth as a fraction of one tile; set per instance together with the Height texture. With
+    with_height the Height texture object is returned too, as (uvs, height)."""
     height = expr(material, unreal.MaterialExpressionTextureObjectParameter, -1700, 700, parameter_name="Height",
                   texture=default_height, sampler_type=unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE)
     call = expr(material, unreal.MaterialExpressionMaterialFunctionCall, -1450, 700)
@@ -261,7 +316,7 @@ def parallax_uv(material, uv, default_height):
                   default_value=False)
     link(call, "Parallax UVs", switch, "True")
     link(uv, "", switch, "False")
-    return switch
+    return (switch, height) if with_height else switch
 
 
 def world_uv(m, tile_cm, x, y):
@@ -417,6 +472,36 @@ def add_lit_windows(m, texcoord, vertex_color, glass_mask):
     mel.connect_material_property(switch, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
 
+def add_surface_samples(m, uv, height, default_set):
+    """The base colour, normal, roughness and AO samples of the surface with its variation (SURFACE_HLSL), in one Custom
+    node. The texture objects keep the parameter names the instances override. Returns the node: its main output is the
+    normal, the extra outputs are Colour, Roughness and Occlusion."""
+    maps = (("ColourMap", "BaseColor", tex(default_set, "BaseColor"), unreal.MaterialSamplerType.SAMPLERTYPE_COLOR),
+            ("NormalMap", "Normal", tex(default_set, "Normal"), unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL),
+            ("RoughnessMap", "Roughness", tex(default_set, "Roughness"), unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE),
+            ("OcclusionMap", "AO", tex("Asphalt/asphalt_02", "AO"), unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE))
+    inputs = ["UV", "WorldPos", "HeightMap"] + [name for name, _, _, _ in maps] + list(SURFACE_VARIATION_PARAMETERS)
+    custom = expr(m, unreal.MaterialExpressionCustom, -1000, -250, code=SURFACE_HLSL, description="SurfaceSamples",
+                  output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3, include_file_paths=[TERRAIN_INCLUDE],
+                  inputs=[custom_input(name) for name in inputs],
+                  additional_outputs=[custom_output("Colour", unreal.CustomMaterialOutputType.CMOT_FLOAT3),
+                                      custom_output("Roughness", unreal.CustomMaterialOutputType.CMOT_FLOAT1),
+                                      custom_output("Occlusion", unreal.CustomMaterialOutputType.CMOT_FLOAT1)])
+    link(uv, "", custom, "UV")
+    link(expr(m, unreal.MaterialExpressionWorldPosition, -1300, -900), "", custom, "WorldPos")
+    link(height, "", custom, "HeightMap")
+    y = -850
+    for input_name, parameter_name, texture, sampler in maps:
+        texture_node = expr(m, unreal.MaterialExpressionTextureObjectParameter, -1300, y, parameter_name=parameter_name,
+                            texture=texture, sampler_type=sampler)
+        link(texture_node, "", custom, input_name)
+        y += 120
+    for name, default in SURFACE_VARIATION_PARAMETERS.items():
+        link(scalar(m, name, default, -1300, y), "", custom, name)
+        y += 100
+    return custom
+
+
 def add_road_cracks(m, texcoord, color, rough, normal):
     """Behind the Cracks static switch (road instances only): lays the generated crack atlas over the surface.
     Returns colour, roughness and normal nodes; without the atlas imported they pass through unchanged."""
@@ -440,14 +525,14 @@ def add_road_cracks(m, texcoord, color, rough, normal):
     link(scalar(m, "Wear", 0.5, -1300, -700), "", custom, "Wear")
     link(color, "", custom, "Color")
     link(rough, "", custom, "Rough")
-    link(normal, "RGB", custom, "Nrm")
+    link(normal, "", custom, "Nrm")
     for name, sampler, y in (("Mask", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR, -650),
                              ("Normal", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL, -600)):
         texture = expr(m, unreal.MaterialExpressionTextureObjectParameter, -1300, y, parameter_name=f"Crack{name}",
                        texture=unreal.load_asset(path + name), sampler_type=sampler)
         link(texture, "", custom, f"Crack{name}")
     results = []
-    for pin, source, source_pin, y in (("", color, "", -900), ("Roughness", rough, "", -850), ("NormalOut", normal, "RGB", -800)):
+    for pin, source, source_pin, y in (("", color, "", -900), ("Roughness", rough, "", -850), ("NormalOut", normal, "", -800)):
         switch = expr(m, unreal.MaterialExpressionStaticSwitchParameter, -800, y, parameter_name="Cracks", default_value=False)
         link(custom, pin, switch, "True")
         link(source, source_pin, switch, "False")
@@ -470,11 +555,12 @@ def build_master():
     link(tile, "", uv, "B")
 
     default_set = "Asphalt/Asphalt015"
-    uv = parallax_uv(m, uv, tex(default_set, "Height"))
-    color = tex_param(m, "BaseColor", tex(default_set, "BaseColor"), unreal.MaterialSamplerType.SAMPLERTYPE_COLOR, uv, -1300, -400)
-    normal = tex_param(m, "Normal", tex(default_set, "Normal"), unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL, uv, -1300, -100)
-    rough = tex_param(m, "Roughness", tex(default_set, "Roughness"), unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE, uv, -1300, 200)
-    ao = tex_param(m, "AO", tex("Asphalt/asphalt_02", "AO"), unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE, uv, -1300, 500)
+    uv, height = parallax_uv(m, uv, tex(default_set, "Height"), with_height=True)
+    samples = add_surface_samples(m, uv, height, default_set)
+    normal = samples  # main output
+    color = (samples, "Colour")
+    rough = (samples, "Roughness")
+    ao = (samples, "Occlusion")
 
     # Per-object brightness variation from vertex colour R (buildings), off by default (min = max = 1).
     vcol = expr(m, unreal.MaterialExpressionVertexColor, -1300, 800)
@@ -483,11 +569,11 @@ def build_master():
     link(scalar(m, "TintMax", 1.0, -1300, 1050), "", tint, "B")
     link(vcol, "R", tint, "Alpha")
     tinted = expr(m, unreal.MaterialExpressionMultiply, -800, -400)
-    link(color, "RGB", tinted, "A")
+    link(color[0], color[1], tinted, "A")
     link(tint, "", tinted, "B")
 
     rough_scaled = expr(m, unreal.MaterialExpressionMultiply, -800, 200)
-    link(rough, "R", rough_scaled, "A")
+    link(rough[0], rough[1], rough_scaled, "A")
     link(scalar(m, "RoughnessScale", 1.0, -1000, 300), "", rough_scaled, "B")
     tinted, rough_scaled, normal = add_road_cracks(m, texcoord, tinted, rough_scaled, normal)
 
@@ -548,10 +634,21 @@ def build_master():
     mel.connect_material_property(out_color, "", unreal.MaterialProperty.MP_BASE_COLOR)
     mel.connect_material_property(out_rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
     mel.connect_material_property(out_normal, "", unreal.MaterialProperty.MP_NORMAL)
-    mel.connect_material_property(ao, "R", unreal.MaterialProperty.MP_AMBIENT_OCCLUSION)
+    mel.connect_material_property(ao[0], ao[1], unreal.MaterialProperty.MP_AMBIENT_OCCLUSION)
     mel.recompile_material(m)
     eal.save_loaded_asset(m)
     return m
+
+
+def set_surface_variation(instance, opts):
+    """Writes the variation overrides of a section (SECTIONS) into its material instance; unset ones stay off."""
+    values = dict(SURFACE_VARIATION_PARAMETERS)
+    values["RotateMix"] = opts.get("rotate", 0.0)
+    values["MacroTone"], values["MacroRoughness"] = opts.get("macro", (0.0, 0.0))
+    values["CellCount"], values["CellTone"] = opts.get("cells", (0, SURFACE_VARIATION_PARAMETERS["CellTone"]))
+    values["HeightCavity"] = opts.get("cavity", 0.0)
+    for name, value in values.items():
+        mel.set_material_instance_scalar_parameter_value(instance, name, value)
 
 
 def build_instance(master, section, set_path, tile_size, opts):
@@ -574,6 +671,7 @@ def build_instance(master, section, set_path, tile_size, opts):
     mel.set_material_instance_scalar_parameter_value(mi, "TileSize", tile_size)
     if "roughness_scale" in opts:
         mel.set_material_instance_scalar_parameter_value(mi, "RoughnessScale", opts["roughness_scale"])
+    set_surface_variation(mi, opts)
     if "tint" in opts:
         lo, hi = opts["tint"]
         mel.set_material_instance_scalar_parameter_value(mi, "TintMin", lo)
