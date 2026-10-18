@@ -73,8 +73,9 @@ Two areas is fine when an issue genuinely spans them; three means split it.
 Work is done when it has been shown to work, not when the code is written. Shown means one of:
 
 - screenshots from `Scripts/screenshot.sh` or `-SeatShot`, from after the change and from before it when it's visual;
-- `Scripts/drive_test.sh` numbers for anything that touches the car, before and after;
-- `Scripts/profile_gpu.sh` timings for anything that might cost frame time.
+- `Scripts/drive_test.sh` numbers for anything that touches the car, before and after.
+
+Render only to confirm something visually, never to measure performance: performance is secondary for now and gets its own pass later, so no `Scripts/profile_gpu.sh` or frame-time runs for a change. Take all the views for all the changes in one screenshot run rather than one run per change, so a run doesn't hold the GPU's memory more than once.
 
 Then hand it over and stop: what changed in a sentence or two, the evidence, and the branch. When it has an issue, the evidence also goes on the issue as a comment — that comment is what I read, so it's written for someone who wasn't in the session. GitHub has no API for attaching images, so screenshots are committed to the `screenshots` branch under `<issue-number>/` and embedded by their raw URL (`https://raw.githubusercontent.com/Letsmoe/third-gear/screenshots/<issue-number>/<file>.png`).
 
@@ -90,7 +91,7 @@ Test on something tiny: the 500 m region `bergedorf_test` (`-Region=bergedorf_te
 
 Every Unreal run and ComfyUI job takes the machine-wide gpu lock and every build the build lock (`Scripts/lock.sh`; the test scripts take it themselves), so parallel worktrees and agents take turns instead of running out of memory.
 
-Never launch or restart my running editor, game or VR session. Check things yourself headless or offscreen instead: `Scripts/screenshot.sh`, `-SeatShot`, `Scripts/drive_test.sh`, `Scripts/profile_gpu.sh`, and the logs under `Saved/Logs/`. Only I can test with the headset and the real wheel; when that's needed, say exactly what to try.
+Never launch or restart my running editor, game or VR session. Check things yourself headless or offscreen instead: `Scripts/screenshot.sh`, `-SeatShot`, `Scripts/drive_test.sh`, and the logs under `Saved/Logs/`. Only I can test with the headset and the real wheel; when that's needed, say exactly what to try.
 
 When I tell you what's happening, that's the reproduction: take it as given and go find the cause, don't re-check what I already saw. Reach for screenshots and logs when the code doesn't make the cause clear, or a fix based on reading it didn't work — guessing from source has been wrong often enough that a second guess isn't worth it.
 
