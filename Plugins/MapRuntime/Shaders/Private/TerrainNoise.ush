@@ -55,6 +55,20 @@ float DgCellHash(int2 cell)
 	return float(hash & 65535u) / 65535.0;
 }
 
+// Two random values in [0, 1) for one stone: the id bytes of the stone (from the stone id map) and the tile it belongs to.
+// The tile index makes the same stone look different in every repeat of the texture.
+float2 DgStoneRandom(int2 tile, uint2 stone)
+{
+	uint2 key = uint2(tile + 32768);
+	uint hash = key.x * 73856093u ^ key.y * 19349663u ^ stone.x * 83492791u ^ stone.y * 2654435761u;
+	hash = (hash ^ (hash >> 13)) * 1274126177u;
+	hash ^= hash >> 16;
+	float first = float(hash & 65535u) / 65535.0;
+	hash = (hash ^ (hash >> 15)) * 2246822519u;
+	hash ^= hash >> 13;
+	return float2(first, float(hash & 65535u) / 65535.0);
+}
+
 // Smooth value noise in [0, 1] over 3D space, one feature per unit. Used with world positions so that variation is
 // continuous across mesh seams and walls and never repeats from one object to the next.
 float DgValueNoise3(float3 q)

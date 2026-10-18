@@ -16,19 +16,23 @@ POM_FUNCTION = "/Engine/Functions/Engine_MaterialFunctions01/Texturing/ParallaxO
 # Albedo calibration: the tint multiplies the scan's colour, so tint = wanted reflectance / the scan's mean reflectance
 # (Asphalt015 0.175, concrete_pavement_02 0.207, PavingStones092 0.28, brick_wall_10 0.046). Wanted: worn asphalt 0.12 to
 # 0.18, concrete slabs 0.25 to 0.35, red brick paving about 0.25, dark red-brown clinker 0.13 to 0.19.
-# section -> (texture folder/set, tile size m, overrides). Variation overrides (see SURFACE_HLSL): "rotate" is how far a
-# rotated, larger second sample replaces the first in patches (organic textures only, it would double-print a pattern of
-# bricks or slabs), "macro" is (brightness, roughness) variation from world position, "cells" is (slabs per tile, tone
-# spread) for a tile that holds a regular grid of slabs, "cavity" darkens ambient light in the low parts of the height map
-# for sets that have no AO map.
+# section -> (texture folder/set, tile size m, overrides). Variation overrides (see SURFACE_HLSL):
+#   "rotate"  how far a rotated second sample replaces the first in patches (organic textures only: it would double-print
+#             the pattern of bricks or slabs)
+#   "macro"   (brightness, roughness) variation from world position
+#   "cells"   (slabs per tile, tone spread) for a tile that holds a regular grid of slabs
+#   "cavity"  darkens ambient light in the low parts of the height map, for sets that have no AO map
+#   "stones"  (tint, levelling): every stone of the set is levelled out to the average brightness by that share, then
+#             tinted on its own by up to the tint (from the set's stone id map, see Tools/texturegen/stone_ids.py)
 SECTIONS = {
     "Road_Asphalt": ("Asphalt/Asphalt015", 2.5, {"tint": (0.85, 0.85), "roughness_scale": 1.4, "cracks": 0.5,
                                                  "rotate": 0.7, "macro": (0.25, 0.2), "cavity": 0.5}),
-    "Road_Cobble": ("Cobble/cobblestone_floor_08", 2.0, {"parallax": 0.03, "macro": (0.15, 0.15)}),
-    "Road_Pavers": ("Pavers/PavingStones092", 2.0, {"tint": (0.9, 0.9), "parallax": 0.015, "macro": (0.15, 0.15)}),
+    "Road_Cobble": ("Cobble/cobblestone_floor_08", 2.0, {"parallax": 0.03, "macro": (0.15, 0.15), "stones": (0.15, 0.5)}),
+    "Road_Pavers": ("Pavers/PavingStones092", 2.0, {"tint": (0.9, 0.9), "parallax": 0.015, "macro": (0.15, 0.15),
+                                                    "stones": (0.12, 0.5)}),
     "Pavement": ("Pavers/concrete_pavement_02", 2.5, {"tint": (1.35, 1.35), "parallax": 0.012, "macro": (0.1, 0.15),
                                                       "cells": (6, 0.12)}),
-    "Path_Paved": ("Pavers/brick_pavement_03", 2.0, {"parallax": 0.015, "macro": (0.12, 0.15)}),
+    "Path_Paved": ("Pavers/brick_pavement_03", 2.0, {"parallax": 0.015, "macro": (0.12, 0.15), "stones": (0.15, 0.9)}),
     "Path_Gravel": ("Ground/gravel_ground_01", 3.0, {"rotate": 0.7, "macro": (0.2, 0.15)}),
     "Kerb": ("Pavers/granite_tile_04", 1.0, {"macro": (0.08, 0.1)}),
     "Bridge_Concrete": ("Concrete/concrete_wall_001", 3.0, {"rotate": 0.6, "macro": (0.15, 0.15)}),
@@ -215,13 +219,35 @@ if (HeightCavity > 0)
 	float h = Texture2DSample(HeightMap, HeightMapSampler, UV).r;
 	cavity = lerp(1.0 - HeightCavity, 1.0, smoothstep(0.0, 1.0, saturate(h / max(mean_h, 0.05))));
 }
-Colour = colour * macro.x * cell_tone;
+// Per-stone tint from the stone id map (Tools/texturegen/stone_ids.py); it fades out when a pixel covers several stones.
+float stone_tone = 1.0;
+float stone_saturation = 1.0;
+float footprint = max(length(ddx(UV)), length(ddy(UV)));
+if (StoneTone > 0)
+{
+	float4 stone_id = Texture2DSampleLevel(StoneIds, StoneIdsSampler, UV, 0);
+	if (stone_id.b > 0.05)
+	{
+		uint code = uint(round((stone_id.b * 255.0 - 32.0) / 16.0));
+		int2 tile = int2(floor(UV)) + int2(int(code % 3u) - 1, int(code / 3u) - 1);
+		float2 stone_random = DgStoneRandom(tile, uint2(round(stone_id.rg * 255.0)));
+		float fade = 1.0 - smoothstep(0.008, 0.02, footprint);
+		// The scan's own light and dark stones are levelled out first, so that the tint below is the only pattern.
+		float levelled = lerp(1.0, 1.0 / (0.5 + stone_id.a), StoneLevel * fade);
+		stone_tone = levelled * (1.0 + StoneTone * fade * (stone_random.x - 0.5) * 2.0);
+		stone_saturation = 1.0 + StoneTone * fade * (stone_random.y - 0.5) * 2.0;
+	}
+}
+float luminance = dot(colour, float3(0.3, 0.59, 0.11));
+colour = lerp(luminance.xxx, colour, stone_saturation);
+Colour = colour * macro.x * cell_tone * stone_tone;
 Roughness = saturate(roughness * macro.y);
 Occlusion = Texture2DSample(OcclusionMap, OcclusionMapSampler, UV).r * cavity;
 return float3(xy, sqrt(saturate(1 - dot(xy, xy))));
 """
 SURFACE_VARIATION_PARAMETERS = {"RotateMix": 0.0, "MacroTone": 0.0, "MacroRoughness": 0.0, "CellCount": 0.0, "CellTone": 0.12,
-                                "HeightCavity": 0.0}
+                                "HeightCavity": 0.0, "StoneTone": 0.0, "StoneLevel": 0.0}
+STONE_IDS_FOLDER = f"{TEX}/Generated/stone_ids"
 
 # Road defects (issue 71): cracks, sealed cracks and patches from the generated atlas, scattered by cell hash so they
 # never repeat (Plugins/MapRuntime/Shaders/Private/RoadCracks.ush). Wear sets how many cells hold a defect.
@@ -472,6 +498,15 @@ def add_lit_windows(m, texcoord, vertex_color, glass_mask):
     mel.connect_material_property(switch, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
 
+def stone_id_texture(set_name):
+    """The stone id map of a texture set, or the engine's white texture (no stone has an id) when it is not imported."""
+    path = f"{STONE_IDS_FOLDER}/T_StoneIds_{set_name}"
+    if eal.does_asset_exist(path):
+        return unreal.load_asset(path)
+    unreal.log_warning("create_materials: stone ids not imported (Scripts/import_stone_ids.py)")
+    return unreal.load_asset("/Engine/EngineResources/WhiteSquareTexture")
+
+
 def add_surface_samples(m, uv, height, default_set):
     """The base colour, normal, roughness and AO samples of the surface with its variation (SURFACE_HLSL), in one Custom
     node. The texture objects keep the parameter names the instances override. Returns the node: its main output is the
@@ -480,7 +515,7 @@ def add_surface_samples(m, uv, height, default_set):
             ("NormalMap", "Normal", tex(default_set, "Normal"), unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL),
             ("RoughnessMap", "Roughness", tex(default_set, "Roughness"), unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE),
             ("OcclusionMap", "AO", tex("Asphalt/asphalt_02", "AO"), unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE))
-    inputs = ["UV", "WorldPos", "HeightMap"] + [name for name, _, _, _ in maps] + list(SURFACE_VARIATION_PARAMETERS)
+    inputs = ["UV", "WorldPos", "HeightMap", "StoneIds"] + [name for name, _, _, _ in maps] + list(SURFACE_VARIATION_PARAMETERS)
     custom = expr(m, unreal.MaterialExpressionCustom, -1000, -250, code=SURFACE_HLSL, description="SurfaceSamples",
                   output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT3, include_file_paths=[TERRAIN_INCLUDE],
                   inputs=[custom_input(name) for name in inputs],
@@ -490,6 +525,9 @@ def add_surface_samples(m, uv, height, default_set):
     link(uv, "", custom, "UV")
     link(expr(m, unreal.MaterialExpressionWorldPosition, -1300, -900), "", custom, "WorldPos")
     link(height, "", custom, "HeightMap")
+    stone_ids = expr(m, unreal.MaterialExpressionTextureObjectParameter, -1700, -850, parameter_name="StoneIds",
+                     texture=stone_id_texture("PavingStones092"), sampler_type=unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR)
+    link(stone_ids, "", custom, "StoneIds")
     y = -850
     for input_name, parameter_name, texture, sampler in maps:
         texture_node = expr(m, unreal.MaterialExpressionTextureObjectParameter, -1300, y, parameter_name=parameter_name,
@@ -647,6 +685,7 @@ def set_surface_variation(instance, opts):
     values["MacroTone"], values["MacroRoughness"] = opts.get("macro", (0.0, 0.0))
     values["CellCount"], values["CellTone"] = opts.get("cells", (0, SURFACE_VARIATION_PARAMETERS["CellTone"]))
     values["HeightCavity"] = opts.get("cavity", 0.0)
+    values["StoneTone"], values["StoneLevel"] = opts.get("stones", (0.0, 0.0))
     for name, value in values.items():
         mel.set_material_instance_scalar_parameter_value(instance, name, value)
 
@@ -672,6 +711,8 @@ def build_instance(master, section, set_path, tile_size, opts):
     if "roughness_scale" in opts:
         mel.set_material_instance_scalar_parameter_value(mi, "RoughnessScale", opts["roughness_scale"])
     set_surface_variation(mi, opts)
+    if "stones" in opts:
+        mel.set_material_instance_texture_parameter_value(mi, "StoneIds", stone_id_texture(set_path.split("/")[-1]))
     if "tint" in opts:
         lo, hi = opts["tint"]
         mel.set_material_instance_scalar_parameter_value(mi, "TintMin", lo)
